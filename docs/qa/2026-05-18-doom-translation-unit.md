@@ -1301,6 +1301,78 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `am_map.c` Local Control-Flow Sweep
+
+`compile -S` now moves the focused `am_map.c` path past several local function
+body blockers:
+
+```c
+static event_t st_notify = { ev_keyup, AM_MSGENTERED };
+break;
+char namebuf[9];
+I_Error("Z_CT at " __FILE__ ":%i", __LINE__);
+static int lastlevel = -1, lastepisode = -1;
+static nexttic = 0;
+switch (ev->data1) { case '-': ... }
+```
+
+The implementation covers these as narrow compile-progress slices:
+
+```text
+compiler_accepts_local_static_aggregate_address_slice
+compiler_accepts_break_statement_slice
+compiler_accepts_local_char_array_decay_slice
+compiler_concatenates_adjacent_string_literals_slice
+preprocessor_expands_file_and_line_builtins_after_macros
+compiler_accepts_local_static_scalar_declaration_slice
+compiler_accepts_switch_case_break_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+```
+
+Focused `am_map.c` compile now reaches the next unsupported local array:
+
+```text
+error: only local char arrays are supported
+```
+
+That line is:
+
+```c
+static int litelevels[] = { 0, 4, 7, 10, 12, 14, 15, 15 };
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779124809`, then that session was closed with `exit`
+without `tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779124809.txt
+ok=11
+fail=51
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before this sweep:
+    error: 7290:5: expected expression
+  after this sweep:
+    error: only local char arrays are supported
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After Pointer Walk Expression Slice
 
 `compile -S` now accepts the pointer-walk expression forms used by the middle of

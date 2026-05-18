@@ -95,8 +95,17 @@ Post-increment expressions on pointer struct members now produce the old field
 value while updating the field.
 Prefix increment and decrement expressions are parsed through the existing
 assignment-expression path, covering scalar conditions such as `++fuzzpos`.
-Local `char name[] = "literal"` declarations are accepted by lowering them as
-pointer locals initialized from string-literal storage.
+Local `char name[] = "literal"` and fixed-size `char namebuf[9]` declarations
+are accepted as stack byte storage, and local array identifiers decay to stack
+addresses for calls such as `sprintf(namebuf, ...)`.
+Adjacent string literals are concatenated, and the preprocessor expands the
+Doom macro builtins `__FILE__` and `__LINE__`.
+`break` statements and minimal `switch`/`case`/`default` control flow now lower
+through labels, including character-literal case values such as `case '-'`.
+Local `static` scalar declarations, including old-style implicit-int forms such
+as `static nexttic = 0`, are parsed and lowered as stack-backed locals. This is
+only a compile-progress approximation; true persistent local static storage is
+still future work.
 Plain `unsigned` parameters are accepted as integer parameters.
 The Doom typedef scalar set includes `lighttable_t`, enabling globals such as
 `lighttable_t* dc_colormap`.
@@ -120,9 +129,10 @@ but eleven of the 62 C files still fail before object generation. `doomdef.c`,
 `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
 `m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently reach assembly
 generation.
-The current `am_map.c` blocker is the local static aggregate declaration
-`static event_t st_notify = { ... }` in `AM_initVariables`, not the earlier
-`AM_getIslope` member expressions.
+The current `am_map.c` blocker is the local static integer array declaration
+`static int litelevels[] = { ... }` in `AM_updateLightLev`, not the earlier
+`AM_getIslope` member expressions, `st_notify` local static aggregate,
+`namebuf` stack array, switch statement, or `case '-'` label.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
