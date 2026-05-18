@@ -100,6 +100,7 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             ..
         }
         | LoweredExpr::Call { .. }
+        | LoweredExpr::IndirectCall { .. }
         | LoweredExpr::Integer(_) => ValueWidth::I32,
         LoweredExpr::PointerSubscript { element_type, .. } => scalar_width(*element_type),
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
@@ -749,8 +750,8 @@ fn emit_aarch64_expr_natural(
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
-        LoweredExpr::Call { callee, args } => {
-            emit_aarch64_call(callee, args, temporary_base, depth, labels, assembly)
+        expr @ (LoweredExpr::Call { .. } | LoweredExpr::IndirectCall { .. }) => {
+            emit_aarch64_call_expr(expr, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::Integer(value) => emit_aarch64_i32_to_register(*value, "w0", assembly),
         LoweredExpr::DoubleLiteral(value) => {
@@ -1036,6 +1037,63 @@ fn emit_aarch64_call(
         emit_aarch64_load_temporary_to_register(expr_width(arg), offset, register, assembly)?;
     }
     write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))
+}
+
+fn emit_aarch64_call_expr(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match expr {
+        LoweredExpr::Call { callee, args } => {
+            emit_aarch64_call(callee, args, temporary_base, depth, labels, assembly)
+        }
+        LoweredExpr::IndirectCall { callee, args } => {
+            emit_aarch64_indirect_call(callee, args, temporary_base, depth, labels, assembly)
+        }
+        _ => Err(CompileError::new(
+            "internal error: expected aarch64 call expression",
+        )),
+    }
+}
+
+fn emit_aarch64_indirect_call(
+    callee: &LoweredExpr,
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const REGISTERS: [&str; 8] = ["0", "1", "2", "3", "4", "5", "6", "7"];
+    let Some(registers) = REGISTERS.get(..args.len()) else {
+        return Err(CompileError::new("too many function call arguments"));
+    };
+    let callee_offset = temporary_base + ((depth + args.len()) * TEMPORARY_BYTES);
+    let arg_depth = depth + args.len() + 1;
+    for (index, arg) in args.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        let width = expr_width(arg);
+        emit_aarch64_expr_with_width(arg, width, temporary_base, arg_depth, labels, assembly)?;
+        emit_aarch64_store_temporary(width, offset, assembly)?;
+    }
+    emit_aarch64_expr_with_width(
+        callee,
+        ValueWidth::I64,
+        temporary_base,
+        arg_depth,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I64, callee_offset, assembly)?;
+    for (index, (arg, register)) in args.iter().zip(registers.iter()).enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        emit_aarch64_load_temporary_to_register(expr_width(arg), offset, register, assembly)?;
+    }
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, callee_offset, "16", assembly)?;
+    write_assembly!(assembly, "\tblr x16\n")
 }
 
 fn emit_aarch64_conditional(
@@ -2039,15 +2097,9 @@ fn emit_x86_64_expr_natural(
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
-        LoweredExpr::Call { callee, args } => emit_x86_64_call(
-            callee,
-            args,
-            temporary_base,
-            depth,
-            target,
-            labels,
-            assembly,
-        ),
+        expr @ (LoweredExpr::Call { .. } | LoweredExpr::IndirectCall { .. }) => {
+            emit_x86_64_call_expr(expr, temporary_base, depth, target, labels, assembly)
+        }
         LoweredExpr::Integer(value) => emit_x86_64_integer(*value, assembly),
         LoweredExpr::DoubleLiteral(value) => {
             emit_x86_64_load_double_literal(value, target, labels, assembly)
@@ -2375,6 +2427,88 @@ fn emit_x86_64_call(
         emit_x86_64_load_temporary_to_register(width, offset, register, assembly)?;
     }
     write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))
+}
+
+fn emit_x86_64_call_expr(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match expr {
+        LoweredExpr::Call { callee, args } => emit_x86_64_call(
+            callee,
+            args,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::IndirectCall { callee, args } => emit_x86_64_indirect_call(
+            callee,
+            args,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        _ => Err(CompileError::new(
+            "internal error: expected x86_64 call expression",
+        )),
+    }
+}
+
+fn emit_x86_64_indirect_call(
+    callee: &LoweredExpr,
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const MAX_REGISTER_ARGS: usize = 6;
+    if args.len() > MAX_REGISTER_ARGS {
+        return Err(CompileError::new("too many function call arguments"));
+    }
+    let callee_offset = temporary_base + ((depth + args.len()) * TEMPORARY_BYTES);
+    let arg_depth = depth + args.len() + 1;
+    for (index, arg) in args.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        let width = expr_width(arg);
+        emit_x86_64_expr_with_width(
+            arg,
+            width,
+            temporary_base,
+            arg_depth,
+            target,
+            labels,
+            assembly,
+        )?;
+        emit_x86_64_store_temporary(width, offset, assembly)?;
+    }
+    emit_x86_64_expr_with_width(
+        callee,
+        ValueWidth::I64,
+        temporary_base,
+        arg_depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I64, callee_offset, assembly)?;
+    for (index, arg) in args.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        let width = expr_width(arg);
+        let register = x86_64_argument_register(index, width)?;
+        emit_x86_64_load_temporary_to_register(width, offset, register, assembly)?;
+    }
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, callee_offset, "%rax", assembly)?;
+    write_assembly!(assembly, "\tcall *%rax\n")
 }
 
 fn emit_x86_64_conditional(
@@ -3629,6 +3763,9 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => 0,
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
+        LoweredExpr::IndirectCall { callee, args } => {
+            1 + expr_depth(callee).max(call_arg_depth(args))
+        }
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
@@ -3746,6 +3883,9 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         }
         LoweredExpr::PostIncrement { target } => lvalue_needs_preserved_temp(target),
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
+        LoweredExpr::IndirectCall { callee, args } => {
+            expr_needs_preserved_temp(callee) || args.iter().any(expr_needs_preserved_temp)
+        }
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
@@ -3770,7 +3910,10 @@ fn lvalue_needs_preserved_temp(target: &LoweredLValue) -> bool {
 }
 
 const fn expr_is_direct_call(expr: &LoweredExpr) -> bool {
-    matches!(expr, LoweredExpr::Call { .. })
+    matches!(
+        expr,
+        LoweredExpr::Call { .. } | LoweredExpr::IndirectCall { .. }
+    )
 }
 
 fn instruction_uses_call(instruction: &Instruction) -> bool {
@@ -3792,7 +3935,7 @@ fn instruction_uses_call(instruction: &Instruction) -> bool {
 
 fn expr_uses_call(expr: &LoweredExpr) -> bool {
     match expr {
-        LoweredExpr::Call { .. } => true,
+        LoweredExpr::Call { .. } | LoweredExpr::IndirectCall { .. } => true,
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)

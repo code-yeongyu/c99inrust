@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
-    BinaryOp, Constant, Expr, FieldType, Function, Global, GlobalInitializer, LValue, Program,
-    ReturnType, ScalarType, Statement, StructLayout, SwitchCase, UnaryOp,
+    BinaryOp, Constant, Expr, FieldType, Function, Global, GlobalInitializer, LValue,
+    PointerReturnFunction, Program, ReturnType, ScalarType, Statement, StructLayout, SwitchCase,
+    UnaryOp,
 };
 
 const POINTER_REFERENT: &str = "*";
@@ -87,6 +88,10 @@ pub enum Instruction {
 pub enum LoweredExpr {
     Call {
         callee: String,
+        args: Vec<Self>,
+    },
+    IndirectCall {
+        callee: Box<Self>,
         args: Vec<Self>,
     },
     Integer(i64),
@@ -216,6 +221,8 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
         .collect::<HashMap<_, _>>();
     let constants = lower_constants(&program.constants)?;
     let (globals, global_bindings) = lower_globals(&program.globals, &constants, &structs)?;
+    let pointer_return_functions =
+        lower_pointer_return_functions(&program.pointer_return_functions);
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function_with_globals(
@@ -223,6 +230,7 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
             &structs,
             &global_bindings,
             &constants,
+            &pointer_return_functions,
         )?);
     }
     let constant_returns = constant_return_functions(&functions);
@@ -281,6 +289,15 @@ fn lower_extern_global_binding(
                 struct_name: struct_name.clone(),
                 byte_size: layout.size,
                 length: None,
+            }
+        }
+        GlobalInitializer::ExternStructObject { struct_name } => {
+            let layout = structs.get(struct_name).ok_or_else(|| {
+                CompileError::new(format!("unknown struct object type: {struct_name}"))
+            })?;
+            GlobalBinding::StructObject {
+                struct_name: struct_name.clone(),
+                byte_size: layout.size,
             }
         }
         GlobalInitializer::Int(_)
@@ -358,7 +375,8 @@ fn lower_defined_global_initializer(
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
         | GlobalInitializer::ExternPointerArray { .. }
-        | GlobalInitializer::ExternStructArray { .. } => Err(CompileError::new(
+        | GlobalInitializer::ExternStructArray { .. }
+        | GlobalInitializer::ExternStructObject { .. } => Err(CompileError::new(
             "internal error: extern global reached definition lowering",
         )),
     }
@@ -503,6 +521,15 @@ fn lower_constants(constants: &[Constant]) -> CompileResult<HashMap<String, i64>
     Ok(bindings)
 }
 
+fn lower_pointer_return_functions(
+    functions: &[PointerReturnFunction],
+) -> HashMap<String, Option<String>> {
+    functions
+        .iter()
+        .map(|function| (function.name.clone(), function.referent.clone()))
+        .collect()
+}
+
 /// Evaluates a constant integer expression.
 ///
 /// # Errors
@@ -514,6 +541,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Call { callee, .. } => Err(CompileError::new(format!(
             "call to {callee} is not a constant expression"
         ))),
+        Expr::IndirectCall { .. } => Err(CompileError::new(
+            "indirect call is not a constant expression",
+        )),
         Expr::Identifier(name) => Err(CompileError::new(format!(
             "identifier {name} is not a constant expression"
         ))),
@@ -595,7 +625,14 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     let structs = HashMap::new();
     let global_bindings = HashMap::new();
     let constants = HashMap::new();
-    lower_function_with_globals(function, &structs, &global_bindings, &constants)
+    let pointer_return_functions = HashMap::new();
+    lower_function_with_globals(
+        function,
+        &structs,
+        &global_bindings,
+        &constants,
+        &pointer_return_functions,
+    )
 }
 
 fn lower_function_with_globals(
@@ -603,9 +640,15 @@ fn lower_function_with_globals(
     structs: &HashMap<String, StructLayout>,
     global_bindings: &HashMap<String, GlobalBinding>,
     constants: &HashMap<String, i64>,
+    pointer_return_functions: &HashMap<String, Option<String>>,
 ) -> CompileResult<LoweredFunction> {
-    let mut context =
-        LoweringContext::new(function.return_type, structs, global_bindings, constants);
+    let mut context = LoweringContext::new(
+        function.return_type,
+        structs,
+        global_bindings,
+        constants,
+        pointer_return_functions,
+    );
     for parameter in &function.parameters {
         context.declare_local(
             &parameter.name,
@@ -739,6 +782,7 @@ struct LoweringContext {
     structs: HashMap<String, StructLayout>,
     global_bindings: HashMap<String, GlobalBinding>,
     constants: HashMap<String, i64>,
+    pointer_return_functions: HashMap<String, Option<String>>,
     scopes: Vec<HashMap<String, LocalBinding>>,
     local_slots: Vec<LocalSlot>,
     next_local_offset: usize,
@@ -756,12 +800,14 @@ impl LoweringContext {
         structs: &HashMap<String, StructLayout>,
         global_bindings: &HashMap<String, GlobalBinding>,
         constants: &HashMap<String, i64>,
+        pointer_return_functions: &HashMap<String, Option<String>>,
     ) -> Self {
         Self {
             return_type,
             structs: structs.clone(),
             global_bindings: global_bindings.clone(),
             constants: constants.clone(),
+            pointer_return_functions: pointer_return_functions.clone(),
             scopes: vec![HashMap::new()],
             local_slots: Vec::new(),
             next_local_offset: 0,
@@ -1360,6 +1406,7 @@ impl LoweringContext {
     fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
         match expr {
             Expr::Call { callee, args } => self.lower_call_expr(callee, args),
+            Expr::IndirectCall { callee, args } => self.lower_indirect_call_expr(callee, args),
             Expr::Identifier(name) => self.lower_identifier_expr(name),
             Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
@@ -1379,10 +1426,7 @@ impl LoweringContext {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
             }),
-            Expr::Cast { target, expr, .. } => Ok(LoweredExpr::Cast {
-                target: *target,
-                expr: Box::new(self.lower_expr(expr)?),
-            }),
+            Expr::Cast { target, expr, .. } => self.lower_cast_expr(*target, expr),
             Expr::Conditional {
                 condition,
                 then_expr,
@@ -1400,6 +1444,44 @@ impl LoweringContext {
                 .map(|arg| self.lower_expr(arg))
                 .collect::<CompileResult<Vec<_>>>()?,
         })
+    }
+
+    fn lower_indirect_call_expr(&self, callee: &Expr, args: &[Expr]) -> CompileResult<LoweredExpr> {
+        let callee = self.lower_expr(callee)?;
+        if lowered_expr_scalar_type(&callee) != Some(ScalarType::Pointer) {
+            return Err(CompileError::new("indirect call requires a pointer callee"));
+        }
+        Ok(LoweredExpr::IndirectCall {
+            callee: Box::new(callee),
+            args: args
+                .iter()
+                .map(|arg| self.lower_expr(arg))
+                .collect::<CompileResult<Vec<_>>>()?,
+        })
+    }
+
+    fn lower_cast_expr(&self, target: ScalarType, expr: &Expr) -> CompileResult<LoweredExpr> {
+        let expr = if target == ScalarType::Pointer {
+            self.lower_pointer_cast_expr(expr)?
+        } else {
+            self.lower_expr(expr)?
+        };
+        Ok(LoweredExpr::Cast {
+            target,
+            expr: Box::new(expr),
+        })
+    }
+
+    fn lower_pointer_cast_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
+        match self.lower_expr(expr) {
+            Ok(lowered) => Ok(lowered),
+            Err(error) => {
+                if let Expr::Identifier(name) = expr {
+                    return Ok(LoweredExpr::GlobalAddress { name: name.clone() });
+                }
+                Err(error)
+            }
+        }
     }
 
     fn lower_identifier_expr(&self, name: &str) -> CompileResult<LoweredExpr> {
@@ -1961,7 +2043,9 @@ impl LoweringContext {
     ) -> CompileResult<ResolvedMember> {
         let access = if dereference {
             let pointer = self.lower_expr(base)?;
-            if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
+            if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer)
+                && !self.expr_is_pointer_return_call(base)
+            {
                 return Err(CompileError::new("member dereference requires a pointer"));
             }
             StructAddress {
@@ -2216,6 +2300,11 @@ impl LoweringContext {
         {
             return Ok(referent.clone());
         }
+        if let Expr::Call { callee, .. } = expr
+            && let Some(Some(referent)) = self.pointer_return_functions.get(callee)
+        {
+            return Ok(referent.clone());
+        }
         if let Expr::Member {
             base,
             field,
@@ -2266,6 +2355,13 @@ impl LoweringContext {
         Err(CompileError::new(
             "pointer member access requires a typed pointer",
         ))
+    }
+
+    fn expr_is_pointer_return_call(&self, expr: &Expr) -> bool {
+        matches!(
+            expr,
+            Expr::Call { callee, .. } if self.pointer_return_functions.contains_key(callee)
+        )
     }
 
     fn push_store(&mut self, target: LoweredLValue, value: LoweredExpr) {
@@ -2480,6 +2576,7 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Call { .. }
+        | LoweredExpr::IndirectCall { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::Unary { .. }
         | LoweredExpr::Conditional { .. }
@@ -2770,6 +2867,12 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
                 for arg in args {
                     inline_constant_calls_in_expr(arg, constants);
                 }
+            }
+        }
+        LoweredExpr::IndirectCall { callee, args } => {
+            inline_constant_calls_in_expr(callee, constants);
+            for arg in args {
+                inline_constant_calls_in_expr(arg, constants);
             }
         }
         LoweredExpr::Unary { expr, .. } | LoweredExpr::Cast { expr, .. } => {

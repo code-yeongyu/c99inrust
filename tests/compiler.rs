@@ -2882,6 +2882,140 @@ int main(void) { return 0; }";
 }
 
 #[test]
+fn compiler_accepts_doom_action_function_pointer_slice() {
+    // given
+    let source = r"typedef void (*actionf_p1)(void*);
+typedef union {
+    actionf_p1 acp1;
+} actionf_t;
+typedef actionf_t think_t;
+typedef struct thinker_s {
+    think_t function;
+} thinker_t;
+void T_MoveCeiling(void* value) {
+}
+int main(void) {
+    thinker_t thinker;
+    thinker.function.acp1 = (actionf_p1)T_MoveCeiling;
+    return thinker.function.acp1 ? 0 : 1;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("T_MoveCeiling:"));
+    assert!(assembly.contains("\tleaq T_MoveCeiling(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq %rax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tcmpq $0, %rax\n"));
+}
+
+#[test]
+fn compiler_accepts_doom_action_function_pointer_call_slice() {
+    // given
+    let source = r"typedef void (*actionf_p1)(void*);
+typedef union {
+    actionf_p1 acp1;
+} actionf_t;
+typedef struct {
+    actionf_t action;
+} state_t;
+void run(state_t* state, void* mobj) {
+    if (state->action.acp1) state->action.acp1(mobj);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("run:"));
+    assert!(assembly.contains("\tcall *%rax\n"));
+}
+
+#[test]
+fn compiler_accepts_member_access_on_pointer_return_call_slice() {
+    // given
+    let source = r"typedef struct {
+    int sector;
+} side_t;
+side_t* getSide(int currentSector, int line, int side);
+int main(void) {
+    return getSide(0, 0, 0)->sector;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tcall getSide\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_tagged_struct_pointer_referent_slice() {
+    // given
+    let source = r"typedef struct line_s {
+    int flags;
+} line_t;
+typedef struct {
+    struct line_s** lines;
+} sector_t;
+int main(void) {
+    sector_t* sec;
+    sec = 0;
+    return sec->lines[0]->flags;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_merges_extern_struct_object_with_definition_slice() {
+    // given
+    let source = r"typedef struct thinker_s {
+    struct thinker_s* next;
+} thinker_t;
+extern thinker_t thinkercap;
+thinker_t thinkercap;
+int main(void) {
+    return thinkercap.next ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("thinkercap:"));
+    assert!(assembly.contains("\tleaq thinkercap(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
+}
+
+#[test]
 fn compiler_accepts_local_struct_pointer_declaration_slice() {
     // given
     let source = r"typedef struct {

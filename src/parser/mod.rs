@@ -6,6 +6,7 @@ pub struct Program {
     pub structs: Vec<StructLayout>,
     pub constants: Vec<Constant>,
     pub globals: Vec<Global>,
+    pub pointer_return_functions: Vec<PointerReturnFunction>,
     pub functions: Vec<Function>,
 }
 
@@ -53,6 +54,12 @@ pub struct Global {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PointerReturnFunction {
+    pub name: String,
+    pub referent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalInitializer {
     Extern(ScalarType),
     ExternPointer {
@@ -63,6 +70,9 @@ pub enum GlobalInitializer {
         referent: Option<String>,
     },
     ExternStructArray {
+        struct_name: String,
+    },
+    ExternStructObject {
         struct_name: String,
     },
     Int(i64),
@@ -102,6 +112,7 @@ impl GlobalInitializer {
                 | Self::ExternIntArray
                 | Self::ExternPointerArray { .. }
                 | Self::ExternStructArray { .. }
+                | Self::ExternStructObject { .. }
         )
     }
 }
@@ -236,6 +247,10 @@ pub enum LValue {
 pub enum Expr {
     Call {
         callee: String,
+        args: Vec<Self>,
+    },
+    IndirectCall {
+        callee: Box<Self>,
         args: Vec<Self>,
     },
     Identifier(String),
@@ -393,6 +408,7 @@ pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
         known_structs: &[],
         known_constants: &[],
         known_scalar_typedefs: &[],
+        known_pointer_typedefs: &[],
     };
     parser.program()
 }
@@ -420,11 +436,31 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let mut structs = Vec::new();
     let mut constants = Vec::new();
     let mut scalar_typedefs = Vec::new();
+    let mut pointer_typedefs = Vec::new();
     let mut globals = Vec::new();
+    let mut pointer_return_functions = Vec::new();
     let mut functions = Vec::new();
     let mut unsupported_data_declaration = false;
     for item_tokens in &external_items {
-        if let Some(layout) = parse_struct_typedef(item_tokens, &structs, &constants)? {
+        if let Some(name) = function_pointer_typedef_name(item_tokens) {
+            pointer_typedefs.push(name);
+            continue;
+        }
+        if let Some(function) = pointer_return_function(item_tokens) {
+            pointer_return_functions.push(function);
+        }
+        if let Some(layout) =
+            parse_struct_typedef(item_tokens, &structs, &constants, &pointer_typedefs)?
+        {
+            if let Some(tag_name) = aggregate_tag_name(item_tokens)
+                && tag_name != layout.name
+            {
+                structs.push(StructLayout {
+                    name: tag_name,
+                    fields: layout.fields.clone(),
+                    size: layout.size,
+                });
+            }
             structs.push(layout);
             continue;
         }
@@ -465,6 +501,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             known_structs: &structs,
             known_constants: &constants,
             known_scalar_typedefs: &scalar_typedefs,
+            known_pointer_typedefs: &pointer_typedefs,
         };
         functions.push(function_parser.function()?);
         if !function_parser.check_end() {
@@ -482,6 +519,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         structs,
         constants,
         globals,
+        pointer_return_functions,
         functions,
     })
 }
@@ -492,6 +530,7 @@ struct Parser<'a> {
     known_structs: &'a [StructLayout],
     known_constants: &'a [Constant],
     known_scalar_typedefs: &'a [String],
+    known_pointer_typedefs: &'a [String],
 }
 
 impl Parser<'_> {
@@ -504,6 +543,7 @@ impl Parser<'_> {
             structs: Vec::new(),
             constants: Vec::new(),
             globals: Vec::new(),
+            pointer_return_functions: Vec::new(),
             functions,
         })
     }
@@ -586,8 +626,12 @@ impl Parser<'_> {
         let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
             return Err(CompileError::new("unsupported function parameter"));
         };
-        let scalar_type = parameter_scalar_type(tokens, self.known_scalar_typedefs)
-            .ok_or_else(|| CompileError::new("unsupported function parameter"))?;
+        let scalar_type = parameter_scalar_type(
+            tokens,
+            self.known_scalar_typedefs,
+            self.known_pointer_typedefs,
+        )
+        .ok_or_else(|| CompileError::new("unsupported function parameter"))?;
         parameters.push(Parameter {
             name: name.to_owned(),
             scalar_type,
@@ -1530,6 +1574,13 @@ impl Parser<'_> {
                 };
                 continue;
             }
+            if self.check_punctuator("(") {
+                expr = Expr::IndirectCall {
+                    callee: Box::new(expr),
+                    args: self.call_arguments()?,
+                };
+                continue;
+            }
             if self.check_punctuator("++") {
                 self.advance();
                 expr = Expr::PostIncrement {
@@ -1565,7 +1616,11 @@ impl Parser<'_> {
             .position(|token| token_is_punctuator(token, ")"))?
             + start;
         let cast_tokens = &self.tokens[start..close];
-        let target = supported_cast_type(cast_tokens)?;
+        let target = supported_cast_type_with_typedefs(
+            cast_tokens,
+            self.known_scalar_typedefs,
+            self.known_pointer_typedefs,
+        )?;
         let referent = if target == ScalarType::Pointer {
             pointer_referent_from_specifiers(cast_tokens)
         } else {
@@ -1676,6 +1731,7 @@ impl Parser<'_> {
         let mut saw_double = false;
         let mut saw_storage_class = false;
         let mut saw_struct_pointer = false;
+        let mut saw_pointer_typedef = false;
         let mut long_count = 0usize;
         while let Some(token) = self.tokens.get(index) {
             match &token.kind {
@@ -1702,7 +1758,15 @@ impl Parser<'_> {
                     if saw_type {
                         break;
                     }
-                    if let Some(scalar_type) = self.supported_declaration_typedef_scalar(name) {
+                    if self
+                        .known_pointer_typedefs
+                        .iter()
+                        .any(|known| known == name)
+                    {
+                        saw_pointer_typedef = true;
+                    } else if let Some(scalar_type) =
+                        self.supported_declaration_typedef_scalar(name)
+                    {
                         if scalar_type != ScalarType::Int {
                             return None;
                         }
@@ -1727,7 +1791,7 @@ impl Parser<'_> {
             }
             return None;
         }
-        if saw_struct_pointer {
+        if saw_struct_pointer || saw_pointer_typedef {
             Some((ScalarType::Pointer, index))
         } else if saw_double && long_count == 0 {
             Some((ScalarType::Double, index))
@@ -1920,7 +1984,11 @@ fn statement_from_expression(expr: Expr) -> Statement {
     }
 }
 
-fn parameter_scalar_type(tokens: &[Token], known_scalar_typedefs: &[String]) -> Option<ScalarType> {
+fn parameter_scalar_type(
+    tokens: &[Token],
+    known_scalar_typedefs: &[String],
+    known_pointer_typedefs: &[String],
+) -> Option<ScalarType> {
     if parameter_has_pointer(tokens) {
         return Some(ScalarType::Pointer);
     }
@@ -1929,6 +1997,14 @@ fn parameter_scalar_type(tokens: &[Token], known_scalar_typedefs: &[String]) -> 
         .enumerate()
         .rev()
         .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
+    if tokens[..name_index]
+        .iter()
+        .rev()
+        .find_map(token_identifier)
+        .is_some_and(|name| known_pointer_typedefs.iter().any(|known| known == name))
+    {
+        return Some(ScalarType::Pointer);
+    }
     integer_parameter_type_with_typedefs(&tokens[..name_index], known_scalar_typedefs)
 }
 
@@ -2066,11 +2142,13 @@ fn parse_struct_typedef(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    pointer_typedefs: &[String],
 ) -> CompileResult<Option<StructLayout>> {
     if !token_has_keyword(tokens, Keyword::Typedef) {
         return Ok(None);
     }
-    if !token_has_keyword(tokens, Keyword::Struct) {
+    let is_union = token_has_keyword(tokens, Keyword::Union);
+    if !token_has_keyword(tokens, Keyword::Struct) && !is_union {
         return Ok(parse_struct_alias_typedef(tokens, known_structs));
     }
     let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
@@ -2086,6 +2164,8 @@ fn parse_struct_typedef(
         &tokens[open_brace + 1..close_brace],
         known_structs,
         constants,
+        pointer_typedefs,
+        is_union,
     )?
     else {
         return Ok(None);
@@ -2114,10 +2194,23 @@ fn parse_struct_alias_typedef(
         })
 }
 
+fn aggregate_tag_name(tokens: &[Token]) -> Option<String> {
+    let open_brace = top_level_punctuator_index(tokens, "{")?;
+    let aggregate_index = tokens[..open_brace].iter().position(|token| {
+        token_is_keyword(token, Keyword::Struct) || token_is_keyword(token, Keyword::Union)
+    })?;
+    tokens
+        .get(aggregate_index + 1)
+        .and_then(token_identifier)
+        .map(ToOwned::to_owned)
+}
+
 fn parse_struct_fields(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    pointer_typedefs: &[String],
+    is_union: bool,
 ) -> CompileResult<Option<(Vec<StructField>, usize)>> {
     let mut fields = Vec::new();
     let mut offset = 0usize;
@@ -2133,9 +2226,13 @@ fn parse_struct_fields(
                 declaration,
                 known_structs,
                 constants,
-                &mut fields,
-                &mut offset,
-                &mut max_alignment,
+                pointer_typedefs,
+                is_union,
+                &mut StructFieldOutput {
+                    fields: &mut fields,
+                    offset: &mut offset,
+                    max_alignment: &mut max_alignment,
+                },
             )?
         {
             return Ok(None);
@@ -2149,13 +2246,19 @@ fn parse_struct_fields(
     Ok(Some((fields, size)))
 }
 
+struct StructFieldOutput<'a> {
+    fields: &'a mut Vec<StructField>,
+    offset: &'a mut usize,
+    max_alignment: &'a mut usize,
+}
+
 fn parse_struct_field_declaration(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
-    fields: &mut Vec<StructField>,
-    offset: &mut usize,
-    max_alignment: &mut usize,
+    pointer_typedefs: &[String],
+    is_union: bool,
+    output: &mut StructFieldOutput<'_>,
 ) -> CompileResult<bool> {
     let ranges = top_level_comma_ranges(tokens);
     let Some((first_start, first_end)) = ranges.first().copied() else {
@@ -2166,7 +2269,8 @@ fn parse_struct_field_declaration(
         return Ok(false);
     };
     let base_specifiers = &first[..first_name_index];
-    let Some(base_type) = struct_field_type(base_specifiers, known_structs) else {
+    let Some(base_type) = struct_field_type(base_specifiers, known_structs, pointer_typedefs)
+    else {
         return Ok(false);
     };
     for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
@@ -2210,14 +2314,23 @@ fn parse_struct_field_declaration(
         };
         let size = field_type_size(&field_type, known_structs)?;
         let alignment = field_type_alignment(&field_type, known_structs)?;
-        *max_alignment = (*max_alignment).max(alignment);
-        *offset = align_struct_offset(*offset, alignment)?;
-        fields.push(StructField {
+        *output.max_alignment = (*output.max_alignment).max(alignment);
+        if is_union {
+            output.fields.push(StructField {
+                name: name.to_owned(),
+                field_type,
+                offset: 0,
+            });
+            *output.offset = (*output.offset).max(size);
+            continue;
+        }
+        *output.offset = align_struct_offset(*output.offset, alignment)?;
+        output.fields.push(StructField {
             name: name.to_owned(),
             field_type,
-            offset: *offset,
+            offset: *output.offset,
         });
-        *offset = offset
+        *output.offset = (*output.offset)
             .checked_add(size)
             .ok_or_else(|| CompileError::new("struct size overflow"))?;
     }
@@ -2256,7 +2369,11 @@ fn struct_field_array_length(tokens: &[Token], constants: &[Constant]) -> Option
     .filter(|_length| close_bracket > open_bracket)
 }
 
-fn struct_field_type(tokens: &[Token], known_structs: &[StructLayout]) -> Option<FieldType> {
+fn struct_field_type(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+    pointer_typedefs: &[String],
+) -> Option<FieldType> {
     if tokens.iter().any(|token| token_is_punctuator(token, "*")) {
         return Some(FieldType::Pointer {
             referent: pointer_referent_from_specifiers(tokens),
@@ -2266,6 +2383,9 @@ fn struct_field_type(tokens: &[Token], known_structs: &[StructLayout]) -> Option
         return Some(FieldType::Scalar(scalar_type));
     }
     let name = tokens.iter().rev().find_map(token_identifier)?;
+    if pointer_typedefs.iter().any(|known| known == name) {
+        return Some(FieldType::Pointer { referent: None });
+    }
     if known_structs.iter().any(|layout| layout.name == name) {
         return Some(FieldType::Struct(name.to_owned()));
     }
@@ -2462,7 +2582,7 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_int_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_extern_scalar(tokens)? {
+    if let Some(global) = parse_global_extern_scalar(tokens, known_structs)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer(tokens)? {
@@ -2908,7 +3028,10 @@ fn parse_global_int_array(
     }))
 }
 
-fn parse_global_extern_scalar(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_extern_scalar(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -2925,6 +3048,8 @@ fn parse_global_extern_scalar(tokens: &[Token]) -> CompileResult<Option<Global>>
         GlobalInitializer::ExternPointer {
             referent: pointer_referent_from_specifiers(specifiers),
         }
+    } else if let Some(struct_name) = global_struct_specifier_name(specifiers, known_structs) {
+        GlobalInitializer::ExternStructObject { struct_name }
     } else if global_specifiers_are_extern_int(specifiers) {
         GlobalInitializer::Extern(ScalarType::Int)
     } else {
@@ -3331,6 +3456,7 @@ fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {
         known_structs: &[],
         known_constants: &[],
         known_scalar_typedefs: &[],
+        known_pointer_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
@@ -3405,6 +3531,7 @@ fn parse_integer_initializer_with_constants(
         known_structs: &[],
         known_constants: constants,
         known_scalar_typedefs: &[],
+        known_pointer_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
@@ -3657,6 +3784,9 @@ fn eval_integer_initializer_expr_with_constants(
         Expr::Call { callee, .. } => Err(CompileError::new(format!(
             "call to {callee} is not an integer initializer"
         ))),
+        Expr::IndirectCall { .. } => Err(CompileError::new(
+            "indirect call is not an integer initializer",
+        )),
         Expr::StringLiteral(_)
         | Expr::SizeOfExpr { .. }
         | Expr::AddressOf { .. }
@@ -3935,6 +4065,19 @@ fn function_definition_name(tokens: &[Token]) -> Option<String> {
     None
 }
 
+fn pointer_return_function(tokens: &[Token]) -> Option<PointerReturnFunction> {
+    let open_index = top_level_function_open_paren(tokens)?;
+    let name_index = previous_identifier_index(tokens, open_index)?;
+    if supported_return_type(&tokens[..name_index]) != Some(ReturnType::Pointer) {
+        return None;
+    }
+    let name = token_identifier(&tokens[name_index])?.to_owned();
+    Some(PointerReturnFunction {
+        name,
+        referent: pointer_referent_from_specifiers(&tokens[..name_index]),
+    })
+}
+
 fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
     let Some(open_index) = top_level_function_open_paren(tokens) else {
         return false;
@@ -3968,6 +4111,12 @@ fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
 
 fn typedef_name(tokens: &[Token]) -> Option<String> {
     function_pointer_name(tokens).or_else(|| last_top_level_identifier(tokens))
+}
+
+fn function_pointer_typedef_name(tokens: &[Token]) -> Option<String> {
+    token_has_keyword(tokens, Keyword::Typedef)
+        .then(|| function_pointer_name(tokens))
+        .flatten()
 }
 
 fn struct_forward_name(tokens: &[Token]) -> Option<String> {
@@ -4092,6 +4241,14 @@ fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
 }
 
 fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
+    supported_cast_type_with_typedefs(tokens, &[], &[])
+}
+
+fn supported_cast_type_with_typedefs(
+    tokens: &[Token],
+    known_scalar_typedefs: &[String],
+    known_pointer_typedefs: &[String],
+) -> Option<ScalarType> {
     if tokens.is_empty() {
         return None;
     }
@@ -4119,7 +4276,14 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
                 long_count += 1;
             }
             TokenKind::Identifier(name) => {
-                if let Some(scalar_type) = supported_typedef_scalar(name) {
+                if known_pointer_typedefs.iter().any(|known| known == name) {
+                    saw_pointer = true;
+                } else if let Some(scalar_type) = supported_typedef_scalar(name).or_else(|| {
+                    known_scalar_typedefs
+                        .iter()
+                        .any(|known_name| known_name == name)
+                        .then_some(ScalarType::Int)
+                }) {
                     if scalar_type != ScalarType::Int {
                         return None;
                     }
