@@ -569,6 +569,72 @@ FAIL z_zone.c
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
 
+## Compile Scan After doomdef Static Metadata
+
+`compile -S` now accepts `doomdef.c`, which carries only an internal static
+metadata string after preprocessing:
+
+```text
+static const char rcsid[] = "...";
+```
+
+The compiler allows this narrow empty-object case only when unsupported
+data-only declarations are absent. Required but unsupported data globals, such
+as the `weaponinfo` table in `d_items.c`, still fail instead of being silently
+dropped.
+
+Regression coverage added:
+
+```text
+compiler_accepts_ignorable_static_metadata_translation_unit
+compiler_rejects_unsupported_data_only_translation_unit
+```
+
+Manual single-file QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/c99inrust-doom-src/linuxdoom-1.10 /tmp/c99inrust-doom-src/linuxdoom-1.10/doomdef.c -o /tmp/c99inrust-doomdef.s
+bytes=0
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/c99inrust-doom-src/linuxdoom-1.10 /tmp/c99inrust-doom-src/linuxdoom-1.10/d_items.c -o /tmp/c99inrust-d-items.s
+error=translation unit has no supported function definitions
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779104614
+scan=/tmp/c99inrust-doom-scan-1779104614.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779104614.txt
+ok=8
+fail=54
+OK doomdef.c
+OK i_main.c
+OK m_argv.c
+OK m_bbox.c
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+FAIL d_items.c
+  error: translation unit has no supported function definitions
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL z_zone.c
+  error: 753:9: expected punctuator ;
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
+
 ## Compile Scan After m_argv Post-Increment
 
 `compile -S` now accepts the Doom `m_argv.c` command-line parameter scan. The
