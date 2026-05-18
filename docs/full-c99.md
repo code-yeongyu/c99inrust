@@ -19,7 +19,8 @@ The first oracle tests live in `tests/clang_oracle.rs`. They compile a C snippet
 with both compilers, link both outputs through the platform toolchain, run both
 executables, and compare exit codes. Current covered slices include constant
 returns, arithmetic precedence, local `int` declarations/assignments, and
-`if`/`else` and `while` control flow over integer comparisons.
+`if`/`else` and `while` control flow over integer comparisons and short-circuit
+`&&`/`||`.
 
 ## Undefined Behavior Policy
 

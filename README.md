@@ -14,7 +14,7 @@ This repository currently ships the first verified vertical slice:
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
 | Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
 | Parser | int function bodies with local `int` declarations, assignments, `if`/`else`, `while`, blocks, returns, plus Doom-shaped surface declarations |
-| IR | scoped local-slot lowering and label lowering for supported `int` statements and expressions |
+| IR | scoped local-slot lowering, label lowering, and short-circuit logical lowering for supported `int` statements and expressions |
 | Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly |
 | Doom | official source audit command and QA plan |
 
@@ -48,7 +48,7 @@ cc answer.s -o answer
 The current compile slice accepts:
 
 ```c
-int main(void) { int x = 0; while (x < 5) { x = x + 1; } return x; }
+int main(void) { int x = 0; while (x < 5 && x != 3) { x = x + 1; } return x; }
 ```
 
 ## Official Doom Target

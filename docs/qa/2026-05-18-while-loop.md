@@ -1,7 +1,7 @@
 # While Loop QA Evidence
 
 Date: 2026-05-18
-Verified compiler head: `a0f03f3d2af8eabee20fc70d5ff71b0033b07f31`
+Verified compiler commit: `a0f03f3d2af8eabee20fc70d5ff71b0033b07f31`
 Session: `c99-while-qa3`
 Raw capture: `/tmp/c99inrust-tmux-while-qa-a0f03f3.txt`
 
