@@ -295,6 +295,12 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Subscript { .. } => Err(CompileError::new(
             "subscript expression is not an integer constant expression",
         )),
+        Expr::Dereference { .. } => Err(CompileError::new(
+            "dereference expression is not an integer constant expression",
+        )),
+        Expr::AddressOf { .. } => Err(CompileError::new(
+            "address expression is not an integer constant expression",
+        )),
         Expr::Member { .. } => Err(CompileError::new(
             "member expression is not an integer constant expression",
         )),
@@ -751,6 +757,8 @@ impl LoweringContext {
                 field,
                 dereference,
             } => self.lower_member_expr(base, field, *dereference),
+            Expr::Dereference { pointer } => self.lower_subscript(pointer, &Expr::Integer(0)),
+            Expr::AddressOf { target } => self.lower_address_of(target),
             Expr::Subscript { array, index } => self.lower_subscript(array, index),
             Expr::Assignment { target, value } => {
                 let target = self.lower_lvalue(target)?;
@@ -855,6 +863,27 @@ impl LoweringContext {
             index: Box::new(self.lower_expr(index)?),
             element_type: ScalarType::Int,
         })
+    }
+
+    fn lower_address_of(&self, target: &LValue) -> CompileResult<LoweredExpr> {
+        match target {
+            LValue::Subscript { array, index } => {
+                let pointer = self.lower_expr(array)?;
+                if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
+                    return Err(CompileError::new(
+                        "address of subscript requires a pointer base",
+                    ));
+                }
+                Ok(LoweredExpr::Binary {
+                    op: BinaryOp::Add,
+                    left: Box::new(pointer),
+                    right: Box::new(self.lower_expr(index)?),
+                })
+            }
+            LValue::Identifier(_) | LValue::Member { .. } => {
+                Err(CompileError::new("unsupported address-of target"))
+            }
+        }
     }
 
     fn lower_member_expr(
@@ -1000,9 +1029,12 @@ impl LoweringContext {
 
     fn lower_post_increment_statement(&mut self, target: &LValue) -> CompileResult<()> {
         let target = self.lower_lvalue(target)?;
-        if lowered_lvalue_scalar_type(&target) != ScalarType::Int {
+        if !matches!(
+            lowered_lvalue_scalar_type(&target),
+            ScalarType::Int | ScalarType::Pointer
+        ) {
             return Err(CompileError::new(
-                "post-increment currently supports int lvalues only",
+                "post-increment currently supports int and pointer lvalues only",
             ));
         }
         let current = lowered_lvalue_to_expr(&target);

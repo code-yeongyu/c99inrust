@@ -140,6 +140,12 @@ pub enum Expr {
         array: Box<Self>,
         index: Box<Self>,
     },
+    Dereference {
+        pointer: Box<Self>,
+    },
+    AddressOf {
+        target: LValue,
+    },
     Member {
         base: Box<Self>,
         field: String,
@@ -519,10 +525,15 @@ impl Parser<'_> {
         })
     }
 
-    fn declaration_statement(&mut self, scalar_type: ScalarType) -> CompileResult<Statement> {
-        self.consume_declaration_type(scalar_type)?;
+    fn declaration_statement(&mut self, base_type: ScalarType) -> CompileResult<Statement> {
+        self.consume_declaration_type(base_type)?;
         let mut declarations = Vec::new();
         loop {
+            let mut scalar_type = base_type;
+            while self.check_punctuator("*") {
+                self.advance();
+                scalar_type = ScalarType::Pointer;
+            }
             let name = self.expect_identifier()?;
             let initializer = if self.check_punctuator("=") {
                 self.advance();
@@ -765,6 +776,20 @@ impl Parser<'_> {
                 expr: Box::new(self.unary()?),
             });
         }
+        if self.check_keyword(Keyword::Sizeof) {
+            return self.sizeof_expr();
+        }
+        if self.check_punctuator("&") {
+            self.advance();
+            let target = lvalue_from_expr(self.unary()?)?;
+            return Ok(Expr::AddressOf { target });
+        }
+        if self.check_punctuator("*") {
+            self.advance();
+            return Ok(Expr::Dereference {
+                pointer: Box::new(self.unary()?),
+            });
+        }
         let op = if self.check_punctuator("+") {
             Some(UnaryOp::Plus)
         } else if self.check_punctuator("-") {
@@ -784,6 +809,27 @@ impl Parser<'_> {
             });
         }
         self.postfix()
+    }
+
+    fn sizeof_expr(&mut self) -> CompileResult<Expr> {
+        self.expect_keyword(Keyword::Sizeof)?;
+        if self.check_punctuator("(") {
+            let start = self.index + 1;
+            let close = self.tokens[start..]
+                .iter()
+                .position(|token| token_is_punctuator(token, ")"))
+                .map(|offset| start + offset);
+            if let Some(close) = close
+                && let Some(size) = sizeof_type(&self.tokens[start..close])
+            {
+                self.index = close + 1;
+                return i64::try_from(size)
+                    .map(Expr::Integer)
+                    .map_err(|_| CompileError::new("sizeof result does not fit i64"));
+            }
+        }
+        let _expr = self.unary()?;
+        Ok(Expr::Integer(4))
     }
 
     fn postfix(&mut self) -> CompileResult<Expr> {
@@ -814,6 +860,19 @@ impl Parser<'_> {
                 self.advance();
                 expr = Expr::PostIncrement {
                     target: lvalue_from_expr(expr)?,
+                };
+                continue;
+            }
+            if self.check_punctuator("--") {
+                self.advance();
+                let target = lvalue_from_expr(expr.clone())?;
+                expr = Expr::Assignment {
+                    target,
+                    value: Box::new(Expr::Binary {
+                        op: BinaryOp::Sub,
+                        left: Box::new(expr),
+                        right: Box::new(Expr::Integer(1)),
+                    }),
                 };
                 continue;
             }
@@ -901,7 +960,9 @@ impl Parser<'_> {
 
     fn declaration_type_at_current(&self) -> Option<ScalarType> {
         match self.peek().map(|token| &token.kind) {
-            Some(TokenKind::Keyword(Keyword::Int)) => Some(ScalarType::Int),
+            Some(TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short)) => {
+                Some(ScalarType::Int)
+            }
             Some(TokenKind::Keyword(Keyword::Double)) => Some(ScalarType::Double),
             Some(TokenKind::Identifier(name)) => supported_typedef_scalar(name),
             _ => None,
@@ -1040,6 +1101,10 @@ fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
     match expr {
         Expr::Identifier(name) => Ok(LValue::Identifier(name)),
         Expr::Subscript { array, index } => Ok(LValue::Subscript { array, index }),
+        Expr::Dereference { pointer } => Ok(LValue::Subscript {
+            array: pointer,
+            index: Box::new(Expr::Integer(0)),
+        }),
         Expr::Member {
             base,
             field,
@@ -2028,6 +2093,8 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
             "call to {callee} is not an integer initializer"
         ))),
         Expr::StringLiteral(_)
+        | Expr::AddressOf { .. }
+        | Expr::Dereference { .. }
         | Expr::Member { .. }
         | Expr::Subscript { .. }
         | Expr::Assignment { .. }
@@ -2413,6 +2480,8 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
     }
     let mut saw_type = false;
     let mut saw_double = false;
+    let mut saw_named_type = false;
+    let mut saw_pointer = false;
     let mut saw_unsigned = false;
     let mut long_count = 0usize;
     for token in tokens {
@@ -2424,7 +2493,9 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
                 saw_type = true;
                 saw_double = true;
             }
-            TokenKind::Keyword(Keyword::Int) => saw_type = true,
+            TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Void) => {
+                saw_type = true;
+            }
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
                 long_count += 1;
@@ -2434,12 +2505,16 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
                 saw_unsigned = true;
             }
             TokenKind::Identifier(name) => {
-                let scalar_type = supported_typedef_scalar(name)?;
-                if scalar_type != ScalarType::Int {
-                    return None;
+                if let Some(scalar_type) = supported_typedef_scalar(name) {
+                    if scalar_type != ScalarType::Int {
+                        return None;
+                    }
+                } else {
+                    saw_named_type = true;
                 }
                 saw_type = true;
             }
+            TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
             TokenKind::Integer(_)
             | TokenKind::StringLiteral(_)
             | TokenKind::CharLiteral(_)
@@ -2451,6 +2526,12 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
     if !saw_type || saw_unsigned {
         return None;
     }
+    if saw_pointer {
+        return Some(ScalarType::Pointer);
+    }
+    if saw_named_type {
+        return None;
+    }
     if saw_double && long_count == 0 {
         Some(ScalarType::Double)
     } else if long_count == 0 {
@@ -2458,6 +2539,10 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
     } else {
         Some(ScalarType::LongLong)
     }
+}
+
+fn sizeof_type(tokens: &[Token]) -> Option<usize> {
+    supported_cast_type(tokens).map(scalar_size_for_layout)
 }
 
 fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {

@@ -123,6 +123,156 @@ fn compound_assignment_matches_host_c_compiler_exit_code() {
 }
 
 #[test]
+fn local_pointer_declaration_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "local_pointer_declaration",
+        source: "int Z_Malloc(int size, int tag, void *user) { return 0; } void Z_Free(void *p) { return; } int main(void) { short *dest; dest = (short*) Z_Malloc(8, 1, 0); Z_Free(dest); return dest == 0; }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
+fn pointer_dereference_slice_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "pointer_dereference_slice",
+        source: "int read_and_bump(int *p) { int value; value = *p; p++; return value; } int main(void) { return 0; }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
+fn sizeof_type_slice_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "sizeof_type_slice",
+        source: "int Z_Malloc(int size, int tag, void *user) { return 0; } int main(void) { int *y; y = (int*) Z_Malloc(4 * sizeof(int), 1, 0); return sizeof(int) == 4 ? 0 : 1; }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
+fn post_decrement_condition_slice_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "post_decrement_condition_slice",
+        source: "void run(int ticks) { while (ticks--) { ticks = ticks; } } int main(void) { return 0; }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
+fn address_of_subscript_slice_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "address_of_subscript_slice",
+        source: "int address_of_subscript(int *p, int i) { int *q; q = &p[i]; return 0; } int main(void) { return 0; }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
 fn if_else_comparison_matches_host_c_compiler_exit_code() {
     // given
     if cfg!(windows) || !command_exists("cc") {
