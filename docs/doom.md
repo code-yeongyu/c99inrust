@@ -68,6 +68,9 @@ Unparenthesized numeric scalar global initializers such as `200 - 32` are also
 accepted, and the preprocessor supplies the Doom-era `IPPORT_USERRESERVED`
 constant for `<netinet/in.h>`. Decimal fixed-point global initializers such as
 `(.2*(1<<16))` are folded into integer storage for the `am_map.c` scale slice.
+Unsupported brace-initialized aggregate globals are skipped before supported
+function bodies, so Doom typedef structs such as `cheatseq_t` no longer get
+misclassified as scalar integer globals.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all

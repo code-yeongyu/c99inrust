@@ -1089,3 +1089,71 @@ FAIL p_inter.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After Aggregate Global Recheck
+
+`compile -S` now stops treating brace-initialized aggregate globals as scalar
+integer globals. This covers the top-level `am_map.c` cheat-sequence state:
+
+```text
+static unsigned char cheat_amap_seq[] = { 0xb2, 0x26, 0x26, 0x2e, 0xff };
+static cheatseq_t cheat_amap = { cheat_amap_seq, 0 };
+```
+
+The unsigned byte array still lowers as supported data. The aggregate typedef
+global is skipped before supported function bodies, matching the existing
+translation-unit behavior for unsupported data declarations while still
+rejecting unsupported data-only translation units.
+
+Regression coverage added:
+
+```text
+compiler_skips_aggregate_global_initializer_before_supported_function
+aggregate_global_initializer_slice_matches_host_c_compiler_exit_code
+compiler_rejects_unsupported_data_only_translation_unit
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779108257
+scan=/tmp/c99inrust-doom-scan-1779108257.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779108257.txt
+ok=9
+fail=53
+```
+
+This did not add a new OK translation unit, but it moved `am_map.c` into the
+first supported function body:
+
+```text
+before: FAIL am_map.c
+  error: 7117:32: unsupported global integer initializer
+after: FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+```
+
+The new `am_map.c` blocker is a multi-declarator local declaration:
+
+```text
+void AM_getIslope(mline_t* ml, islope_t* is)
+{
+    int dx, dy;
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+FAIL i_net.c
+  error: 3905:5: expected expression
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL p_inter.c
+  error: unsupported function parameter
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
