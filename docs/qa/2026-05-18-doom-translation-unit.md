@@ -3386,3 +3386,90 @@ FAIL p_plats.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Enum Typedef Parameter Slice
+
+Known enum typedef names are now accepted as scalar function parameter types.
+This moves the `p_*` enum parameter blockers to later function-pointer cast
+assignment forms.
+
+Regression coverage added:
+
+```text
+compiler_accepts_enum_typedef_parameter_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_ceilng.c \
+  -o /tmp/c99inrust-p_ceilng.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_doors.c \
+  -o /tmp/c99inrust-p_doors.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_floor.c \
+  -o /tmp/c99inrust-p_floor.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_plats.c \
+  -o /tmp/c99inrust-p_plats.s
+```
+
+Focused compiles still fail, but now fail after their enum typedef parameter
+blockers.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779139669`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779139669.txt
+ok=21
+fail=41
+```
+
+Representative moved blockers:
+
+```text
+FAIL p_ceilng.c
+  before this slice:
+    error: unsupported function parameter
+  after this slice:
+    error: 6502:47: expected punctuator ;
+
+FAIL p_doors.c
+  before this slice:
+    error: unsupported function parameter
+  after this slice:
+    error: 6804:45: expected punctuator ;
+
+FAIL p_floor.c
+  before this slice:
+    error: unsupported function parameter
+  after this slice:
+    error: 6573:46: expected punctuator ;
+
+FAIL p_plats.c
+  before this slice:
+    error: unsupported function parameter
+  after this slice:
+    error: 6805:45: expected punctuator ;
+
+FAIL p_switch.c
+  before this slice:
+    error: unsupported function parameter
+  after this slice:
+    error: pointer member access requires a typed pointer
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

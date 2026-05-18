@@ -189,6 +189,9 @@ gaps, although the total scan count remains unchanged.
 Enum typedef names introduced by `typedef enum { ... } name;` are also tracked
 as scalar local declaration types, moving local arrays such as
 `dirtype_t d[3]` and several `p_*` enum-parameter blockers to later failures.
+Those enum typedef names are now accepted in function parameter lists as well,
+moving `ceiling_e`, `vldoor_e`, `floor_e`, and related parameters to later
+function-pointer cast assignment blockers.
 
 The current Doom compile scan reaches actual supported function bodies, but 41
 of the 62 C files still fail before object generation. `am_map.c`,
@@ -226,6 +229,9 @@ The former local enum typedef blocker in `p_enemy.c` moved past
 `dirtype_t d[3]`; `p_ceilng.c`, `p_doors.c`, `p_floor.c`, and `p_plats.c`
 now report unsupported function parameters rather than enum typedef parse
 punctuation errors.
+The former enum typedef parameter blockers in those `p_*` files now move to
+later function-pointer cast assignments such as
+`ceiling->thinker.function.acp1 = (actionf_p1)T_MoveCeiling`.
 Many remaining files are blocked by old-style function definitions,
 function-pointer declarations, typed-pointer gaps, and unsupported expression
 forms.
