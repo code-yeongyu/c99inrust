@@ -228,17 +228,24 @@ as `char savegamestrings[10][24]` now decay to row pointers and support nested
 byte subscripts, including string-list initializers. File-scope function
 pointers and function-pointer struct fields are represented as pointer storage.
 This moves `m_menu.c` to assembly generation.
+Prototype-only function declarations now count as known function designators,
+so assignments such as `colfunc = basecolfunc = R_DrawColumn` and
+`colfunc = R_DrawTranslatedColumn` lower to symbol addresses even when the
+function body lives in another translation unit. Typed `ptr +/- integer`
+expressions now lower through scaled pointer-offset IR, including struct
+pointer arithmetic used by `(vissprite_p-1)->next`. This moves `r_main.c` and
+`r_things.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 21
+The current Doom compile scan reaches actual supported function bodies, but 19
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `f_wipe.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`,
 `m_fixed.c`, `m_menu.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`,
 `p_doors.c`, `p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
 `p_maputl.c`, `p_plats.c`, `p_pspr.c`, `p_saveg.c`, `p_sight.c`, `p_spec.c`,
-`p_telept.c`, `p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_plane.c`,
-`r_segs.c`, `r_sky.c`, `st_lib.c`, `tables.c`, and `z_zone.c` currently reach
-assembly generation.
+`p_telept.c`, `p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_main.c`,
+`r_plane.c`, `r_segs.c`, `r_sky.c`, `r_things.c`, `st_lib.c`, `tables.c`, and
+`z_zone.c` currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -285,6 +292,10 @@ The former `m_menu.c` blockers moved past `<fcntl.h>` open flags,
 `savegamestrings[slot][index]` global char-matrix access, file-scope callback
 pointer `messageRoutine`, and `menuitem_t.routine` / `menu_t.routine`
 function-pointer fields.
+The former `r_main.c` and `r_things.c` blockers moved past prototype-only draw
+function designators such as `R_DrawColumn` / `R_DrawTranslatedColumn`, and
+the `r_things.c` sprite sort path now accepts scaled struct-pointer arithmetic
+before `->` member access.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
 char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`
