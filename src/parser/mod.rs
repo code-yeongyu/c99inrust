@@ -1297,14 +1297,11 @@ fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
     for token in tokens {
         match &token.kind {
             TokenKind::Keyword(
-                Keyword::Const
-                | Keyword::Register
-                | Keyword::Restrict
-                | Keyword::Signed
-                | Keyword::Unsigned
-                | Keyword::Volatile,
+                Keyword::Const | Keyword::Register | Keyword::Restrict | Keyword::Volatile,
             ) => {}
-            TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short) => saw_type = true,
+            TokenKind::Keyword(
+                Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Signed | Keyword::Unsigned,
+            ) => saw_type = true,
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
                 long_count += 1;

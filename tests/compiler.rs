@@ -916,6 +916,23 @@ fn compiler_accepts_parameter_list_signatures_when_body_does_not_use_parameters(
 }
 
 #[test]
+fn compiler_accepts_unsigned_parameter_slice() {
+    // given
+    let source = "void R_VideoErase(unsigned ofs, int count) { ofs = ofs + count; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("R_VideoErase:"));
+    assert!(assembly.contains("\taddl %ecx, %eax\n"));
+}
+
+#[test]
 fn compiler_binds_parameters_as_local_slots_on_aarch64() {
     // given
     let source = "int identity(int value) { return value; } int main(void) { return 0; }";
