@@ -371,3 +371,85 @@ cargo audit: PASS, 1 crate scanned
 unsafe/miri: N/A; crate has unsafe_code = "forbid" and #![forbid(unsafe_code)]
 remove-ai-slops scan: PASS for this slice; no debug leftovers, dead code, warning suppressions, or needless behavior-changing cleanup found
 ```
+
+## m_random Globals And Subscripts Slice Recheck
+
+Date: 2026-05-18
+Scope: `src/parser/mod.rs`, `src/ir/mod.rs`, `src/codegen/mod.rs`,
+`tests/compiler.rs`, `tests/clang_oracle.rs`,
+`docs/doom.md`, and `docs/qa/2026-05-18-doom-translation-unit.md`
+
+Commands run locally after adding global `int`, global `unsigned char[]`,
+subscript expressions, and chained assignment support:
+
+```text
+rustup run stable cargo fmt --all -- --check
+rustup run stable cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src/parser/mod.rs src/ir/mod.rs src/codegen/mod.rs tests/compiler.rs tests/clang_oracle.rs
+LSP diagnostics on the five changed Rust files
+rustup run stable cargo test --all-targets --all-features
+cargo nextest run --all-targets --all-features
+cargo machete
+cargo deny check
+cargo audit
+```
+
+Results:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+no-excuse: PASS for 5 files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test: PASS, 56 tests
+nextest: PASS, 56 tests
+cargo machete: PASS, no unused dependencies
+cargo deny: PASS, advisories/bans/licenses/sources ok
+cargo audit: PASS, 1 crate scanned
+unsafe/miri: N/A; crate has unsafe_code = "forbid", #![forbid(unsafe_code)], and unsafe scan returned no hits
+remove-ai-slops scan: PASS for this slice; no debug leftovers, dead code, warning suppressions, unsafe blocks, or speculative abstractions found
+```
+
+Manual tmux QA:
+
+```text
+tmux_session=c99-doom-m-random-qa
+scan=/tmp/c99inrust-doom-compile-scan-after-m-random.txt
+ok=4
+fail=58
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Current local clang performance recheck:
+
+```text
+benchmark_root=/tmp/c99inrust-perf-current-F9yovf
+local_compiler=Apple clang version 21.0.0 (clang-2100.0.123.102)
+
+compile-to-assembly, 100 iterations:
+c99inrust real 1.25 user 0.13 sys 0.20
+clang     real 2.98 user 1.25 sys 1.23
+
+one-command binary build, 50 iterations:
+c99inrust build real 2.52 user 1.86 sys 1.87
+clang           real 2.53 user 1.89 sys 1.82
+
+runtime, 50 runs:
+c99inrust real 2.56 user 1.90 sys 0.12
+clang     real 2.95 user 2.39 sys 0.11
+
+assembly-output metrics:
+c99_lines=47
+clang_lines=68
+c99_instruction_lines=36
+clang_instruction_lines=41
+c99_stack_refs=14
+clang_stack_refs=15
+```
+
+This recheck proves the current synthetic compiler baseline remains ahead of
+local clang's default pipeline on the tracked build-time, runtime, and assembly
+size metrics. It does not prove full playable Doom performance yet.

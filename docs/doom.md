@@ -49,12 +49,15 @@ specifiers such as `fixed_t`, `boolean`, `char`, and `unsigned short` as the
 current integer return ABI, emits signed integer expression slices for
 `long long` casts, function call arguments, and `?:` conditionals, and now
 covers the Doom `FixedDiv2` double-expression slice plus the Linux
-`<values.h>` integer limit macros used by `doomtype.h`. Pointer returns remain
-unsupported.
+`<values.h>` integer limit macros used by `doomtype.h`. It also emits the
+global int and `unsigned char` table slice needed by `m_random.c`, including
+right-associative chained assignment and global byte-array subscripts. Pointer
+returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but two of the 62 C files still fail before object generation. `m_swap.c` and
-`m_fixed.c` currently reach assembly generation. Evidence is recorded in
+but four of the 62 C files still fail before object generation. `m_fixed.c`,
+`m_random.c`, `m_swap.c`, and `r_sky.c` currently reach assembly generation.
+Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
 ## Playability Gate

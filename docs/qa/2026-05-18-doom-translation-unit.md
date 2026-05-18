@@ -466,3 +466,80 @@ FAIL r_sky.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After m_random Globals and Subscripts
+
+The compiler now captures the Doom `m_random.c` global random table and mutable
+indices:
+
+```text
+unsigned char rndtable[256] = { ... };
+int rndindex = 0;
+int prndindex = 0;
+```
+
+The executable subset also accepts global scalar assignments, global byte-array
+subscripts, and the right-associative chained assignment in
+`M_ClearRandom`:
+
+```text
+rndindex = prndindex = 0;
+return rndtable[prndindex];
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_m_random_global_array_slice
+m_random_global_array_slice_matches_host_c_compiler_exit_code
+```
+
+Manual compile QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/DOOM/linuxdoom-1.10 /tmp/DOOM/linuxdoom-1.10/m_random.c -o /tmp/doom-m_random-next.s
+lines=72
+observed=_rndtable,_rndindex,_prndindex,_P_Random,_M_Random,_M_ClearRandom
+observed=ldrb w0, [x16, w0, sxtw]
+```
+
+Cross-target assembly QA:
+
+```text
+target/debug/c99inrust compile -S --target x86_64-unknown-linux-gnu -D NORMALUNIX -D LINUX -I /tmp/DOOM/linuxdoom-1.10 /tmp/DOOM/linuxdoom-1.10/m_random.c -o /tmp/doom-m_random-linux-x86_64.s
+observed=movzbl (%rcx,%rax), %eax
+observed=.section .note.GNU-stack,"",@progbits
+
+target/debug/c99inrust compile -S --target x86_64-apple-darwin -D NORMALUNIX -D LINUX -I /tmp/DOOM/linuxdoom-1.10 /tmp/DOOM/linuxdoom-1.10/m_random.c -o /tmp/doom-m_random-darwin-x86_64.s
+observed=_rndtable(%rip)
+observed=movzbl (%rcx,%rax), %eax
+```
+
+Current tmux compile scan:
+
+```text
+tmux_session=c99-doom-m-random-qa
+scan=/tmp/c99inrust-doom-compile-scan-after-m-random.txt
+ok=4
+fail=58
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+FAIL m_bbox.c
+  error: assignment to subscript targets is not supported yet
+FAIL i_main.c
+  error: assignment to undeclared local or global: myargc
+FAIL p_ceilng.c
+  error: 6350:14: expected punctuator ;
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
