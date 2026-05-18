@@ -147,6 +147,7 @@ impl LoweringContext {
                 then_branch,
                 else_branch,
             } => self.lower_if(condition, then_branch, else_branch.as_deref()),
+            Statement::While { condition, body } => self.lower_while(condition, body),
             Statement::Return(expr) => {
                 let value = self.lower_expr(expr)?;
                 self.instructions.push(Instruction::Return(value));
@@ -189,6 +190,24 @@ impl LoweringContext {
             self.instructions
                 .push(Instruction::Label { label: end_label });
         }
+        Ok(())
+    }
+
+    fn lower_while(&mut self, condition: &Expr, body: &Statement) -> CompileResult<()> {
+        let start_label = self.fresh_label();
+        let end_label = self.fresh_label();
+        self.instructions
+            .push(Instruction::Label { label: start_label });
+        let condition = self.lower_expr(condition)?;
+        self.instructions.push(Instruction::JumpIfZero {
+            condition,
+            label: end_label,
+        });
+        self.lower_branch(body)?;
+        self.instructions
+            .push(Instruction::Jump { label: start_label });
+        self.instructions
+            .push(Instruction::Label { label: end_label });
         Ok(())
     }
 

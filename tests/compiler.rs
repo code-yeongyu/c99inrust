@@ -118,3 +118,35 @@ fn compiler_emits_branches_for_if_else_comparisons() {
         }
     }
 }
+
+#[test]
+fn compiler_emits_back_edges_for_while_loops() {
+    // given
+    let source = "int main(void) { int x = 0; while (x < 5) { x = x + 1; } return x; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("cset w0, lt"));
+            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("b Lmain_"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains("setl %al"));
+            assert!(assembly.contains("je Lmain_"));
+            assert!(assembly.contains("jmp Lmain_"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("setl %al"));
+            assert!(assembly.contains("je .Lmain_"));
+            assert!(assembly.contains("jmp .Lmain_"));
+        }
+    }
+}

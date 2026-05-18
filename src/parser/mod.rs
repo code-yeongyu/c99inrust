@@ -28,6 +28,10 @@ pub enum Statement {
         then_branch: Box<Statement>,
         else_branch: Option<Box<Statement>>,
     },
+    While {
+        condition: Expr,
+        body: Box<Statement>,
+    },
     Return(Expr),
 }
 
@@ -181,6 +185,9 @@ impl Parser<'_> {
         if self.check_keyword(Keyword::If) {
             return self.if_statement();
         }
+        if self.check_keyword(Keyword::While) {
+            return self.while_statement();
+        }
         if self.check_keyword(Keyword::Return) {
             self.advance();
             let expr = self.expression()?;
@@ -224,6 +231,15 @@ impl Parser<'_> {
             then_branch,
             else_branch,
         })
+    }
+
+    fn while_statement(&mut self) -> CompileResult<Statement> {
+        self.expect_keyword(Keyword::While)?;
+        self.expect_punctuator("(")?;
+        let condition = self.expression()?;
+        self.expect_punctuator(")")?;
+        let body = Box::new(self.statement()?);
+        Ok(Statement::While { condition, body })
     }
 
     fn block_items(&mut self) -> CompileResult<Vec<Statement>> {
