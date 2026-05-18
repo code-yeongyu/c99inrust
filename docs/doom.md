@@ -104,6 +104,8 @@ Global pointer arrays such as `byte* ylookup[MAXHEIGHT]` are emitted as
 zero-filled pointer storage and support pointer element loads/stores.
 Global int arrays such as `int columnofs[MAXWIDTH]` are emitted as zero-filled
 integer storage and support int element loads/stores.
+Global int arrays with integer initializer lists are emitted as `.long` data,
+covering Doom tables such as `fuzzoffset`.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -120,7 +122,7 @@ The current `r_draw.c` blocker has moved past `(unsigned)dc_x`, the first
 local char-array string initializers in `R_FillBackScreen`, and the
 `unsigned ofs` parameter in `R_VideoErase`, and the global arrays `ylookup` and
 `columnofs`, and the `lighttable_t* dc_colormap` global. It is now the global
-array `fuzzoffset`.
+pointer array `screens`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
