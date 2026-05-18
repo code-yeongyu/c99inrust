@@ -397,6 +397,41 @@ fn compiler_accepts_parameter_list_signatures_when_body_does_not_use_parameters(
 }
 
 #[test]
+fn compiler_binds_parameters_as_local_slots_on_aarch64() {
+    // given
+    let source = "int identity(int value) { return value; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("_identity:\n\tsub sp, sp, #16\n\tstr w0, [sp, #0]"));
+    assert!(assembly.contains("\tldr w0, [sp, #0]"));
+}
+
+#[test]
+fn compiler_binds_parameters_as_local_slots_on_x86_64() {
+    // given
+    let source = "int identity(int value) { return value; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("identity:\n\tpushq %rbp"));
+    assert!(assembly.contains("\tmovl %edi, -4(%rbp)"));
+    assert!(assembly.contains("\tmovl -4(%rbp), %eax"));
+}
+
+#[test]
 fn compiler_accepts_typedef_return_signatures() {
     // given
     let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return 42; } int main(void) { return 0; }";
