@@ -12,15 +12,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-2025-vs2026]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
+      - uses: actions/checkout@v6
+      - name: Install stable Rust
+        run: rustup toolchain install stable --component clippy --component rustfmt
       - name: Format
-        run: cargo fmt --all -- --check
+        run: rustup run stable cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: rustup run stable cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
-        run: cargo test --all-targets --all-features
+        run: rustup run stable cargo test --all-targets --all-features
