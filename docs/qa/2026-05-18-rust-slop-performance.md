@@ -132,3 +132,39 @@ PASS: c99inrust assembly has fewer total lines, instruction lines, and stack ref
 This file proves the local benchmark performance gate only. It does not prove
 the broader thread goal because full public Doom compile/link/run/play evidence
 is still missing.
+
+## Signature Slice Recheck
+
+Date: 2026-05-18
+Scope: `src/parser/mod.rs`, `src/ir/mod.rs`, `src/codegen/mod.rs`,
+`tests/compiler.rs`, `tests/clang_oracle.rs`
+
+Commands run locally after the Doom signature slice:
+
+```text
+rustup run stable cargo fmt --all -- --check
+rustup run stable cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src/parser/mod.rs src/ir/mod.rs src/codegen/mod.rs tests/compiler.rs tests/clang_oracle.rs
+LSP diagnostics on the five changed Rust files
+rustup run stable cargo test --all-targets --all-features
+cargo nextest run --all-targets --all-features
+cargo machete
+cargo deny check
+cargo audit
+```
+
+Results:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+no-excuse: PASS for 5 files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test: PASS, 36 tests
+nextest: PASS, 36 tests
+cargo machete: PASS, no unused dependencies
+cargo deny: PASS, advisories/bans/licenses/sources ok
+cargo audit: PASS, 1 crate scanned
+unsafe/miri: N/A; crate has unsafe_code = "forbid" and #![forbid(unsafe_code)]
+remove-ai-slops scan: PASS for this slice; no debug leftovers, dead code, warning suppressions, or needless behavior-changing cleanup found
+```
