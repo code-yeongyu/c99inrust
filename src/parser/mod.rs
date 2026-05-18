@@ -20,6 +20,12 @@ pub enum ReturnType {
     Void,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarType {
+    Int,
+    LongLong,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Block(Vec<Self>),
@@ -53,12 +59,22 @@ pub enum Statement {
 pub enum Expr {
     Call {
         callee: String,
+        args: Vec<Self>,
     },
     Identifier(String),
     Integer(i64),
     Unary {
         op: UnaryOp,
         expr: Box<Self>,
+    },
+    Cast {
+        target: ScalarType,
+        expr: Box<Self>,
+    },
+    Conditional {
+        condition: Box<Self>,
+        then_expr: Box<Self>,
+        else_expr: Box<Self>,
     },
     Binary {
         op: BinaryOp,
@@ -438,7 +454,23 @@ impl Parser<'_> {
     }
 
     fn expression(&mut self) -> CompileResult<Expr> {
-        self.logical_or()
+        self.conditional()
+    }
+
+    fn conditional(&mut self) -> CompileResult<Expr> {
+        let condition = self.logical_or()?;
+        if !self.check_punctuator("?") {
+            return Ok(condition);
+        }
+        self.advance();
+        let then_expr = self.expression()?;
+        self.expect_punctuator(":")?;
+        let else_expr = self.conditional()?;
+        Ok(Expr::Conditional {
+            condition: Box::new(condition),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+        })
     }
 
     fn logical_or(&mut self) -> CompileResult<Expr> {
@@ -530,6 +562,13 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> CompileResult<Expr> {
+        if let Some((target, next_index)) = self.cast_type_at_current() {
+            self.index = next_index;
+            return Ok(Expr::Cast {
+                target,
+                expr: Box::new(self.unary()?),
+            });
+        }
         let op = if self.check_punctuator("+") {
             Some(UnaryOp::Plus)
         } else if self.check_punctuator("-") {
@@ -551,6 +590,19 @@ impl Parser<'_> {
         self.primary()
     }
 
+    fn cast_type_at_current(&self) -> Option<(ScalarType, usize)> {
+        if !self.check_punctuator("(") {
+            return None;
+        }
+        let start = self.index + 1;
+        let close = self.tokens[start..]
+            .iter()
+            .position(|token| token_is_punctuator(token, ")"))?
+            + start;
+        let target = supported_cast_type(&self.tokens[start..close])?;
+        Some((target, close + 1))
+    }
+
     fn primary(&mut self) -> CompileResult<Expr> {
         if let Some(token) = self.peek() {
             match &token.kind {
@@ -563,9 +615,10 @@ impl Parser<'_> {
                     let value = value.clone();
                     self.advance();
                     if self.check_punctuator("(") {
-                        self.advance();
-                        self.expect_punctuator(")")?;
-                        return Ok(Expr::Call { callee: value });
+                        return Ok(Expr::Call {
+                            callee: value,
+                            args: self.call_arguments()?,
+                        });
                     }
                     Ok(Expr::Identifier(value))
                 }
@@ -579,6 +632,23 @@ impl Parser<'_> {
             }
         } else {
             Err(CompileError::new("unexpected end of token stream"))
+        }
+    }
+
+    fn call_arguments(&mut self) -> CompileResult<Vec<Expr>> {
+        self.expect_punctuator("(")?;
+        let mut args = Vec::new();
+        if self.check_punctuator(")") {
+            self.advance();
+            return Ok(args);
+        }
+        loop {
+            args.push(self.expression()?);
+            if self.check_punctuator(")") {
+                self.advance();
+                return Ok(args);
+            }
+            self.expect_punctuator(",")?;
         }
     }
 
@@ -951,6 +1021,46 @@ fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
         (true, false) => Some(ReturnType::Void),
         (false, true) => Some(ReturnType::Int),
         (true, true) | (false, false) => None,
+    }
+}
+
+fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut saw_type = false;
+    let mut saw_unsigned = false;
+    let mut long_count = 0usize;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(
+                Keyword::Const | Keyword::Restrict | Keyword::Signed | Keyword::Volatile,
+            ) => {}
+            TokenKind::Keyword(Keyword::Int) => saw_type = true,
+            TokenKind::Keyword(Keyword::Long) => {
+                saw_type = true;
+                long_count += 1;
+            }
+            TokenKind::Keyword(Keyword::Unsigned) => {
+                saw_type = true;
+                saw_unsigned = true;
+            }
+            TokenKind::Identifier(_)
+            | TokenKind::Integer(_)
+            | TokenKind::StringLiteral(_)
+            | TokenKind::CharLiteral(_)
+            | TokenKind::Punctuator(_)
+            | TokenKind::End
+            | TokenKind::Keyword(_) => return None,
+        }
+    }
+    if !saw_type || saw_unsigned {
+        return None;
+    }
+    if long_count == 0 {
+        Some(ScalarType::Int)
+    } else {
+        Some(ScalarType::LongLong)
     }
 }
 

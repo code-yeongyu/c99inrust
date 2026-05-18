@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, Function, Program, ReturnType, Statement, UnaryOp};
+use crate::parser::{
+    BinaryOp, Expr, Function, Program, ReturnType, ScalarType, Statement, UnaryOp,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredProgram {
@@ -40,12 +42,22 @@ pub enum Instruction {
 pub enum LoweredExpr {
     Call {
         callee: String,
+        args: Vec<Self>,
     },
     Integer(i64),
     Local(usize),
     Unary {
         op: UnaryOp,
         expr: Box<Self>,
+    },
+    Cast {
+        target: ScalarType,
+        expr: Box<Self>,
+    },
+    Conditional {
+        condition: Box<Self>,
+        then_expr: Box<Self>,
+        else_expr: Box<Self>,
     },
     Binary {
         op: BinaryOp,
@@ -78,7 +90,7 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
 /// checked integer model.
 pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
     match expr {
-        Expr::Call { callee } => Err(CompileError::new(format!(
+        Expr::Call { callee, .. } => Err(CompileError::new(format!(
             "call to {callee} is not a constant expression"
         ))),
         Expr::Identifier(name) => Err(CompileError::new(format!(
@@ -94,6 +106,21 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
                     .ok_or_else(|| CompileError::new("integer overflow in unary minus")),
                 UnaryOp::BitNot => Ok(!value),
                 UnaryOp::LogicalNot => Ok(i64::from(value == 0)),
+            }
+        }
+        Expr::Cast { target, expr } => {
+            let value = const_eval(expr)?;
+            cast_const_value(*target, value)
+        }
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            if const_eval(condition)? == 0 {
+                const_eval(else_expr)
+            } else {
+                const_eval(then_expr)
             }
         }
         Expr::Binary { op, left, right } => {
@@ -355,8 +382,12 @@ impl LoweringContext {
 
     fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
         match expr {
-            Expr::Call { callee } => Ok(LoweredExpr::Call {
+            Expr::Call { callee, args } => Ok(LoweredExpr::Call {
                 callee: callee.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg))
+                    .collect::<CompileResult<Vec<_>>>()?,
             }),
             Expr::Identifier(name) => {
                 let Some(slot) = self.local_slot(name) else {
@@ -369,12 +400,34 @@ impl LoweringContext {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
             }),
+            Expr::Cast { target, expr } => Ok(LoweredExpr::Cast {
+                target: *target,
+                expr: Box::new(self.lower_expr(expr)?),
+            }),
+            Expr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+            } => Ok(LoweredExpr::Conditional {
+                condition: Box::new(self.lower_expr(condition)?),
+                then_expr: Box::new(self.lower_expr(then_expr)?),
+                else_expr: Box::new(self.lower_expr(else_expr)?),
+            }),
             Expr::Binary { op, left, right } => Ok(LoweredExpr::Binary {
                 op: *op,
                 left: Box::new(self.lower_expr(left)?),
                 right: Box::new(self.lower_expr(right)?),
             }),
         }
+    }
+}
+
+fn cast_const_value(target: ScalarType, value: i64) -> CompileResult<i64> {
+    match target {
+        ScalarType::Int => i32::try_from(value)
+            .map(i64::from)
+            .map_err(|_| CompileError::new("integer cast result does not fit i32")),
+        ScalarType::LongLong => Ok(value),
     }
 }
 
@@ -463,12 +516,29 @@ fn inline_constant_calls_in_instruction(
 
 fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<String, i64>) {
     match expr {
-        LoweredExpr::Call { callee } => {
-            if let Some(value) = constants.get(callee) {
+        LoweredExpr::Call { callee, args } => {
+            if args.is_empty()
+                && let Some(value) = constants.get(callee)
+            {
                 *expr = LoweredExpr::Integer(*value);
+            } else {
+                for arg in args {
+                    inline_constant_calls_in_expr(arg, constants);
+                }
             }
         }
-        LoweredExpr::Unary { expr, .. } => inline_constant_calls_in_expr(expr, constants),
+        LoweredExpr::Unary { expr, .. } | LoweredExpr::Cast { expr, .. } => {
+            inline_constant_calls_in_expr(expr, constants);
+        }
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            inline_constant_calls_in_expr(condition, constants);
+            inline_constant_calls_in_expr(then_expr, constants);
+            inline_constant_calls_in_expr(else_expr, constants);
+        }
         LoweredExpr::Binary { left, right, .. } => {
             inline_constant_calls_in_expr(left, constants);
             inline_constant_calls_in_expr(right, constants);

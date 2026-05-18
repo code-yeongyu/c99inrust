@@ -253,6 +253,76 @@ fn compiler_emits_zero_arg_function_calls() {
 }
 
 #[test]
+fn compiler_emits_integer_function_call_arguments() {
+    // given
+    let source = "int add(int left, int right) { return left + right; } int main(int argc, char **argv) { return add(argc, 41); }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("\tldr w0, [sp, #0]\n"));
+            assert!(assembly.contains("\tmovz w0, #41\n"));
+            assert!(assembly.contains("\tldr w0, [sp, #8]\n"));
+            assert!(assembly.contains("\tldr w1, [sp, #16]\n"));
+            assert!(assembly.contains("\tbl _add\n"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains("\tmovl -4(%rbp), %eax\n"));
+            assert!(assembly.contains("\tmovl $41, %eax\n"));
+            assert!(assembly.contains("\tmovl -12(%rbp), %edi\n"));
+            assert!(assembly.contains("\tmovl -20(%rbp), %esi\n"));
+            assert!(assembly.contains("\tcall _add\n"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("\tmovl -4(%rbp), %eax\n"));
+            assert!(assembly.contains("\tmovl $41, %eax\n"));
+            assert!(assembly.contains("\tmovl -12(%rbp), %edi\n"));
+            assert!(assembly.contains("\tmovl -20(%rbp), %esi\n"));
+            assert!(assembly.contains("\tcall add\n"));
+        }
+    }
+}
+
+#[test]
+fn compiler_emits_conditional_expression_branches() {
+    // given
+    let source = "int main(int argc, char **argv) { return argc < 0 ? 2 : 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("\tb.eq Lmain_"));
+            assert!(assembly.contains("\tmovz w0, #2\n"));
+            assert!(assembly.contains("\tmovz w0, #42\n"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains("\tje Lmain_"));
+            assert!(assembly.contains("\tmovl $2, %eax\n"));
+            assert!(assembly.contains("\tmovl $42, %eax\n"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("\tje .Lmain_"));
+            assert!(assembly.contains("\tmovl $2, %eax\n"));
+            assert!(assembly.contains("\tmovl $42, %eax\n"));
+        }
+    }
+}
+
+#[test]
 fn aarch64_keeps_binary_left_operand_in_preserved_register_across_direct_call() {
     // given
     let source = "int answer(void) { int value = 40; return value; } int main(void) { return 2 + answer(); }";
@@ -429,6 +499,35 @@ fn compiler_binds_parameters_as_local_slots_on_x86_64() {
     assert!(assembly.contains("identity:\n\tpushq %rbp"));
     assert!(assembly.contains("\tmovl %edi, -4(%rbp)"));
     assert!(assembly.contains("\tmovl -4(%rbp), %eax"));
+}
+
+#[test]
+fn compiler_emits_signed_long_long_cast_intermediates() {
+    // given
+    let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return ((long long) a * (long long) b) >> 16; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("_FixedMul:\n"));
+            assert!(assembly.contains("\tsxtw x0, w0\n"));
+            assert!(assembly.contains("\tmul x0, x0, x1\n"));
+            assert!(assembly.contains("\tasr x0, x0, x1\n"));
+        }
+        Target::X86_64AppleDarwin | Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("FixedMul:\n") || assembly.contains("_FixedMul:\n"));
+            assert!(assembly.contains("\tmovslq -4(%rbp), %rax\n"));
+            assert!(assembly.contains("\timulq %rcx, %rax\n"));
+            assert!(assembly.contains("\tsarq %cl, %rax\n"));
+        }
+    }
 }
 
 #[test]

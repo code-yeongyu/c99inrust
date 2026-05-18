@@ -2,7 +2,7 @@ use std::fmt::{self, Write as _};
 
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::{Instruction, LoweredExpr, LoweredFunction, LoweredProgram};
-use crate::parser::{BinaryOp, UnaryOp};
+use crate::parser::{BinaryOp, ScalarType, UnaryOp};
 
 macro_rules! write_assembly {
     ($assembly:expr, $($argument:tt)*) => {
@@ -15,6 +15,81 @@ pub enum Target {
     Aarch64AppleDarwin,
     X86_64AppleDarwin,
     X86_64UnknownLinuxGnu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ValueWidth {
+    I32,
+    I64,
+}
+
+const TEMPORARY_BYTES: usize = 8;
+
+#[derive(Clone, Copy)]
+struct BinaryExpr<'a> {
+    op: BinaryOp,
+    left: &'a LoweredExpr,
+    right: &'a LoweredExpr,
+}
+
+#[derive(Clone, Copy)]
+struct ConditionalExpr<'a> {
+    condition: &'a LoweredExpr,
+    then_expr: &'a LoweredExpr,
+    else_expr: &'a LoweredExpr,
+}
+
+const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
+    match scalar_type {
+        ScalarType::Int => ValueWidth::I32,
+        ScalarType::LongLong => ValueWidth::I64,
+    }
+}
+
+fn expr_width(expr: &LoweredExpr) -> ValueWidth {
+    match expr {
+        LoweredExpr::Cast { target, .. } => scalar_width(*target),
+        LoweredExpr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => expr_width(then_expr).max(expr_width(else_expr)),
+        LoweredExpr::Binary { op, left, right } => binary_result_width(*op, left, right),
+        LoweredExpr::Call { .. }
+        | LoweredExpr::Integer(_)
+        | LoweredExpr::Local(_)
+        | LoweredExpr::Unary { .. } => ValueWidth::I32,
+    }
+}
+
+fn binary_result_width(op: BinaryOp, left: &LoweredExpr, right: &LoweredExpr) -> ValueWidth {
+    if binary_returns_i32(op) {
+        ValueWidth::I32
+    } else {
+        binary_operand_width(op, left, right)
+    }
+}
+
+fn binary_operand_width(op: BinaryOp, left: &LoweredExpr, right: &LoweredExpr) -> ValueWidth {
+    if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
+        ValueWidth::I32
+    } else {
+        expr_width(left).max(expr_width(right))
+    }
+}
+
+const fn binary_returns_i32(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Less
+            | BinaryOp::LessEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEqual
+            | BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::LogicalAnd
+            | BinaryOp::LogicalOr
+    )
 }
 
 impl Target {
@@ -204,6 +279,7 @@ impl Aarch64Frame {
             .max()
             .unwrap_or(0);
         let local_bytes = function.local_count * 4;
+        let temporary_base = align_to(local_bytes, TEMPORARY_BYTES);
         let call_frame_bytes = if function_uses_call(function) { 8 } else { 0 };
         let preserved_temp_bytes = if function_uses_aarch64_preserved_temp(function) {
             8
@@ -211,11 +287,14 @@ impl Aarch64Frame {
             0
         };
         let stack_bytes = align_to(
-            local_bytes + (temporary_count * 4) + call_frame_bytes + preserved_temp_bytes,
+            temporary_base
+                + (temporary_count * TEMPORARY_BYTES)
+                + call_frame_bytes
+                + preserved_temp_bytes,
             16,
         );
         Self {
-            temporary_base: local_bytes,
+            temporary_base,
             stack_bytes,
             link_register_offset: (call_frame_bytes > 0).then(|| stack_bytes - 8),
             preserved_temp_offset: (preserved_temp_bytes > 0)
@@ -267,8 +346,8 @@ fn emit_x86_64_function(
         .max()
         .unwrap_or(0);
     let local_bytes = function.local_count * 4;
-    let temporary_base = local_bytes;
-    let stack_bytes = align_to(local_bytes + (temporary_count * 4), 16);
+    let temporary_base = align_to(local_bytes, TEMPORARY_BYTES);
+    let stack_bytes = align_to(temporary_base + (temporary_count * TEMPORARY_BYTES), 16);
     let mut labels = LabelAllocator::new(function, target);
     write_assembly!(assembly, ".globl {label}\n")?;
     write_assembly!(assembly, "{label}:\n")?;
@@ -362,10 +441,40 @@ fn emit_aarch64_expr(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    emit_aarch64_expr_with_width(
+        expr,
+        expr_width(expr),
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )
+}
+
+fn emit_aarch64_expr_with_width(
+    expr: &LoweredExpr,
+    target_width: ValueWidth,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let natural_width = expr_width(expr);
+    emit_aarch64_expr_natural(expr, temporary_base, depth, labels, assembly)?;
+    emit_aarch64_width_adjustment(natural_width, target_width, assembly);
+    Ok(())
+}
+
+fn emit_aarch64_expr_natural(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
     match expr {
-        LoweredExpr::Call { callee } => {
-            write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))?;
-            Ok(())
+        LoweredExpr::Call { callee, args } => {
+            emit_aarch64_call(callee, args, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::Integer(value) => emit_aarch64_i32_to_register(*value, "w0", assembly),
         LoweredExpr::Local(slot) => {
@@ -385,64 +494,295 @@ fn emit_aarch64_expr(
             }
             Ok(())
         }
-        LoweredExpr::Binary { op, left, right } => {
-            if *op == BinaryOp::LogicalAnd {
-                return emit_aarch64_logical_and(
-                    left,
-                    right,
-                    temporary_base,
-                    depth,
-                    labels,
-                    assembly,
-                );
-            }
-            if *op == BinaryOp::LogicalOr {
-                return emit_aarch64_logical_or(
-                    left,
-                    right,
-                    temporary_base,
-                    depth,
-                    labels,
-                    assembly,
-                );
-            }
-            let temporary_offset = temporary_base + (depth * 4);
-            emit_aarch64_expr(left, temporary_base, depth + 1, labels, assembly)?;
-            if expr_is_direct_call(right) {
-                assembly.push_str("\tmov w19, w0\n");
-                emit_aarch64_expr(right, temporary_base, depth + 1, labels, assembly)?;
-                assembly.push_str("\tmov w1, w0\n");
-                assembly.push_str("\tmov w0, w19\n");
-            } else {
-                write_assembly!(assembly, "\tstr w0, [sp, #{temporary_offset}]\n")?;
-                emit_aarch64_expr(right, temporary_base, depth + 1, labels, assembly)?;
-                assembly.push_str("\tmov w1, w0\n");
-                write_assembly!(assembly, "\tldr w0, [sp, #{temporary_offset}]\n")?;
-            }
-            match op {
-                BinaryOp::Mul => assembly.push_str("\tmul w0, w0, w1\n"),
-                BinaryOp::Div => assembly.push_str("\tsdiv w0, w0, w1\n"),
-                BinaryOp::Mod => {
-                    assembly.push_str("\tsdiv w2, w0, w1\n");
-                    assembly.push_str("\tmsub w0, w2, w1, w0\n");
-                }
-                BinaryOp::Add => assembly.push_str("\tadd w0, w0, w1\n"),
-                BinaryOp::Sub => assembly.push_str("\tsub w0, w0, w1\n"),
-                BinaryOp::ShiftLeft => assembly.push_str("\tlsl w0, w0, w1\n"),
-                BinaryOp::ShiftRight => assembly.push_str("\tasr w0, w0, w1\n"),
-                BinaryOp::Less => emit_aarch64_comparison("lt", assembly)?,
-                BinaryOp::LessEqual => emit_aarch64_comparison("le", assembly)?,
-                BinaryOp::Greater => emit_aarch64_comparison("gt", assembly)?,
-                BinaryOp::GreaterEqual => emit_aarch64_comparison("ge", assembly)?,
-                BinaryOp::Equal => emit_aarch64_comparison("eq", assembly)?,
-                BinaryOp::NotEqual => emit_aarch64_comparison("ne", assembly)?,
-                BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {}
-                BinaryOp::BitAnd => assembly.push_str("\tand w0, w0, w1\n"),
-                BinaryOp::BitXor => assembly.push_str("\teor w0, w0, w1\n"),
-                BinaryOp::BitOr => assembly.push_str("\torr w0, w0, w1\n"),
-            }
-            Ok(())
+        LoweredExpr::Cast { target, expr } => emit_aarch64_expr_with_width(
+            expr,
+            scalar_width(*target),
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => emit_aarch64_conditional(
+            ConditionalExpr {
+                condition,
+                then_expr,
+                else_expr,
+            },
+            expr_width(expr),
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Binary { op, left, right } => emit_aarch64_binary_expr(
+            BinaryExpr {
+                op: *op,
+                left,
+                right,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_aarch64_binary_expr(
+    binary: BinaryExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if binary.op == BinaryOp::LogicalAnd {
+        return emit_aarch64_logical_and(
+            binary.left,
+            binary.right,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        );
+    }
+    if binary.op == BinaryOp::LogicalOr {
+        return emit_aarch64_logical_or(
+            binary.left,
+            binary.right,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        );
+    }
+    let operand_width = binary_operand_width(binary.op, binary.left, binary.right);
+    let temporary_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    emit_aarch64_expr_with_width(
+        binary.left,
+        operand_width,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    if expr_is_direct_call(binary.right) {
+        emit_aarch64_move_result_to_register("19", operand_width, assembly)?;
+        emit_aarch64_expr_with_width(
+            binary.right,
+            operand_width,
+            temporary_base,
+            depth + 1,
+            labels,
+            assembly,
+        )?;
+        emit_aarch64_move_result_to_register("1", operand_width, assembly)?;
+        emit_aarch64_move_register_to_result("19", operand_width, assembly)?;
+    } else {
+        emit_aarch64_store_temporary(operand_width, temporary_offset, assembly)?;
+        emit_aarch64_expr_with_width(
+            binary.right,
+            operand_width,
+            temporary_base,
+            depth + 1,
+            labels,
+            assembly,
+        )?;
+        emit_aarch64_move_result_to_register("1", operand_width, assembly)?;
+        emit_aarch64_load_temporary(operand_width, temporary_offset, assembly)?;
+    }
+    emit_aarch64_binary_op(binary.op, operand_width, assembly)?;
+    Ok(())
+}
+
+fn emit_aarch64_width_adjustment(
+    actual_width: ValueWidth,
+    target_width: ValueWidth,
+    assembly: &mut String,
+) {
+    if actual_width == ValueWidth::I32 && target_width == ValueWidth::I64 {
+        assembly.push_str("\tsxtw x0, w0\n");
+    }
+}
+
+fn emit_aarch64_call(
+    callee: &str,
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const REGISTERS: [&str; 8] = ["0", "1", "2", "3", "4", "5", "6", "7"];
+    let Some(registers) = REGISTERS.get(..args.len()) else {
+        return Err(CompileError::new("too many function call arguments"));
+    };
+    let arg_depth = depth + args.len();
+    for (index, arg) in args.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        emit_aarch64_expr_with_width(
+            arg,
+            ValueWidth::I32,
+            temporary_base,
+            arg_depth,
+            labels,
+            assembly,
+        )?;
+        emit_aarch64_store_temporary(ValueWidth::I32, offset, assembly)?;
+    }
+    for (index, register) in registers.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        emit_aarch64_load_temporary_to_register(ValueWidth::I32, offset, register, assembly)?;
+    }
+    write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))
+}
+
+fn emit_aarch64_conditional(
+    expr: ConditionalExpr<'_>,
+    result_width: ValueWidth,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let else_label = labels.fresh();
+    let end_label = labels.fresh();
+    emit_aarch64_expr(expr.condition, temporary_base, depth, labels, assembly)?;
+    emit_aarch64_compare_result_to_zero(expr_width(expr.condition), assembly)?;
+    write_assembly!(assembly, "\tb.eq {else_label}\n")?;
+    emit_aarch64_expr_with_width(
+        expr.then_expr,
+        result_width,
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tb {end_label}\n")?;
+    write_assembly!(assembly, "{else_label}:\n")?;
+    emit_aarch64_expr_with_width(
+        expr.else_expr,
+        result_width,
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "{end_label}:\n")?;
+    Ok(())
+}
+
+fn emit_aarch64_move_result_to_register(
+    register: &str,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let prefix = aarch64_register_prefix(width);
+    write_assembly!(assembly, "\tmov {prefix}{register}, {prefix}0\n")
+}
+
+fn emit_aarch64_move_register_to_result(
+    register: &str,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let prefix = aarch64_register_prefix(width);
+    write_assembly!(assembly, "\tmov {prefix}0, {prefix}{register}\n")
+}
+
+fn emit_aarch64_store_temporary(
+    width: ValueWidth,
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let register = aarch64_result_register(width);
+    write_assembly!(assembly, "\tstr {register}, [sp, #{offset}]\n")
+}
+
+fn emit_aarch64_load_temporary(
+    width: ValueWidth,
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let register = aarch64_result_register(width);
+    write_assembly!(assembly, "\tldr {register}, [sp, #{offset}]\n")
+}
+
+fn emit_aarch64_load_temporary_to_register(
+    width: ValueWidth,
+    offset: usize,
+    register: &str,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let prefix = aarch64_register_prefix(width);
+    write_assembly!(assembly, "\tldr {prefix}{register}, [sp, #{offset}]\n")
+}
+
+fn emit_aarch64_compare_result_to_zero(
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let register = aarch64_result_register(width);
+    write_assembly!(assembly, "\tcmp {register}, #0\n")
+}
+
+fn emit_aarch64_binary_op(
+    op: BinaryOp,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match (op, width) {
+        (BinaryOp::Mul, ValueWidth::I32) => assembly.push_str("\tmul w0, w0, w1\n"),
+        (BinaryOp::Mul, ValueWidth::I64) => assembly.push_str("\tmul x0, x0, x1\n"),
+        (BinaryOp::Div, ValueWidth::I32) => assembly.push_str("\tsdiv w0, w0, w1\n"),
+        (BinaryOp::Div, ValueWidth::I64) => assembly.push_str("\tsdiv x0, x0, x1\n"),
+        (BinaryOp::Mod, ValueWidth::I32) => {
+            assembly.push_str("\tsdiv w2, w0, w1\n");
+            assembly.push_str("\tmsub w0, w2, w1, w0\n");
         }
+        (BinaryOp::Mod, ValueWidth::I64) => {
+            assembly.push_str("\tsdiv x2, x0, x1\n");
+            assembly.push_str("\tmsub x0, x2, x1, x0\n");
+        }
+        (BinaryOp::Add, ValueWidth::I32) => assembly.push_str("\tadd w0, w0, w1\n"),
+        (BinaryOp::Add, ValueWidth::I64) => assembly.push_str("\tadd x0, x0, x1\n"),
+        (BinaryOp::Sub, ValueWidth::I32) => assembly.push_str("\tsub w0, w0, w1\n"),
+        (BinaryOp::Sub, ValueWidth::I64) => assembly.push_str("\tsub x0, x0, x1\n"),
+        (BinaryOp::ShiftLeft, ValueWidth::I32) => assembly.push_str("\tlsl w0, w0, w1\n"),
+        (BinaryOp::ShiftLeft, ValueWidth::I64) => assembly.push_str("\tlsl x0, x0, x1\n"),
+        (BinaryOp::ShiftRight, ValueWidth::I32) => assembly.push_str("\tasr w0, w0, w1\n"),
+        (BinaryOp::ShiftRight, ValueWidth::I64) => assembly.push_str("\tasr x0, x0, x1\n"),
+        (BinaryOp::Less, _) => emit_aarch64_comparison("lt", width, assembly)?,
+        (BinaryOp::LessEqual, _) => emit_aarch64_comparison("le", width, assembly)?,
+        (BinaryOp::Greater, _) => emit_aarch64_comparison("gt", width, assembly)?,
+        (BinaryOp::GreaterEqual, _) => emit_aarch64_comparison("ge", width, assembly)?,
+        (BinaryOp::Equal, _) => emit_aarch64_comparison("eq", width, assembly)?,
+        (BinaryOp::NotEqual, _) => emit_aarch64_comparison("ne", width, assembly)?,
+        (BinaryOp::BitAnd, ValueWidth::I32) => assembly.push_str("\tand w0, w0, w1\n"),
+        (BinaryOp::BitAnd, ValueWidth::I64) => assembly.push_str("\tand x0, x0, x1\n"),
+        (BinaryOp::BitXor, ValueWidth::I32) => assembly.push_str("\teor w0, w0, w1\n"),
+        (BinaryOp::BitXor, ValueWidth::I64) => assembly.push_str("\teor x0, x0, x1\n"),
+        (BinaryOp::BitOr, ValueWidth::I32) => assembly.push_str("\torr w0, w0, w1\n"),
+        (BinaryOp::BitOr, ValueWidth::I64) => assembly.push_str("\torr x0, x0, x1\n"),
+        (BinaryOp::LogicalAnd | BinaryOp::LogicalOr, _) => {}
+    }
+    Ok(())
+}
+
+const fn aarch64_register_prefix(width: ValueWidth) -> &'static str {
+    match width {
+        ValueWidth::I32 => "w",
+        ValueWidth::I64 => "x",
+    }
+}
+
+const fn aarch64_result_register(width: ValueWidth) -> &'static str {
+    match width {
+        ValueWidth::I32 => "w0",
+        ValueWidth::I64 => "x0",
     }
 }
 
@@ -529,16 +869,14 @@ fn emit_aarch64_compare(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    emit_aarch64_expr(left, temporary_base, 1, labels, assembly)?;
-    if let LoweredExpr::Integer(value) = right {
-        emit_aarch64_i32_to_register(*value, "w1", assembly)?;
-    } else {
-        write_assembly!(assembly, "\tstr w0, [sp, #{temporary_base}]\n")?;
-        emit_aarch64_expr(right, temporary_base, 1, labels, assembly)?;
-        assembly.push_str("\tmov w1, w0\n");
-        write_assembly!(assembly, "\tldr w0, [sp, #{temporary_base}]\n")?;
-    }
-    assembly.push_str("\tcmp w0, w1\n");
+    let width = expr_width(left).max(expr_width(right));
+    emit_aarch64_expr_with_width(left, width, temporary_base, 1, labels, assembly)?;
+    emit_aarch64_store_temporary(width, temporary_base, assembly)?;
+    emit_aarch64_expr_with_width(right, width, temporary_base, 1, labels, assembly)?;
+    emit_aarch64_move_result_to_register("1", width, assembly)?;
+    emit_aarch64_load_temporary(width, temporary_base, assembly)?;
+    let prefix = aarch64_register_prefix(width);
+    write_assembly!(assembly, "\tcmp {prefix}0, {prefix}1\n")?;
     Ok(())
 }
 
@@ -550,11 +888,50 @@ fn emit_x86_64_expr(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    emit_x86_64_expr_with_width(
+        expr,
+        expr_width(expr),
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )
+}
+
+fn emit_x86_64_expr_with_width(
+    expr: &LoweredExpr,
+    target_width: ValueWidth,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let natural_width = expr_width(expr);
+    emit_x86_64_expr_natural(expr, temporary_base, depth, target, labels, assembly)?;
+    emit_x86_64_width_adjustment(natural_width, target_width, assembly);
+    Ok(())
+}
+
+fn emit_x86_64_expr_natural(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
     match expr {
-        LoweredExpr::Call { callee } => {
-            write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))?;
-            Ok(())
-        }
+        LoweredExpr::Call { callee, args } => emit_x86_64_call(
+            callee,
+            args,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
         LoweredExpr::Integer(value) => {
             let value = i32::try_from(*value)
                 .map_err(|_| CompileError::new("integer literal does not fit i32"))?;
@@ -579,71 +956,314 @@ fn emit_x86_64_expr(
             }
             Ok(())
         }
-        LoweredExpr::Binary { op, left, right } => {
-            if *op == BinaryOp::LogicalAnd {
-                return emit_x86_64_logical_and(
-                    left,
-                    right,
-                    temporary_base,
-                    depth,
-                    target,
-                    labels,
-                    assembly,
-                );
-            }
-            if *op == BinaryOp::LogicalOr {
-                return emit_x86_64_logical_or(
-                    left,
-                    right,
-                    temporary_base,
-                    depth,
-                    target,
-                    labels,
-                    assembly,
-                );
-            }
-            let temporary_offset = temporary_base + (depth * 4);
-            emit_x86_64_expr(left, temporary_base, depth + 1, target, labels, assembly)?;
-            write_assembly!(
-                assembly,
-                "\tmovl %eax, {}(%rbp)\n",
-                x86_stack_offset(temporary_offset)
-            )?;
-            emit_x86_64_expr(right, temporary_base, depth + 1, target, labels, assembly)?;
-            assembly.push_str("\tmovl %eax, %ecx\n");
-            write_assembly!(
-                assembly,
-                "\tmovl {}(%rbp), %eax\n",
-                x86_stack_offset(temporary_offset)
-            )?;
-            match op {
-                BinaryOp::Mul => assembly.push_str("\timull %ecx, %eax\n"),
-                BinaryOp::Div => {
-                    assembly.push_str("\tcltd\n");
-                    assembly.push_str("\tidivl %ecx\n");
-                }
-                BinaryOp::Mod => {
-                    assembly.push_str("\tcltd\n");
-                    assembly.push_str("\tidivl %ecx\n");
-                    assembly.push_str("\tmovl %edx, %eax\n");
-                }
-                BinaryOp::Add => assembly.push_str("\taddl %ecx, %eax\n"),
-                BinaryOp::Sub => assembly.push_str("\tsubl %ecx, %eax\n"),
-                BinaryOp::ShiftLeft => assembly.push_str("\tsall %cl, %eax\n"),
-                BinaryOp::ShiftRight => assembly.push_str("\tsarl %cl, %eax\n"),
-                BinaryOp::Less => emit_x86_64_comparison("setl", assembly)?,
-                BinaryOp::LessEqual => emit_x86_64_comparison("setle", assembly)?,
-                BinaryOp::Greater => emit_x86_64_comparison("setg", assembly)?,
-                BinaryOp::GreaterEqual => emit_x86_64_comparison("setge", assembly)?,
-                BinaryOp::Equal => emit_x86_64_comparison("sete", assembly)?,
-                BinaryOp::NotEqual => emit_x86_64_comparison("setne", assembly)?,
-                BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {}
-                BinaryOp::BitAnd => assembly.push_str("\tandl %ecx, %eax\n"),
-                BinaryOp::BitXor => assembly.push_str("\txorl %ecx, %eax\n"),
-                BinaryOp::BitOr => assembly.push_str("\torl %ecx, %eax\n"),
-            }
-            Ok(())
+        LoweredExpr::Cast {
+            target: scalar_type,
+            expr,
+        } => emit_x86_64_expr_with_width(
+            expr,
+            scalar_width(*scalar_type),
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => emit_x86_64_conditional(
+            ConditionalExpr {
+                condition,
+                then_expr,
+                else_expr,
+            },
+            expr_width(expr),
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Binary { op, left, right } => emit_x86_64_binary_expr(
+            BinaryExpr {
+                op: *op,
+                left,
+                right,
+            },
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_x86_64_binary_expr(
+    binary: BinaryExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if binary.op == BinaryOp::LogicalAnd {
+        return emit_x86_64_logical_and(
+            binary.left,
+            binary.right,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        );
+    }
+    if binary.op == BinaryOp::LogicalOr {
+        return emit_x86_64_logical_or(
+            binary.left,
+            binary.right,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        );
+    }
+    let operand_width = binary_operand_width(binary.op, binary.left, binary.right);
+    let temporary_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    emit_x86_64_expr_with_width(
+        binary.left,
+        operand_width,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(operand_width, temporary_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        binary.right,
+        operand_width,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_move_result_to_rhs(operand_width, assembly);
+    emit_x86_64_load_temporary(operand_width, temporary_offset, assembly)?;
+    emit_x86_64_binary_op(binary.op, operand_width, assembly)?;
+    Ok(())
+}
+
+fn emit_x86_64_width_adjustment(
+    actual_width: ValueWidth,
+    target_width: ValueWidth,
+    assembly: &mut String,
+) {
+    if actual_width == ValueWidth::I32 && target_width == ValueWidth::I64 {
+        assembly.push_str("\tcltq\n");
+    }
+}
+
+fn emit_x86_64_call(
+    callee: &str,
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const REGISTERS: [&str; 6] = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
+    let Some(registers) = REGISTERS.get(..args.len()) else {
+        return Err(CompileError::new("too many function call arguments"));
+    };
+    let arg_depth = depth + args.len();
+    for (index, arg) in args.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        emit_x86_64_expr_with_width(
+            arg,
+            ValueWidth::I32,
+            temporary_base,
+            arg_depth,
+            target,
+            labels,
+            assembly,
+        )?;
+        emit_x86_64_store_temporary(ValueWidth::I32, offset, assembly)?;
+    }
+    for (index, register) in registers.iter().enumerate() {
+        let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        emit_x86_64_load_temporary_to_register(ValueWidth::I32, offset, register, assembly)?;
+    }
+    write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))
+}
+
+fn emit_x86_64_conditional(
+    expr: ConditionalExpr<'_>,
+    result_width: ValueWidth,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let else_label = labels.fresh();
+    let end_label = labels.fresh();
+    emit_x86_64_expr(
+        expr.condition,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_compare_result_to_zero(expr_width(expr.condition), assembly);
+    write_assembly!(assembly, "\tje {else_label}\n")?;
+    emit_x86_64_expr_with_width(
+        expr.then_expr,
+        result_width,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tjmp {end_label}\n")?;
+    write_assembly!(assembly, "{else_label}:\n")?;
+    emit_x86_64_expr_with_width(
+        expr.else_expr,
+        result_width,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "{end_label}:\n")?;
+    Ok(())
+}
+
+fn emit_x86_64_store_temporary(
+    width: ValueWidth,
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let suffix = x86_64_instruction_suffix(width);
+    let register = x86_64_result_register(width);
+    write_assembly!(
+        assembly,
+        "\tmov{suffix} {register}, {}(%rbp)\n",
+        x86_stack_offset(offset, width)
+    )
+}
+
+fn emit_x86_64_load_temporary(
+    width: ValueWidth,
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let suffix = x86_64_instruction_suffix(width);
+    let register = x86_64_result_register(width);
+    write_assembly!(
+        assembly,
+        "\tmov{suffix} {}(%rbp), {register}\n",
+        x86_stack_offset(offset, width)
+    )
+}
+
+fn emit_x86_64_load_temporary_to_register(
+    width: ValueWidth,
+    offset: usize,
+    register: &str,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let suffix = x86_64_instruction_suffix(width);
+    write_assembly!(
+        assembly,
+        "\tmov{suffix} {}(%rbp), {register}\n",
+        x86_stack_offset(offset, width)
+    )
+}
+
+fn emit_x86_64_move_result_to_rhs(width: ValueWidth, assembly: &mut String) {
+    match width {
+        ValueWidth::I32 => assembly.push_str("\tmovl %eax, %ecx\n"),
+        ValueWidth::I64 => assembly.push_str("\tmovq %rax, %rcx\n"),
+    }
+}
+
+fn emit_x86_64_compare_result_to_zero(width: ValueWidth, assembly: &mut String) {
+    match width {
+        ValueWidth::I32 => assembly.push_str("\tcmpl $0, %eax\n"),
+        ValueWidth::I64 => assembly.push_str("\tcmpq $0, %rax\n"),
+    }
+}
+
+fn emit_x86_64_binary_op(
+    op: BinaryOp,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match (op, width) {
+        (BinaryOp::Mul, ValueWidth::I32) => assembly.push_str("\timull %ecx, %eax\n"),
+        (BinaryOp::Mul, ValueWidth::I64) => assembly.push_str("\timulq %rcx, %rax\n"),
+        (BinaryOp::Div, ValueWidth::I32) => {
+            assembly.push_str("\tcltd\n");
+            assembly.push_str("\tidivl %ecx\n");
         }
+        (BinaryOp::Div, ValueWidth::I64) => {
+            assembly.push_str("\tcqto\n");
+            assembly.push_str("\tidivq %rcx\n");
+        }
+        (BinaryOp::Mod, ValueWidth::I32) => {
+            assembly.push_str("\tcltd\n");
+            assembly.push_str("\tidivl %ecx\n");
+            assembly.push_str("\tmovl %edx, %eax\n");
+        }
+        (BinaryOp::Mod, ValueWidth::I64) => {
+            assembly.push_str("\tcqto\n");
+            assembly.push_str("\tidivq %rcx\n");
+            assembly.push_str("\tmovq %rdx, %rax\n");
+        }
+        (BinaryOp::Add, ValueWidth::I32) => assembly.push_str("\taddl %ecx, %eax\n"),
+        (BinaryOp::Add, ValueWidth::I64) => assembly.push_str("\taddq %rcx, %rax\n"),
+        (BinaryOp::Sub, ValueWidth::I32) => assembly.push_str("\tsubl %ecx, %eax\n"),
+        (BinaryOp::Sub, ValueWidth::I64) => assembly.push_str("\tsubq %rcx, %rax\n"),
+        (BinaryOp::ShiftLeft, ValueWidth::I32) => assembly.push_str("\tsall %cl, %eax\n"),
+        (BinaryOp::ShiftLeft, ValueWidth::I64) => assembly.push_str("\tsalq %cl, %rax\n"),
+        (BinaryOp::ShiftRight, ValueWidth::I32) => assembly.push_str("\tsarl %cl, %eax\n"),
+        (BinaryOp::ShiftRight, ValueWidth::I64) => assembly.push_str("\tsarq %cl, %rax\n"),
+        (BinaryOp::Less, _) => emit_x86_64_comparison("setl", width, assembly)?,
+        (BinaryOp::LessEqual, _) => emit_x86_64_comparison("setle", width, assembly)?,
+        (BinaryOp::Greater, _) => emit_x86_64_comparison("setg", width, assembly)?,
+        (BinaryOp::GreaterEqual, _) => emit_x86_64_comparison("setge", width, assembly)?,
+        (BinaryOp::Equal, _) => emit_x86_64_comparison("sete", width, assembly)?,
+        (BinaryOp::NotEqual, _) => emit_x86_64_comparison("setne", width, assembly)?,
+        (BinaryOp::BitAnd, ValueWidth::I32) => assembly.push_str("\tandl %ecx, %eax\n"),
+        (BinaryOp::BitAnd, ValueWidth::I64) => assembly.push_str("\tandq %rcx, %rax\n"),
+        (BinaryOp::BitXor, ValueWidth::I32) => assembly.push_str("\txorl %ecx, %eax\n"),
+        (BinaryOp::BitXor, ValueWidth::I64) => assembly.push_str("\txorq %rcx, %rax\n"),
+        (BinaryOp::BitOr, ValueWidth::I32) => assembly.push_str("\torl %ecx, %eax\n"),
+        (BinaryOp::BitOr, ValueWidth::I64) => assembly.push_str("\torq %rcx, %rax\n"),
+        (BinaryOp::LogicalAnd | BinaryOp::LogicalOr, _) => {}
+    }
+    Ok(())
+}
+
+const fn x86_64_instruction_suffix(width: ValueWidth) -> &'static str {
+    match width {
+        ValueWidth::I32 => "l",
+        ValueWidth::I64 => "q",
+    }
+}
+
+const fn x86_64_result_register(width: ValueWidth) -> &'static str {
+    match width {
+        ValueWidth::I32 => "%eax",
+        ValueWidth::I64 => "%rax",
     }
 }
 
@@ -745,13 +1365,25 @@ fn emit_x86_64_logical_or(
     Ok(())
 }
 
-fn emit_aarch64_comparison(condition: &str, assembly: &mut String) -> CompileResult<()> {
-    assembly.push_str("\tcmp w0, w1\n");
+fn emit_aarch64_comparison(
+    condition: &str,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let prefix = aarch64_register_prefix(width);
+    write_assembly!(assembly, "\tcmp {prefix}0, {prefix}1\n")?;
     write_assembly!(assembly, "\tcset w0, {condition}\n")
 }
 
-fn emit_x86_64_comparison(instruction: &str, assembly: &mut String) -> CompileResult<()> {
-    assembly.push_str("\tcmpl %ecx, %eax\n");
+fn emit_x86_64_comparison(
+    instruction: &str,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match width {
+        ValueWidth::I32 => assembly.push_str("\tcmpl %ecx, %eax\n"),
+        ValueWidth::I64 => assembly.push_str("\tcmpq %rcx, %rax\n"),
+    }
     write_assembly!(assembly, "\t{instruction} %al\n")?;
     assembly.push_str("\tmovzbl %al, %eax\n");
     Ok(())
@@ -850,13 +1482,21 @@ const fn instruction_label(instruction: &Instruction) -> Option<usize> {
 
 fn expr_depth(expr: &LoweredExpr) -> usize {
     match expr {
-        LoweredExpr::Call { .. } | LoweredExpr::Integer(_) | LoweredExpr::Local(_) => 0,
-        LoweredExpr::Unary { expr, .. } => expr_depth(expr),
+        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => 0,
+        LoweredExpr::Call { args, .. } => call_arg_depth(args),
+        LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
             left,
             right,
         } => expr_depth(left).max(expr_depth(right)),
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => expr_depth(condition)
+            .max(expr_depth(then_expr))
+            .max(expr_depth(else_expr)),
         LoweredExpr::Binary { left, right, .. } => 1 + expr_depth(left).max(expr_depth(right)),
     }
 }
@@ -890,13 +1530,25 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
             left,
             right,
         } => expr_needs_preserved_temp(left) || expr_needs_preserved_temp(right),
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            expr_needs_preserved_temp(condition)
+                || expr_needs_preserved_temp(then_expr)
+                || expr_needs_preserved_temp(else_expr)
+        }
         LoweredExpr::Binary { left, right, .. } => {
             expr_is_direct_call(right)
                 || expr_needs_preserved_temp(left)
                 || expr_needs_preserved_temp(right)
         }
-        LoweredExpr::Unary { expr, .. } => expr_needs_preserved_temp(expr),
-        LoweredExpr::Call { .. } | LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
+        LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => {
+            expr_needs_preserved_temp(expr)
+        }
+        LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
+        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
     }
 }
 
@@ -919,7 +1571,12 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
     match expr {
         LoweredExpr::Call { .. } => true,
         LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
-        LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
+        LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => expr_uses_call(condition) || expr_uses_call(then_expr) || expr_uses_call(else_expr),
         LoweredExpr::Binary { left, right, .. } => expr_uses_call(left) || expr_uses_call(right),
     }
 }
@@ -932,8 +1589,8 @@ fn x86_local_offset(slot: usize) -> String {
     format!("-{}", (slot + 1) * 4)
 }
 
-fn x86_stack_offset(byte_offset: usize) -> String {
-    format!("-{}", byte_offset + 4)
+fn x86_stack_offset(byte_offset: usize, width: ValueWidth) -> String {
+    format!("-{}", byte_offset + width_bytes(width))
 }
 
 const fn align_to(value: usize, alignment: usize) -> usize {
@@ -942,6 +1599,21 @@ const fn align_to(value: usize, alignment: usize) -> usize {
         value
     } else {
         value + (alignment - remainder)
+    }
+}
+
+fn call_arg_depth(args: &[LoweredExpr]) -> usize {
+    if args.is_empty() {
+        0
+    } else {
+        args.len() + args.iter().map(expr_depth).max().unwrap_or(0)
+    }
+}
+
+const fn width_bytes(width: ValueWidth) -> usize {
+    match width {
+        ValueWidth::I32 => 4,
+        ValueWidth::I64 => 8,
     }
 }
 
