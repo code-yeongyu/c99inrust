@@ -467,6 +467,11 @@ enum LocalBinding {
         slot: usize,
         length: usize,
     },
+    StructObject {
+        slot: usize,
+        struct_name: String,
+        byte_size: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -521,6 +526,7 @@ struct LoweringContext {
     instructions: Vec<Instruction>,
     next_label: usize,
     break_labels: Vec<usize>,
+    continue_labels: Vec<usize>,
     has_return: bool,
 }
 
@@ -542,6 +548,7 @@ impl LoweringContext {
             instructions: Vec::new(),
             next_label: 0,
             break_labels: Vec::new(),
+            continue_labels: Vec::new(),
             has_return: false,
         }
     }
@@ -565,6 +572,9 @@ impl LoweringContext {
                 length,
                 initializer,
             } => self.lower_local_int_array(name, *length, initializer.as_deref()),
+            Statement::LocalStruct { name, struct_name } => {
+                self.lower_local_struct_object(name, struct_name)
+            }
             Statement::LocalConstants(constants) => {
                 for constant in constants {
                     self.constants.insert(constant.name.clone(), constant.value);
@@ -577,12 +587,7 @@ impl LoweringContext {
                 }
                 Ok(())
             }
-            Statement::Assignment { target, value } => {
-                let target = self.lower_lvalue(target)?;
-                let value = self.lower_expr(value)?;
-                self.push_store(target, value);
-                Ok(())
-            }
+            Statement::Assignment { target, value } => self.lower_assignment(target, value),
             Statement::If {
                 condition,
                 then_branch,
@@ -617,6 +622,13 @@ impl LoweringContext {
             Statement::Break => {
                 let Some(label) = self.break_labels.last() else {
                     return Err(CompileError::new("break statement outside loop"));
+                };
+                self.instructions.push(Instruction::Jump { label: *label });
+                Ok(())
+            }
+            Statement::Continue => {
+                let Some(label) = self.continue_labels.last() else {
+                    return Err(CompileError::new("continue statement outside loop"));
                 };
                 self.instructions.push(Instruction::Jump { label: *label });
                 Ok(())
@@ -695,6 +707,10 @@ impl LoweringContext {
         Ok(())
     }
 
+    fn lower_local_struct_object(&mut self, name: &str, struct_name: &str) -> CompileResult<()> {
+        self.declare_struct_object(name, struct_name).map(|_| ())
+    }
+
     fn lower_block(&mut self, statements: &[Statement]) -> CompileResult<()> {
         self.scopes.push(HashMap::new());
         for statement in statements {
@@ -742,7 +758,9 @@ impl LoweringContext {
             label: end_label,
         });
         self.break_labels.push(end_label);
+        self.continue_labels.push(start_label);
         let result = self.lower_branch(body);
+        self.continue_labels.pop();
         self.break_labels.pop();
         result?;
         self.instructions
@@ -754,13 +772,19 @@ impl LoweringContext {
 
     fn lower_do_while(&mut self, body: &Statement, condition: &Expr) -> CompileResult<()> {
         let start_label = self.fresh_label();
+        let continue_label = self.fresh_label();
         let end_label = self.fresh_label();
         self.instructions
             .push(Instruction::Label { label: start_label });
         self.break_labels.push(end_label);
+        self.continue_labels.push(continue_label);
         let result = self.lower_branch(body);
+        self.continue_labels.pop();
         self.break_labels.pop();
         result?;
+        self.instructions.push(Instruction::Label {
+            label: continue_label,
+        });
         let condition = self.lower_expr(condition)?;
         self.instructions.push(Instruction::JumpIfZero {
             condition,
@@ -785,6 +809,7 @@ impl LoweringContext {
             self.lower_statement(statement)?;
         }
         let start_label = self.fresh_label();
+        let continue_label = self.fresh_label();
         let end_label = self.fresh_label();
         self.instructions
             .push(Instruction::Label { label: start_label });
@@ -796,9 +821,14 @@ impl LoweringContext {
             });
         }
         self.break_labels.push(end_label);
+        self.continue_labels.push(continue_label);
         let result = self.lower_branch(body);
+        self.continue_labels.pop();
         self.break_labels.pop();
         result?;
+        self.instructions.push(Instruction::Label {
+            label: continue_label,
+        });
         if let Some(statement) = post {
             self.lower_statement(statement)?;
         }
@@ -909,6 +939,21 @@ impl LoweringContext {
         )
     }
 
+    fn declare_struct_object(&mut self, name: &str, struct_name: &str) -> CompileResult<usize> {
+        let layout = self.struct_layout(struct_name)?.clone();
+        self.declare_slot(
+            name,
+            ScalarType::Pointer,
+            layout.size,
+            struct_alignment(&layout),
+            LocalBinding::StructObject {
+                slot: self.local_slots.len(),
+                struct_name: struct_name.to_owned(),
+                byte_size: layout.size,
+            },
+        )
+    }
+
     fn declare_slot(
         &mut self,
         name: &str,
@@ -967,6 +1012,12 @@ impl LoweringContext {
             .ok_or_else(|| CompileError::new("internal error: missing local slot"))
     }
 
+    fn struct_layout(&self, struct_name: &str) -> CompileResult<&StructLayout> {
+        self.structs
+            .get(struct_name)
+            .ok_or_else(|| CompileError::new(format!("unknown struct: {struct_name}")))
+    }
+
     fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
         match expr {
             Expr::Call { callee, args } => Ok(LoweredExpr::Call {
@@ -992,6 +1043,12 @@ impl LoweringContext {
                         LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
                             offset: self.local_offset(slot)?,
                             byte_size: local_int_array_byte_size(length)?,
+                        }),
+                        LocalBinding::StructObject {
+                            slot, byte_size, ..
+                        } => Ok(LoweredExpr::LocalAddress {
+                            offset: self.local_offset(slot)?,
+                            byte_size,
                         }),
                     };
                 }
@@ -1062,6 +1119,21 @@ impl LoweringContext {
         }
     }
 
+    fn lower_assignment(&mut self, target: &LValue, value: &Expr) -> CompileResult<()> {
+        if let Some(target) = self.resolve_struct_lvalue_address(target)? {
+            let source = self.resolve_struct_address(value)?;
+            if source.struct_name != target.struct_name {
+                return Err(CompileError::new("incompatible struct assignment"));
+            }
+            self.push_struct_copy(&target, &source)?;
+            return Ok(());
+        }
+        let target = self.lower_lvalue(target)?;
+        let value = self.lower_expr(value)?;
+        self.push_store(target, value);
+        Ok(())
+    }
+
     fn lower_lvalue(&self, target: &LValue) -> CompileResult<LoweredLValue> {
         match target {
             LValue::Identifier(name) => {
@@ -1077,6 +1149,9 @@ impl LoweringContext {
                         LocalBinding::CharArray { .. } | LocalBinding::IntArray { .. } => Err(
                             CompileError::new("assignment to local array is not supported"),
                         ),
+                        LocalBinding::StructObject { .. } => Err(CompileError::new(
+                            "direct assignment to local struct object is not supported",
+                        )),
                     };
                 }
                 if let Some(scalar_type) = self
@@ -1102,6 +1177,48 @@ impl LoweringContext {
         }
     }
 
+    fn resolve_struct_lvalue_address(
+        &self,
+        target: &LValue,
+    ) -> CompileResult<Option<StructAddress>> {
+        match target {
+            LValue::Identifier(name) => {
+                let Some(LocalBinding::StructObject {
+                    slot,
+                    struct_name,
+                    byte_size,
+                }) = self.local_binding(name)
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(StructAddress {
+                    pointer: LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size,
+                    },
+                    offset: 0,
+                    struct_name,
+                }))
+            }
+            LValue::Member {
+                base,
+                field,
+                dereference,
+            } => {
+                let member = self.resolve_member_access(base, field, *dereference)?;
+                let FieldType::Struct(struct_name) = member.field_type else {
+                    return Ok(None);
+                };
+                Ok(Some(StructAddress {
+                    pointer: member.pointer,
+                    offset: member.offset,
+                    struct_name,
+                }))
+            }
+            LValue::Subscript { .. } => Ok(None),
+        }
+    }
+
     fn lower_sizeof_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
         if let Expr::Identifier(name) = expr
             && let Some(binding) = self.local_binding(name)
@@ -1110,6 +1227,7 @@ impl LoweringContext {
                 LocalBinding::Scalar { scalar_type, .. } => scalar_size(scalar_type),
                 LocalBinding::CharArray { length, .. } => length,
                 LocalBinding::IntArray { length, .. } => local_int_array_byte_size(length)?,
+                LocalBinding::StructObject { byte_size, .. } => byte_size,
             };
             return i64::try_from(size)
                 .map(LoweredExpr::Integer)
@@ -1234,6 +1352,12 @@ impl LoweringContext {
                         offset: self.local_offset(slot)?,
                         byte_size: local_int_array_byte_size(length)?,
                     }),
+                    LocalBinding::StructObject {
+                        slot, byte_size, ..
+                    } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size,
+                    }),
                 }
             }
             LValue::Member { .. } => Err(CompileError::new("unsupported address-of target")),
@@ -1328,6 +1452,22 @@ impl LoweringContext {
     }
 
     fn resolve_struct_address(&self, expr: &Expr) -> CompileResult<StructAddress> {
+        if let Expr::Identifier(name) = expr
+            && let Some(LocalBinding::StructObject {
+                slot,
+                struct_name,
+                byte_size,
+            }) = self.local_binding(name)
+        {
+            return Ok(StructAddress {
+                pointer: LoweredExpr::LocalAddress {
+                    offset: self.local_offset(slot)?,
+                    byte_size,
+                },
+                offset: 0,
+                struct_name,
+            });
+        }
         if let Expr::Member {
             base,
             field,
@@ -1393,6 +1533,77 @@ impl LoweringContext {
                     }));
             }
         }
+    }
+
+    fn push_struct_copy(
+        &mut self,
+        target: &StructAddress,
+        source: &StructAddress,
+    ) -> CompileResult<()> {
+        let layout = self.struct_layout(&target.struct_name)?.clone();
+        for field in layout.fields {
+            let target_offset = target
+                .offset
+                .checked_add(field.offset)
+                .ok_or_else(|| CompileError::new("struct member offset overflow"))?;
+            let source_offset = source
+                .offset
+                .checked_add(field.offset)
+                .ok_or_else(|| CompileError::new("struct member offset overflow"))?;
+            match field.field_type {
+                FieldType::Scalar(scalar_type) => self.push_struct_scalar_copy(
+                    target,
+                    source,
+                    target_offset,
+                    source_offset,
+                    scalar_type,
+                ),
+                FieldType::Pointer => self.push_struct_scalar_copy(
+                    target,
+                    source,
+                    target_offset,
+                    source_offset,
+                    ScalarType::Pointer,
+                ),
+                FieldType::Struct(struct_name) => {
+                    self.push_struct_copy(
+                        &StructAddress {
+                            pointer: target.pointer.clone(),
+                            offset: target_offset,
+                            struct_name: struct_name.clone(),
+                        },
+                        &StructAddress {
+                            pointer: source.pointer.clone(),
+                            offset: source_offset,
+                            struct_name,
+                        },
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn push_struct_scalar_copy(
+        &mut self,
+        target: &StructAddress,
+        source: &StructAddress,
+        target_offset: usize,
+        source_offset: usize,
+        scalar_type: ScalarType,
+    ) {
+        self.push_store(
+            LoweredLValue::PointerField {
+                pointer: Box::new(target.pointer.clone()),
+                offset: target_offset,
+                scalar_type,
+            },
+            LoweredExpr::PointerField {
+                pointer: Box::new(source.pointer.clone()),
+                offset: source_offset,
+                scalar_type,
+            },
+        );
     }
 
     fn lower_post_increment_statement(&mut self, target: &LValue) -> CompileResult<()> {
@@ -1560,6 +1771,10 @@ fn local_int_array_byte_size(length: usize) -> CompileResult<usize> {
     length
         .checked_mul(scalar_size(ScalarType::Int))
         .ok_or_else(|| CompileError::new("local int array size overflow"))
+}
+
+fn struct_alignment(layout: &StructLayout) -> usize {
+    layout.size.clamp(1, 8)
 }
 
 const fn scalar_size(scalar_type: ScalarType) -> usize {

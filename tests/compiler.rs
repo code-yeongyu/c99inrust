@@ -631,6 +631,32 @@ fn compiler_accepts_switch_case_break_slice() {
 }
 
 #[test]
+fn compiler_accepts_continue_statement_slice() {
+    // given
+    let source = r"int main(void) {
+    int i = 0;
+    int out = 0;
+    for (i = 0; i < 4; i++) {
+        if (i == 2) continue;
+        out += i;
+    }
+    return out;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\taddl %ecx, %eax\n"));
+    assert!(assembly.contains("\tjmp .Lmain_"));
+}
+
+#[test]
 fn compiler_accepts_local_enum_and_register_implicit_int_slice() {
     // given
     let source = r"int main(void) {
@@ -1015,6 +1041,31 @@ fn compiler_accepts_multi_declarator_local_int_slice() {
     assert!(assembly.contains("movl %eax, -4(%rbp)"));
     assert!(assembly.contains("movl %eax, -8(%rbp)"));
     assert!(assembly.contains("addl %ecx, %eax"));
+}
+
+#[test]
+fn compiler_accepts_global_int_declarator_list_slice() {
+    // given
+    let source = r"typedef int fixed_t;
+static fixed_t m_x, m_y;
+int main(void) {
+    m_x = 4;
+    m_y = m_x + 2;
+    return m_y;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("m_x:"));
+    assert!(assembly.contains("m_y:"));
+    assert!(assembly.contains("\tmovl %eax, m_x(%rip)\n"));
+    assert!(assembly.contains("\tmovl %eax, m_y(%rip)\n"));
 }
 
 #[test]
@@ -1422,6 +1473,27 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_angle_t_parameter_slice() {
+    // given
+    let source = r"typedef unsigned int angle_t;
+int rotate(angle_t angle) {
+    return angle >> 19;
+}
+int main(void) { return rotate(0); }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("rotate:"));
+    assert!(assembly.contains("\tsarl %cl, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_m_cheat_xlate_table_slice() {
     // given
     let source = r"static unsigned char cheat_xlate_table[256];
@@ -1701,6 +1773,69 @@ int main(void) {
     // then
     assert!(assembly.contains("main:"));
     assert!(assembly.contains("\tcmpq $0, %rax\n"));
+}
+
+#[test]
+fn compiler_accepts_local_struct_object_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x, y;
+} fpoint_t;
+typedef struct {
+    fpoint_t a, b;
+} fline_t;
+void clip(fline_t* fl) {
+    fpoint_t tmp;
+    tmp.x = fl->a.x + 1;
+    tmp.y = 0;
+    fl->b = tmp;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("clip:"));
+    assert!(assembly.contains("\tleaq -16(%rbp), %rax\n"));
+    assert!(assembly.contains("\tmovl %eax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tmovl %eax, 4(%rcx)\n"));
+    assert!(assembly.contains("\tmovl %eax, 8(%rcx)\n"));
+    assert!(assembly.contains("\tmovl %eax, 12(%rcx)\n"));
+}
+
+#[test]
+fn compiler_accepts_static_local_struct_object_slice() {
+    // given
+    let source = r"typedef struct {
+    int x, y;
+} fpoint_t;
+typedef struct {
+    fpoint_t a, b;
+} fline_t;
+int draw(void) {
+    static fline_t fl;
+    fl.a.x = 1;
+    fl.b.y = 2;
+    return fl.a.x;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("draw:"));
+    assert!(assembly.contains("\tmovl %eax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tmovl %eax, 12(%rcx)\n"));
 }
 
 #[test]

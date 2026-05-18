@@ -108,6 +108,10 @@ pub enum Statement {
         length: usize,
         initializer: Option<Vec<i32>>,
     },
+    LocalStruct {
+        name: String,
+        struct_name: String,
+    },
     LocalConstants(Vec<Constant>),
     DeclarationList(Vec<Self>),
     Assignment {
@@ -140,6 +144,7 @@ pub enum Statement {
     },
     Expression(Expr),
     Break,
+    Continue,
     Return(Option<Expr>),
 }
 
@@ -354,8 +359,9 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             constants.extend(enum_constants);
             continue;
         }
-        if let Some(global) = parse_supported_global_declaration(item_tokens, &structs)? {
-            globals.push(global);
+        let parsed_globals = parse_supported_global_declarations(item_tokens, &structs)?;
+        if !parsed_globals.is_empty() {
+            globals.extend(parsed_globals);
             continue;
         }
         let Some(name) = function_definition_name(item_tokens) else {
@@ -522,6 +528,9 @@ impl Parser<'_> {
         if let Some(statement) = self.local_enum_declaration()? {
             return Ok(statement);
         }
+        if let Some(statement) = self.local_struct_declaration()? {
+            return Ok(statement);
+        }
         if let Some(scalar_type) = self.declaration_type_at_current() {
             return self.declaration_statement(scalar_type);
         }
@@ -544,6 +553,11 @@ impl Parser<'_> {
             self.advance();
             self.expect_punctuator(";")?;
             return Ok(Statement::Break);
+        }
+        if self.check_keyword(Keyword::Continue) {
+            self.advance();
+            self.expect_punctuator(";")?;
+            return Ok(Statement::Continue);
         }
         if self.check_keyword(Keyword::Return) {
             self.advance();
@@ -723,6 +737,58 @@ impl Parser<'_> {
             length,
             initializer,
         })
+    }
+
+    fn local_struct_declaration(&mut self) -> CompileResult<Option<Statement>> {
+        let type_index = if self.check_keyword(Keyword::Static) {
+            self.index + 1
+        } else {
+            self.index
+        };
+        let Some(struct_name) = self.local_struct_name_at(type_index) else {
+            return Ok(None);
+        };
+        self.index = type_index + 1;
+        let mut declarations = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            if self.check_punctuator("=") {
+                return Err(CompileError::new(
+                    "local struct initializers are not supported",
+                ));
+            }
+            declarations.push(Statement::LocalStruct {
+                name,
+                struct_name: struct_name.clone(),
+            });
+            if self.check_punctuator(",") {
+                self.advance();
+                continue;
+            }
+            self.expect_punctuator(";")?;
+            break;
+        }
+        if declarations.len() == 1 {
+            Ok(Some(declarations.remove(0)))
+        } else {
+            Ok(Some(Statement::DeclarationList(declarations)))
+        }
+    }
+
+    fn local_struct_name_at(&self, index: usize) -> Option<String> {
+        let TokenKind::Identifier(name) = &self.tokens.get(index)?.kind else {
+            return None;
+        };
+        if !self.known_structs.iter().any(|layout| layout.name == *name) {
+            return None;
+        }
+        if !matches!(
+            self.tokens.get(index + 1).map(|token| &token.kind),
+            Some(TokenKind::Identifier(_))
+        ) {
+            return None;
+        }
+        Some(name.clone())
     }
 
     fn local_int_array_initializer(&mut self) -> CompileResult<Vec<i32>> {
@@ -1958,6 +2024,17 @@ fn parse_supported_global_declaration(
     parse_global_int(tokens, known_structs)
 }
 
+fn parse_supported_global_declarations(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Vec<Global>> {
+    if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs)? {
+        return Ok(globals);
+    }
+    parse_supported_global_declaration(tokens, known_structs)
+        .map(|global| global.map_or_else(Vec::new, |global| vec![global]))
+}
+
 fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {
     if ignorable_static_const_char_array(tokens) {
         return false;
@@ -2267,6 +2344,55 @@ fn parse_global_int(
         .ok_or_else(|| CompileError::new("expected global int name"))?
         .to_owned();
     Ok(Some(Global { name, initializer }))
+}
+
+fn parse_global_int_declarator_list(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Vec<Global>>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let ranges = top_level_comma_ranges(declaration);
+    if ranges.len() <= 1 {
+        return Ok(None);
+    }
+    let Some((first_start, first_end)) = ranges.first().copied() else {
+        return Ok(None);
+    };
+    let first = &declaration[first_start..first_end];
+    let first_end_index = top_level_punctuator_index(first, "=").unwrap_or(first.len());
+    let Some(first_name_index) = previous_identifier_index(first, first_end_index) else {
+        return Ok(None);
+    };
+    let base_specifiers = &first[..first_name_index];
+    if !global_specifiers_are_int(base_specifiers, known_structs) {
+        return Ok(None);
+    }
+    let mut globals = Vec::with_capacity(ranges.len());
+    for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
+        let segment = &declaration[start..end];
+        let end_index = top_level_punctuator_index(segment, "=").unwrap_or(segment.len());
+        if top_level_punctuator_index(&segment[..end_index], "[").is_some() {
+            return Ok(None);
+        }
+        let Some(name_index) = previous_identifier_index(segment, end_index) else {
+            return Ok(None);
+        };
+        if range_index > 0 && !segment[..name_index].is_empty() {
+            return Ok(None);
+        }
+        let initializer = if end_index == segment.len() {
+            GlobalInitializer::Int(0)
+        } else {
+            parse_global_int_initializer(&segment[end_index + 1..])?
+        };
+        let name = token_identifier(&segment[name_index])
+            .ok_or_else(|| CompileError::new("expected global int name"))?
+            .to_owned();
+        globals.push(Global { name, initializer });
+    }
+    Ok(Some(globals))
 }
 
 fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
@@ -3234,7 +3360,7 @@ fn sizeof_type(tokens: &[Token]) -> Option<usize> {
 
 fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
     match name {
-        "boolean" | "byte" | "fixed_t" | "lighttable_t" => Some(ScalarType::Int),
+        "angle_t" | "boolean" | "byte" | "fixed_t" | "lighttable_t" => Some(ScalarType::Int),
         _ => None,
     }
 }
