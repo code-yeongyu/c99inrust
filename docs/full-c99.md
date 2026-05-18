@@ -20,7 +20,8 @@ with both compilers, link both outputs through the platform toolchain, run both
 executables, and compare exit codes. Current covered slices include constant
 returns, arithmetic precedence, local `int` declarations/assignments, and
 `if`/`else`, `while`, and `for` control flow over integer comparisons and
-short-circuit `&&`/`||`.
+short-circuit `&&`/`||`, plus direct zero-argument calls between supported
+`int` functions.
 
 ## Undefined Behavior Policy
 

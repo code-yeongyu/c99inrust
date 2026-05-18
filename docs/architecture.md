@@ -16,8 +16,9 @@ if preprocessing did not exist.
 ## Current Target Model
 
 The implemented backend emits assembly for the current int-only function-body
-slice: local `int` declarations, scoped blocks, assignments, `if`/`else`,
-`while`, `for`, arithmetic/bitwise/comparison/logical expressions, and returns.
+slice: local `int` declarations, scoped blocks, assignments, zero-argument
+direct calls, `if`/`else`, `while`, `for`,
+arithmetic/bitwise/comparison/logical expressions, and returns.
 
 - `aarch64-apple-darwin`
 - `x86_64-apple-darwin`
@@ -43,7 +44,7 @@ files. Compiling official Doom still requires more than surface parsing:
 - typedef names
 - struct, union, and enum layout
 - pointers and arrays
-- function calls and external symbols
+- function call arguments, external symbol resolution, and broad ABI coverage
 - SysV ABI argument and return handling
 - object emission or a robust assembly/link path
 - Linux/X11 platform dependencies and a legal IWAD for playability

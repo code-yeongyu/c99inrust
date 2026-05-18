@@ -13,9 +13,9 @@ This repository currently ships the first verified vertical slice:
 | ------- | ------ |
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
 | Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
-| Parser | int function bodies with local `int` declarations, assignments, `if`/`else`, `while`, `for`, blocks, returns, plus Doom-shaped surface declarations |
-| IR | scoped local-slot lowering, label lowering, and short-circuit logical lowering for supported `int` statements and expressions |
-| Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly |
+| Parser | int function bodies with local `int` declarations, assignments, zero-argument calls, `if`/`else`, `while`, `for`, blocks, returns, plus Doom-shaped surface declarations |
+| IR | scoped local-slot lowering, label lowering, zero-argument call lowering, and short-circuit logical lowering for supported `int` statements and expressions |
+| Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly with zero-argument direct calls |
 | Doom | official source audit command and QA plan |
 
 Full C99, full Doom playability, all-world architecture coverage, and
@@ -48,7 +48,8 @@ cc answer.s -o answer
 The current compile slice accepts:
 
 ```c
-int main(void) { int total = 0; for (int i = 0; i < 5; i = i + 1) { total = total + i; } return total; }
+int answer(void) { return 40; }
+int main(void) { int total = 0; for (int i = 0; i < 2; i = i + 1) { total = total + answer(); } return total - 38; }
 ```
 
 ## Official Doom Target
@@ -74,8 +75,12 @@ semantic C parsing or code generation.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
 cargo test --all-targets --all-features
+cargo nextest run --all-targets --all-features
+cargo machete
+cargo deny check
+cargo audit
 bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src tests
 ```
 
