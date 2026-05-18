@@ -86,6 +86,21 @@ fn preprocessor_expands_function_macros_and_spliced_lines() {
 }
 
 #[test]
+fn preprocessor_removes_comments_before_macro_expansion() {
+    // given
+    let source = "#define HU_FONTSTART '!'\t// the first font character\n#define HU_FONTSIZE ('_' - HU_FONTSTART + 1)\nextern int hu_font[HU_FONTSIZE];\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("commented-macro.c", source)
+        .expect("preprocessor should remove comments before expanding macros");
+
+    // then
+    assert!(unit.source.contains("extern int hu_font[('_' - '!' + 1)];"));
+    assert!(!unit.source.contains("// the first font character"));
+}
+
+#[test]
 fn preprocessor_resolves_local_includes_and_preserves_system_includes() {
     // given
     let root = std::env::temp_dir().join(format!("c99inrust-front-end-{}", std::process::id()));
