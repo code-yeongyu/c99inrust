@@ -1790,3 +1790,58 @@ The next `m_cheat.c` blocker is a post-increment expression on a pointer field:
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Pointer Field Post-Increment Slice
+
+`compile -S` now accepts post-increment expressions on pointer struct members.
+This covers the final current `m_cheat.c` blocker:
+
+```c
+*(cht->p++) = key;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_pointer_member_post_increment_value_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779116128`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779116128.txt
+ok=10
+fail=52
+```
+
+Representative moved blocker:
+
+```text
+FAIL m_cheat.c
+  before pointer field post-increment slice:
+    post-increment expression supports direct lvalues only
+OK m_cheat.c
+```
+
+The next broad Doom blocker is still outside `m_cheat.c`; for example,
+`r_draw.c` currently stops at prefix increment in `R_DrawFuzzColumn`:
+
+```c
+if (++fuzzpos == 50)
+    fuzzpos = 0;
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

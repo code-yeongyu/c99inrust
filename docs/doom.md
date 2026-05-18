@@ -91,22 +91,19 @@ body-first loop with a conditional back edge. Static unsigned-byte globals can
 now be zero-filled and assigned through byte subscripts, covering tables such as
 `cheat_xlate_table[256]`. Pointer-valued struct members can now be read and
 assigned, covering `cheatseq_t` fields such as `cht->p` and `cht->sequence`.
+Post-increment expressions on pointer struct members now produce the old field
+value while updating the field.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but nine of the 62 C files still fail before object generation. `doomdef.c`,
-`doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_fixed.c`, `m_random.c`,
-`m_swap.c`, and `r_sky.c` currently reach assembly generation.
+but ten of the 62 C files still fail before object generation. `doomdef.c`,
+`doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
+`m_random.c`, `m_swap.c`, and `r_sky.c` currently reach assembly generation.
 The current `am_map.c` blocker is the local static aggregate declaration
 `static event_t st_notify = { ... }` in `AM_initVariables`, not the earlier
 `AM_getIslope` member expressions.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
-The current `m_cheat.c` blocker has moved past `(unsigned char)key`,
-`unsigned char *p, c;`, `while (*(p++) != 1);`, and the `cht_GetParam`
-`do { ... } while (...)` loop, `cheat_xlate_table[256]`, and pointer
-struct-member values such as `cht->p`. It is now post-increment expressions on
-non-direct lvalues such as `cht->p++`.
 The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and the first
 `do { ... } while (...)` loops, and is now prefix increment in
 `if (++fuzzpos == 50)` inside `R_DrawFuzzColumn`.
