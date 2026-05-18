@@ -24,11 +24,13 @@ fn compiler_emits_native_assembly_for_constant_return_program() {
         }
         Target::X86_64AppleDarwin => {
             assert!(assembly.contains(".globl _main"));
-            assert!(assembly.contains("movl $42, %eax"));
+            assert!(assembly.contains("movl $40, %eax"));
+            assert!(assembly.contains("addl %ecx, %eax"));
         }
         Target::X86_64UnknownLinuxGnu => {
             assert!(assembly.contains(".globl main"));
-            assert!(assembly.contains("movl $42, %eax"));
+            assert!(assembly.contains("movl $40, %eax"));
+            assert!(assembly.contains("addl %ecx, %eax"));
         }
     }
     assert!(assembly.contains("ret"));
