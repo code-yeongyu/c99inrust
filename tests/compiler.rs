@@ -100,8 +100,8 @@ fn compiler_emits_branches_for_if_else_comparisons() {
     match target {
         Target::Aarch64AppleDarwin => {
             assert!(assembly.contains("cmp w0, w1"));
-            assert!(assembly.contains("cset w0, ge"));
-            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("b.lt Lmain_"));
+            assert!(assembly.contains("b Lmain_"));
             assert!(assembly.contains("cset w0, eq"));
         }
         Target::X86_64AppleDarwin => {
@@ -134,8 +134,9 @@ fn compiler_emits_back_edges_for_while_loops() {
     // then
     match target {
         Target::Aarch64AppleDarwin => {
-            assert!(assembly.contains("cset w0, lt"));
-            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("cmp w0, w1"));
+            assert!(assembly.contains("b.ge Lmain_"));
+            assert!(assembly.contains("add w0, w0, #1"));
             assert!(assembly.contains("b Lmain_"));
         }
         Target::X86_64AppleDarwin => {
@@ -198,8 +199,9 @@ fn compiler_emits_for_loop_back_edges() {
     // then
     match target {
         Target::Aarch64AppleDarwin => {
-            assert!(assembly.contains("cset w0, lt"));
-            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("cmp w0, w1"));
+            assert!(assembly.contains("b.ge Lmain_"));
+            assert!(assembly.contains("add w0, w0, #1"));
             assert!(assembly.contains("b Lmain_"));
             assert!(assembly.contains("str w0, [sp, #4]"));
         }
