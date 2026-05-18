@@ -340,13 +340,13 @@ fn compiler_emits_back_edges_for_do_while_loops() {
             assert!(assembly.contains("b Lmain_"));
         }
         Target::X86_64AppleDarwin => {
-            assert!(assembly.contains("addl $1, %eax"));
+            assert!(assembly.contains("addl %ecx, %eax"));
             assert!(assembly.contains("setl %al"));
             assert!(assembly.contains("je Lmain_"));
             assert!(assembly.contains("jmp Lmain_"));
         }
         Target::X86_64UnknownLinuxGnu => {
-            assert!(assembly.contains("addl $1, %eax"));
+            assert!(assembly.contains("addl %ecx, %eax"));
             assert!(assembly.contains("setl %al"));
             assert!(assembly.contains("je .Lmain_"));
             assert!(assembly.contains("jmp .Lmain_"));
