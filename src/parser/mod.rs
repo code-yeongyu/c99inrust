@@ -3,8 +3,15 @@ use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    pub constants: Vec<Constant>,
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Constant {
+    pub name: String,
+    pub value: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +30,14 @@ pub enum GlobalInitializer {
 pub struct Function {
     pub name: String,
     pub return_type: ReturnType,
-    pub parameters: Vec<String>,
+    pub parameters: Vec<Parameter>,
     pub statements: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    pub name: String,
+    pub scalar_type: ScalarType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -233,9 +246,15 @@ pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslat
 pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Program> {
     let mut parser = SurfaceParser { tokens, index: 0 };
     let external_items = parser.external_token_groups()?;
+    let mut constants = Vec::new();
     let mut globals = Vec::new();
     let mut functions = Vec::new();
     for item_tokens in &external_items {
+        let enum_constants = parse_enum_constants(item_tokens)?;
+        if !enum_constants.is_empty() {
+            constants.extend(enum_constants);
+            continue;
+        }
         if let Some(global) = parse_supported_global_declaration(item_tokens)? {
             globals.push(global);
             continue;
@@ -270,7 +289,11 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             "translation unit has no supported function definitions",
         ));
     }
-    Ok(Program { globals, functions })
+    Ok(Program {
+        constants,
+        globals,
+        functions,
+    })
 }
 
 struct Parser<'a> {
@@ -285,6 +308,7 @@ impl Parser<'_> {
             functions.push(self.function()?);
         }
         Ok(Program {
+            constants: Vec::new(),
             globals: Vec::new(),
             functions,
         })
@@ -324,7 +348,7 @@ impl Parser<'_> {
         Ok((return_type, name))
     }
 
-    fn parameter_list(&mut self) -> CompileResult<Vec<String>> {
+    fn parameter_list(&mut self) -> CompileResult<Vec<Parameter>> {
         let mut parameters = Vec::new();
         let mut parameter_start = self.index;
         let mut depth = 0usize;
@@ -357,7 +381,7 @@ impl Parser<'_> {
 
     fn push_parameter(
         &self,
-        parameters: &mut Vec<String>,
+        parameters: &mut Vec<Parameter>,
         start: usize,
         end: usize,
     ) -> CompileResult<()> {
@@ -368,7 +392,12 @@ impl Parser<'_> {
         let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
             return Err(CompileError::new("unsupported function parameter"));
         };
-        parameters.push(name.to_owned());
+        let scalar_type = parameter_scalar_type(tokens)
+            .ok_or_else(|| CompileError::new("unsupported function parameter"))?;
+        parameters.push(Parameter {
+            name: name.to_owned(),
+            scalar_type,
+        });
         Ok(())
     }
 
@@ -860,6 +889,135 @@ fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
     }
 }
 
+fn parameter_scalar_type(tokens: &[Token]) -> Option<ScalarType> {
+    if parameter_has_pointer(tokens) {
+        return Some(ScalarType::Pointer);
+    }
+    let name_index = tokens
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
+    integer_parameter_type(&tokens[..name_index])
+}
+
+fn parameter_has_pointer(tokens: &[Token]) -> bool {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    for token in tokens {
+        if paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+            && token_is_punctuator(token, "*")
+        {
+            return true;
+        }
+        update_depths(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
+    }
+    false
+}
+
+fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
+    let mut saw_type = false;
+    let mut long_count = 0usize;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(
+                Keyword::Const
+                | Keyword::Register
+                | Keyword::Restrict
+                | Keyword::Signed
+                | Keyword::Unsigned
+                | Keyword::Volatile,
+            ) => {}
+            TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short) => saw_type = true,
+            TokenKind::Keyword(Keyword::Long) => {
+                saw_type = true;
+                long_count += 1;
+            }
+            TokenKind::Identifier(name) => {
+                let scalar_type = supported_typedef_scalar(name)?;
+                if scalar_type != ScalarType::Int {
+                    return None;
+                }
+                saw_type = true;
+            }
+            _ => return None,
+        }
+    }
+    if !saw_type {
+        return None;
+    }
+    if long_count == 0 {
+        Some(ScalarType::Int)
+    } else {
+        Some(ScalarType::LongLong)
+    }
+}
+
+fn parse_enum_constants(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
+    if !matches!(
+        tokens.first().map(|token| &token.kind),
+        Some(TokenKind::Keyword(Keyword::Enum))
+    ) {
+        return Ok(Vec::new());
+    }
+    let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
+        return Ok(Vec::new());
+    };
+    let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
+        return Err(CompileError::new("unterminated enum declaration")
+            .at(tokens[open_brace].line, tokens[open_brace].column));
+    };
+    parse_enum_body(&tokens[open_brace + 1..close_brace])
+}
+
+fn parse_enum_body(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
+    let mut constants = Vec::new();
+    let mut value = 0i64;
+    let mut index = 0usize;
+    while index < tokens.len() {
+        if token_is_punctuator(&tokens[index], ",") {
+            index += 1;
+            continue;
+        }
+        let Some(name) = token_identifier(&tokens[index]) else {
+            return Ok(Vec::new());
+        };
+        index += 1;
+        if tokens
+            .get(index)
+            .is_some_and(|token| token_is_punctuator(token, "="))
+        {
+            let initializer_start = index + 1;
+            let initializer_end = next_enum_separator(tokens, initializer_start);
+            value = parse_integer_initializer(&tokens[initializer_start..initializer_end])?;
+            index = initializer_end;
+        }
+        constants.push(Constant {
+            name: name.to_owned(),
+            value,
+        });
+        value = value
+            .checked_add(1)
+            .ok_or_else(|| CompileError::new("enum constant overflow"))?;
+    }
+    Ok(constants)
+}
+
+fn next_enum_separator(tokens: &[Token], start: usize) -> usize {
+    tokens[start..]
+        .iter()
+        .position(|token| token_is_punctuator(token, ","))
+        .map_or(tokens.len(), |offset| start + offset)
+}
+
 fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<Global>> {
     if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
         return Ok(None);
@@ -1067,6 +1225,23 @@ fn matching_top_level_bracket(tokens: &[Token], open_bracket: usize) -> Option<u
         if token_is_punctuator(token, "]") {
             bracket_depth = bracket_depth.checked_sub(1)?;
             if bracket_depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
+fn matching_top_level_brace(tokens: &[Token], open_brace: usize) -> Option<usize> {
+    let mut brace_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open_brace) {
+        if token_is_punctuator(token, "{") {
+            brace_depth += 1;
+            continue;
+        }
+        if token_is_punctuator(token, "}") {
+            brace_depth = brace_depth.checked_sub(1)?;
+            if brace_depth == 0 {
                 return Some(index);
             }
         }

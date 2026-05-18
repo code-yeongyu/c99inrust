@@ -43,6 +43,13 @@ struct ConditionalExpr<'a> {
     else_expr: &'a LoweredExpr,
 }
 
+#[derive(Clone, Copy)]
+struct PointerSubscriptExpr<'a> {
+    pointer: &'a LoweredExpr,
+    index: &'a LoweredExpr,
+    element_type: ScalarType,
+}
+
 const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
     match scalar_type {
         ScalarType::Int => ValueWidth::I32,
@@ -60,8 +67,13 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             scalar_width(*scalar_type)
         }
         LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::PointerSubscript {
+            element_type: ScalarType::Int,
+            ..
+        }
         | LoweredExpr::Call { .. }
         | LoweredExpr::Integer(_) => ValueWidth::I32,
+        LoweredExpr::PointerSubscript { element_type, .. } => scalar_width(*element_type),
         LoweredExpr::Assign { target, .. } => lowered_lvalue_width(target),
         LoweredExpr::Unary { op, expr } => match op {
             UnaryOp::LogicalNot => ValueWidth::I32,
@@ -81,6 +93,7 @@ const fn lowered_lvalue_width(target: &LoweredLValue) -> ValueWidth {
         LoweredLValue::Local { scalar_type, .. } | LoweredLValue::Global { scalar_type, .. } => {
             scalar_width(*scalar_type)
         }
+        LoweredLValue::PointerSubscript { element_type, .. } => scalar_width(*element_type),
     }
 }
 
@@ -501,11 +514,16 @@ fn emit_aarch64_parameter_stores(
     function: &LoweredFunction,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    const REGISTERS: [&str; 8] = ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"];
-    let Some(registers) = REGISTERS.get(..function.parameter_count) else {
+    const MAX_REGISTER_ARGS: usize = 8;
+    if function.parameter_count > MAX_REGISTER_ARGS {
         return Err(CompileError::new("too many function parameters"));
-    };
-    for (slot, register) in registers.iter().enumerate() {
+    }
+    for slot in 0..function.parameter_count {
+        let Some(local_slot) = function.local_slots.get(slot) else {
+            return Err(CompileError::new("internal error: missing parameter slot"));
+        };
+        let width = scalar_width(local_slot.scalar_type);
+        let register = aarch64_parameter_register(slot, width);
         write_assembly!(
             assembly,
             "\tstr {register}, [sp, #{}]\n",
@@ -519,15 +537,21 @@ fn emit_x86_64_parameter_stores(
     function: &LoweredFunction,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    const REGISTERS: [&str; 6] = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
-    let Some(registers) = REGISTERS.get(..function.parameter_count) else {
+    const MAX_REGISTER_ARGS: usize = 6;
+    if function.parameter_count > MAX_REGISTER_ARGS {
         return Err(CompileError::new("too many function parameters"));
-    };
-    for (slot, register) in registers.iter().enumerate() {
+    }
+    for slot in 0..function.parameter_count {
+        let Some(local_slot) = function.local_slots.get(slot) else {
+            return Err(CompileError::new("internal error: missing parameter slot"));
+        };
+        let width = scalar_width(local_slot.scalar_type);
+        let register = x86_64_argument_register(slot, width)?;
         write_assembly!(
             assembly,
-            "\tmovl {register}, {}(%rbp)\n",
-            x86_stack_offset(local_offset(function, slot)?, ValueWidth::I32)
+            "\tmov{} {register}, {}(%rbp)\n",
+            x86_64_instruction_suffix(width),
+            x86_stack_offset(local_offset(function, slot)?, width)
         )?;
     }
     Ok(())
@@ -595,6 +619,21 @@ fn emit_aarch64_expr_natural(
                 assembly,
             )
         }
+        LoweredExpr::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+        } => emit_aarch64_load_pointer_subscript(
+            PointerSubscriptExpr {
+                pointer,
+                index,
+                element_type: *element_type,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         LoweredExpr::Assign { target, value } => {
             emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
         }
@@ -603,28 +642,7 @@ fn emit_aarch64_expr_natural(
             scalar_type,
         } => emit_aarch64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
         LoweredExpr::Unary { op, expr } => {
-            emit_aarch64_expr(expr, temporary_base, depth, labels, assembly)?;
-            let width = expr_width(expr);
-            match op {
-                UnaryOp::Plus => {}
-                UnaryOp::Minus => match width {
-                    ValueWidth::I32 => assembly.push_str("\tneg w0, w0\n"),
-                    ValueWidth::I64 => assembly.push_str("\tneg x0, x0\n"),
-                    ValueWidth::F64 => assembly.push_str("\tfneg d0, d0\n"),
-                },
-                UnaryOp::BitNot => match width {
-                    ValueWidth::I32 => assembly.push_str("\tmvn w0, w0\n"),
-                    ValueWidth::I64 => assembly.push_str("\tmvn x0, x0\n"),
-                    ValueWidth::F64 => {
-                        return Err(CompileError::new("unsupported double bitwise operator"));
-                    }
-                },
-                UnaryOp::LogicalNot => {
-                    emit_aarch64_compare_result_to_zero(width, assembly)?;
-                    assembly.push_str("\tcset w0, eq\n");
-                }
-            }
-            Ok(())
+            emit_aarch64_unary_expr(*op, expr, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::Cast { target, expr } => emit_aarch64_expr_with_width(
             expr,
@@ -1014,6 +1032,41 @@ fn emit_aarch64_load_global_byte_subscript(
     Ok(())
 }
 
+fn emit_aarch64_load_pointer_subscript(
+    subscript: PointerSubscriptExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let base_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let width = scalar_width(subscript.element_type);
+    emit_aarch64_expr_with_width(
+        subscript.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    write_assembly!(
+        assembly,
+        "\tldr {}, [x16, w0, sxtw #{}]\n",
+        aarch64_result_register(width),
+        memory_scale_shift(width)
+    )
+}
+
 fn emit_aarch64_assign(
     target: &LoweredLValue,
     value: &LoweredExpr,
@@ -1023,13 +1076,105 @@ fn emit_aarch64_assign(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = lowered_lvalue_width(target);
-    emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
     match target {
-        LoweredLValue::Local { offset, .. } => emit_aarch64_store_result(width, *offset, assembly),
+        LoweredLValue::Local { offset, .. } => {
+            emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
+            emit_aarch64_store_result(width, *offset, assembly)
+        }
         LoweredLValue::Global { name, .. } => {
+            emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
             emit_aarch64_store_global(name, width, labels.target, assembly)
         }
+        LoweredLValue::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+        } => emit_aarch64_store_pointer_subscript(
+            PointerSubscriptExpr {
+                pointer,
+                index,
+                element_type: *element_type,
+            },
+            value,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
     }
+}
+
+fn emit_aarch64_store_pointer_subscript(
+    subscript: PointerSubscriptExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(subscript.element_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let base_offset = temporary_base + ((depth + 1) * TEMPORARY_BYTES);
+    emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
+    emit_aarch64_store_temporary(width, value_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        subscript.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 2,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 2,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmov w17, w0\n");
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    emit_aarch64_load_temporary(width, value_offset, assembly)?;
+    write_assembly!(
+        assembly,
+        "\tstr {}, [x16, w17, sxtw #{}]\n",
+        aarch64_result_register(width),
+        memory_scale_shift(width)
+    )
+}
+
+fn emit_aarch64_unary_expr(
+    op: UnaryOp,
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    emit_aarch64_expr(expr, temporary_base, depth, labels, assembly)?;
+    let width = expr_width(expr);
+    match op {
+        UnaryOp::Plus => {}
+        UnaryOp::Minus => match width {
+            ValueWidth::I32 => assembly.push_str("\tneg w0, w0\n"),
+            ValueWidth::I64 => assembly.push_str("\tneg x0, x0\n"),
+            ValueWidth::F64 => assembly.push_str("\tfneg d0, d0\n"),
+        },
+        UnaryOp::BitNot => match width {
+            ValueWidth::I32 => assembly.push_str("\tmvn w0, w0\n"),
+            ValueWidth::I64 => assembly.push_str("\tmvn x0, x0\n"),
+            ValueWidth::F64 => {
+                return Err(CompileError::new("unsupported double bitwise operator"));
+            }
+        },
+        UnaryOp::LogicalNot => {
+            emit_aarch64_compare_result_to_zero(width, assembly)?;
+            assembly.push_str("\tcset w0, eq\n");
+        }
+    }
+    Ok(())
 }
 
 const fn aarch64_register_prefix(width: ValueWidth) -> &'static str {
@@ -1038,6 +1183,11 @@ const fn aarch64_register_prefix(width: ValueWidth) -> &'static str {
         ValueWidth::I64 => "x",
         ValueWidth::F64 => "d",
     }
+}
+
+fn aarch64_parameter_register(index: usize, width: ValueWidth) -> String {
+    let prefix = aarch64_register_prefix(width);
+    format!("{prefix}{index}")
 }
 
 const fn aarch64_result_register(width: ValueWidth) -> &'static str {
@@ -1212,6 +1362,7 @@ fn emit_x86_64_expr_natural(
         }
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::PointerSubscript { .. }
         | LoweredExpr::Assign { .. }) => emit_x86_64_global_or_assignment_expr(
             expr,
             temporary_base,
@@ -1314,6 +1465,22 @@ fn emit_x86_64_global_or_assignment_expr(
         LoweredExpr::GlobalByteSubscript { name, index } => emit_x86_64_load_global_byte_subscript(
             name,
             index,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+        } => emit_x86_64_load_pointer_subscript(
+            PointerSubscriptExpr {
+                pointer,
+                index,
+                element_type: *element_type,
+            },
             temporary_base,
             depth,
             target,
@@ -1702,6 +1869,46 @@ fn emit_x86_64_load_global_byte_subscript(
     Ok(())
 }
 
+fn emit_x86_64_load_pointer_subscript(
+    subscript: PointerSubscriptExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let base_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let width = scalar_width(subscript.element_type);
+    emit_x86_64_expr_with_width(
+        subscript.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    write_assembly!(
+        assembly,
+        "\tmov{} (%rcx,%rax,{}), {}\n",
+        x86_64_instruction_suffix(width),
+        memory_scale_bytes(width),
+        x86_64_result_register(width)
+    )
+}
+
 fn emit_x86_64_assign(
     target: &LoweredLValue,
     value: &LoweredExpr,
@@ -1712,21 +1919,103 @@ fn emit_x86_64_assign(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = lowered_lvalue_width(target);
+    match target {
+        LoweredLValue::Local { offset, .. } => {
+            emit_x86_64_expr_with_width(
+                value,
+                width,
+                temporary_base,
+                depth,
+                codegen_target,
+                labels,
+                assembly,
+            )?;
+            emit_x86_64_store_result(width, *offset, assembly)
+        }
+        LoweredLValue::Global { name, .. } => {
+            emit_x86_64_expr_with_width(
+                value,
+                width,
+                temporary_base,
+                depth,
+                codegen_target,
+                labels,
+                assembly,
+            )?;
+            emit_x86_64_store_global(name, width, codegen_target, assembly)
+        }
+        LoweredLValue::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+        } => emit_x86_64_store_pointer_subscript(
+            PointerSubscriptExpr {
+                pointer,
+                index,
+                element_type: *element_type,
+            },
+            value,
+            temporary_base,
+            depth,
+            codegen_target,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_x86_64_store_pointer_subscript(
+    subscript: PointerSubscriptExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(subscript.element_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let base_offset = temporary_base + ((depth + 1) * TEMPORARY_BYTES);
     emit_x86_64_expr_with_width(
         value,
         width,
         temporary_base,
         depth,
-        codegen_target,
+        target,
         labels,
         assembly,
     )?;
-    match target {
-        LoweredLValue::Local { offset, .. } => emit_x86_64_store_result(width, *offset, assembly),
-        LoweredLValue::Global { name, .. } => {
-            emit_x86_64_store_global(name, width, codegen_target, assembly)
-        }
-    }
+    emit_x86_64_store_temporary(width, value_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        subscript.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 2,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 2,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    assembly.push_str("\tmovq %rax, %rdx\n");
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    emit_x86_64_load_temporary(width, value_offset, assembly)?;
+    write_assembly!(
+        assembly,
+        "\tmov{} {}, (%rcx,%rdx,{})\n",
+        x86_64_instruction_suffix(width),
+        x86_64_result_register(width),
+        memory_scale_bytes(width)
+    )
 }
 
 fn emit_x86_64_negate_f64(
@@ -2029,7 +2318,10 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::GlobalByteSubscript { index, .. } => expr_depth(index),
-        LoweredExpr::Assign { value, .. } => expr_depth(value),
+        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+            pointer_lvalue_address_depth(pointer, index)
+        }
+        LoweredExpr::Assign { target, value } => assign_expr_depth(target, value),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
             left,
@@ -2044,6 +2336,25 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
             .max(expr_depth(else_expr)),
         LoweredExpr::Binary { left, right, .. } => 1 + expr_depth(left).max(expr_depth(right)),
     }
+}
+
+fn assign_expr_depth(target: &LoweredLValue, value: &LoweredExpr) -> usize {
+    expr_depth(value)
+        .max(1)
+        .max(1 + lvalue_address_depth(target))
+}
+
+fn lvalue_address_depth(target: &LoweredLValue) -> usize {
+    match target {
+        LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => 0,
+        LoweredLValue::PointerSubscript { pointer, index, .. } => {
+            pointer_lvalue_address_depth(pointer, index)
+        }
+    }
+}
+
+fn pointer_lvalue_address_depth(pointer: &LoweredExpr, index: &LoweredExpr) -> usize {
+    1 + expr_depth(pointer).max(expr_depth(index))
 }
 
 fn function_uses_call(function: &LoweredFunction) -> bool {
@@ -2095,13 +2406,27 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
             expr_needs_preserved_temp(expr)
         }
         LoweredExpr::GlobalByteSubscript { index, .. } => expr_needs_preserved_temp(index),
-        LoweredExpr::Assign { value, .. } => expr_needs_preserved_temp(value),
+        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+            expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
+        }
+        LoweredExpr::Assign { target, value } => {
+            lvalue_needs_preserved_temp(target) || expr_needs_preserved_temp(value)
+        }
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
         | LoweredExpr::Local { .. } => false,
+    }
+}
+
+fn lvalue_needs_preserved_temp(target: &LoweredLValue) -> bool {
+    match target {
+        LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => false,
+        LoweredLValue::PointerSubscript { pointer, index, .. } => {
+            expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
+        }
     }
 }
 
@@ -2132,13 +2457,25 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         | LoweredExpr::Local { .. } => false,
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
         LoweredExpr::GlobalByteSubscript { index, .. } => expr_uses_call(index),
-        LoweredExpr::Assign { value, .. } => expr_uses_call(value),
+        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+            expr_uses_call(pointer) || expr_uses_call(index)
+        }
+        LoweredExpr::Assign { target, value } => lvalue_uses_call(target) || expr_uses_call(value),
         LoweredExpr::Conditional {
             condition,
             then_expr,
             else_expr,
         } => expr_uses_call(condition) || expr_uses_call(then_expr) || expr_uses_call(else_expr),
         LoweredExpr::Binary { left, right, .. } => expr_uses_call(left) || expr_uses_call(right),
+    }
+}
+
+fn lvalue_uses_call(target: &LoweredLValue) -> bool {
+    match target {
+        LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => false,
+        LoweredLValue::PointerSubscript { pointer, index, .. } => {
+            expr_uses_call(pointer) || expr_uses_call(index)
+        }
     }
 }
 
@@ -2239,6 +2576,20 @@ fn call_arg_depth(args: &[LoweredExpr]) -> usize {
 }
 
 const fn width_bytes(width: ValueWidth) -> usize {
+    match width {
+        ValueWidth::I32 => 4,
+        ValueWidth::I64 | ValueWidth::F64 => 8,
+    }
+}
+
+const fn memory_scale_shift(width: ValueWidth) -> u8 {
+    match width {
+        ValueWidth::I32 => 2,
+        ValueWidth::I64 | ValueWidth::F64 => 3,
+    }
+}
+
+const fn memory_scale_bytes(width: ValueWidth) -> u8 {
     match width {
         ValueWidth::I32 => 4,
         ValueWidth::I64 | ValueWidth::F64 => 8,

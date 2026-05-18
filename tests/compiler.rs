@@ -268,23 +268,26 @@ fn compiler_emits_integer_function_call_arguments() {
     match target {
         Target::Aarch64AppleDarwin => {
             assert!(assembly.contains("\tldr w0, [sp, #0]\n"));
+            assert!(assembly.contains("\tstr x1, [sp, #8]\n"));
             assert!(assembly.contains("\tmovz w0, #41\n"));
-            assert!(assembly.contains("\tldr w0, [sp, #8]\n"));
-            assert!(assembly.contains("\tldr w1, [sp, #16]\n"));
+            assert!(assembly.contains("\tldr w0, [sp, #16]\n"));
+            assert!(assembly.contains("\tldr w1, [sp, #24]\n"));
             assert!(assembly.contains("\tbl _add\n"));
         }
         Target::X86_64AppleDarwin => {
             assert!(assembly.contains("\tmovl -4(%rbp), %eax\n"));
+            assert!(assembly.contains("\tmovq %rsi, -16(%rbp)\n"));
             assert!(assembly.contains("\tmovl $41, %eax\n"));
-            assert!(assembly.contains("\tmovl -12(%rbp), %edi\n"));
-            assert!(assembly.contains("\tmovl -20(%rbp), %esi\n"));
+            assert!(assembly.contains("\tmovl -20(%rbp), %edi\n"));
+            assert!(assembly.contains("\tmovl -28(%rbp), %esi\n"));
             assert!(assembly.contains("\tcall _add\n"));
         }
         Target::X86_64UnknownLinuxGnu => {
             assert!(assembly.contains("\tmovl -4(%rbp), %eax\n"));
+            assert!(assembly.contains("\tmovq %rsi, -16(%rbp)\n"));
             assert!(assembly.contains("\tmovl $41, %eax\n"));
-            assert!(assembly.contains("\tmovl -12(%rbp), %edi\n"));
-            assert!(assembly.contains("\tmovl -20(%rbp), %esi\n"));
+            assert!(assembly.contains("\tmovl -20(%rbp), %edi\n"));
+            assert!(assembly.contains("\tmovl -28(%rbp), %esi\n"));
             assert!(assembly.contains("\tcall add\n"));
         }
     }
@@ -606,6 +609,47 @@ int main(void) {
     assert!(assembly.contains("rndindex"));
     assert!(assembly.contains("prndindex"));
     assert!(assembly.contains("M_ClearRandom"));
+}
+
+#[test]
+fn compiler_accepts_m_bbox_pointer_subscript_slice() {
+    // given
+    let source = r"enum { BOXTOP, BOXBOTTOM, BOXLEFT, BOXRIGHT };
+void M_ClearBox(int *box) {
+    box[BOXTOP] = box[BOXRIGHT] = -1;
+    box[BOXBOTTOM] = box[BOXLEFT] = 10;
+}
+void M_AddToBox(int *box, int x, int y) {
+    if (x < box[BOXLEFT])
+        box[BOXLEFT] = x;
+    else if (x > box[BOXRIGHT])
+        box[BOXRIGHT] = x;
+    if (y < box[BOXBOTTOM])
+        box[BOXBOTTOM] = y;
+    else if (y > box[BOXTOP])
+        box[BOXTOP] = y;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly = emit_assembly(&lowered, Target::native()).expect("assembly should emit");
+    let linux_x86_64_assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("linux assembly should emit");
+
+    // then
+    assert!(assembly.contains("M_ClearBox"));
+    assert!(assembly.contains("M_AddToBox"));
+    match Target::native() {
+        Target::Aarch64AppleDarwin => assert!(assembly.contains("sxtw #2")),
+        Target::X86_64AppleDarwin | Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains(",%rax,4)"));
+        }
+    }
+    assert!(linux_x86_64_assembly.contains("(%rcx,%rax,4)"));
+    assert!(linux_x86_64_assembly.contains("(%rcx,%rdx,4)"));
 }
 
 #[test]
