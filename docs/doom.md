@@ -124,7 +124,8 @@ File-scope pointers to struct typedefs, such as `static player_t *plr`, retain
 their referent for member access. Pointer-valued struct fields also carry their
 referent, covering nested forms such as `plr->mo->x` when the pointee layouts
 are known. Struct field parsing accepts untracked typedef scalars and simple
-array declarators as compile-progress approximations.
+array declarators, including scalar member-array subscripts such as
+`plr->powers[pw_allmap]`.
 Plain `unsigned` parameters are accepted as integer parameters.
 The Doom typedef scalar set includes `lighttable_t`, enabling globals such as
 `lighttable_t* dc_colormap`.
@@ -140,21 +141,37 @@ storage.
 Local pointers to typedef'd structs such as `patch_t* patch` are accepted in
 function bodies that have already seen the struct typedef.
 Top-level arrays of known struct typedefs with aggregate initializers are
-skipped instead of being misclassified as integer arrays.
+accepted as zero-filled storage and decay to their global address for calls.
+Global struct objects, including brace-initialized objects such as
+`cheatseq_t cheat_amap = { ... }`, are also emitted as zero-filled storage for
+address-taking.
+Extern pointers to struct typedefs retain their referent, and struct objects
+reached through pointer subscripts such as `lines[i].v1->x` are lowered through
+dynamic `base + index * sizeof(struct)` addressing. Local typed struct pointers
+retain their referent, typed pointer casts such as `(memblock_t*)p` carry their
+pointee for `->` access, `sizeof(struct_typedef)` reports known layout size,
+standard streams `stdin`/`stdout`/`stderr` are available as extern pointer
+bindings, and `&nested.struct.member` lowers to a field address.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but eleven of the 62 C files still fail before object generation. `doomdef.c`,
-`doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
-`m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently reach assembly
-generation.
-The current `am_map.c` blocker is struct member access through a typed pointer
-subscript such as the `lines[i].v1->x` family, not the earlier
-`AM_getIslope` member expressions, `st_notify` local static aggregate,
-`namebuf` stack array, switch statement, `case '-'` label, `litelevels` local
-integer array, local enum, `register` implicit-int locals, local `fpoint_t tmp`,
-static local `fline_t fl`, `continue`, `angle_t`, `static fixed_t m_x, m_y`,
-or `static player_t *plr` declarations.
+but fifty of the 62 C files still fail before object generation. `am_map.c`,
+`doomdef.c`, `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`,
+`m_fixed.c`, `m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently
+reach assembly generation.
+The former `am_map.c` blockers have moved past `AM_getIslope` member
+expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
+statement, `case '-'` label, `litelevels` local integer array, local enum,
+`register` implicit-int locals, local `fpoint_t tmp`, static local
+`fline_t fl`, `continue`, `angle_t`, `static fixed_t m_x, m_y`, `static
+player_t *plr`, typed pointer-subscript member access such as `lines[i].v1->x`,
+`markpoints[i].x`, `m_paninc.x`, `sizeof(memblock_t)`, `(memblock_t*)` member
+access, `stderr`, `plr->powers[pw_allmap]`, `&l.a.x`, and initialized vector
+tables such as `cheat_player_arrow`.
+The current broad scan now shows `d_items.c` blocked on a conflicting
+`weaponinfo` declaration, while many other files are blocked by enum-sized
+arrays, old-style function definitions, function-pointer declarations, and
+unsupported expression forms.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first

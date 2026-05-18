@@ -1301,6 +1301,81 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `am_map.c` Struct Address Sweep
+
+This slice moved `am_map.c` from the typed pointer-subscript member blocker to
+assembly generation.
+
+New covered Doom shapes include:
+
+```c
+lines[i].v1->x;
+markpoints[i].x;
+m_paninc.x;
+plr->powers[pw_allmap];
+((memblock_t *)p)->id;
+&l.a.x;
+cheat_player_arrow;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_pointer_subscript_struct_member_slice
+compiler_accepts_extern_pointer_subscript_struct_member_slice
+compiler_accepts_global_struct_array_member_slice
+compiler_accepts_global_struct_object_member_slice
+compiler_accepts_extern_struct_array_address_slice
+compiler_accepts_extern_int_array_slice
+compiler_accepts_sizeof_struct_typedef_slice
+compiler_accepts_typed_pointer_cast_member_slice
+compiler_accepts_standard_stream_global_slice
+compiler_accepts_struct_array_field_subscript_slice
+compiler_accepts_struct_member_address_slice
+compiler_accepts_global_struct_array_decay_slice
+compiler_accepts_aggregate_global_address_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+```
+
+Focused `am_map.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779129982`. The session exited naturally; no
+`tmux kill-server` was used:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779129982.txt
+ok=12
+fail=50
+OK am_map.c
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before this slice:
+    error: member access requires a struct base
+  after this slice:
+    OK am_map.c
+```
+
+Next visible blockers include conflicting declarations such as
+`weaponinfo`, enum-sized arrays, old-style function definitions,
+function-pointer declarations, and unsupported expression forms.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `am_map.c` Local Control-Flow Sweep
 
 `compile -S` now moves the focused `am_map.c` path past several local function
