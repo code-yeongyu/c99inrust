@@ -52,6 +52,28 @@ pub fn emit_assembly(program: &LoweredProgram, target: Target) -> CompileResult<
     Ok(assembly)
 }
 
+struct LabelAllocator<'a> {
+    function: &'a str,
+    target: Target,
+    next_label: usize,
+}
+
+impl<'a> LabelAllocator<'a> {
+    fn new(function: &'a LoweredFunction, target: Target) -> Self {
+        Self {
+            function: &function.name,
+            target,
+            next_label: next_available_label(function),
+        }
+    }
+
+    fn fresh(&mut self) -> String {
+        let label = self.next_label;
+        self.next_label += 1;
+        branch_label(self.function, label, self.target)
+    }
+}
+
 fn emit_aarch64_function(
     function: &LoweredFunction,
     target: Target,
@@ -67,6 +89,7 @@ fn emit_aarch64_function(
     let local_bytes = function.local_count * 4;
     let temporary_base = local_bytes;
     let stack_bytes = align_to(local_bytes + (temporary_count * 4), 16);
+    let mut labels = LabelAllocator::new(function, target);
     assembly.push_str(&format!(".globl {label}\n"));
     assembly.push_str(".p2align 2\n");
     assembly.push_str(&format!("{label}:\n"));
@@ -76,11 +99,11 @@ fn emit_aarch64_function(
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal { slot, value } => {
-                emit_aarch64_expr(value, temporary_base, 0, assembly)?;
+                emit_aarch64_expr(value, temporary_base, 0, &mut labels, assembly)?;
                 assembly.push_str(&format!("\tstr w0, [sp, #{}]\n", local_offset(*slot)));
             }
             Instruction::JumpIfZero { condition, label } => {
-                emit_aarch64_expr(condition, temporary_base, 0, assembly)?;
+                emit_aarch64_expr(condition, temporary_base, 0, &mut labels, assembly)?;
                 assembly.push_str("\tcmp w0, #0\n");
                 assembly.push_str(&format!(
                     "\tb.eq {}\n",
@@ -100,7 +123,7 @@ fn emit_aarch64_function(
                 ));
             }
             Instruction::Return(expr) => {
-                emit_aarch64_expr(expr, temporary_base, 0, assembly)?;
+                emit_aarch64_expr(expr, temporary_base, 0, &mut labels, assembly)?;
                 if stack_bytes > 0 {
                     assembly.push_str(&format!("\tadd sp, sp, #{stack_bytes}\n"));
                 }
@@ -118,6 +141,7 @@ fn emit_x86_64_function(
 ) -> CompileResult<()> {
     let label = label_name(&function.name, target);
     let stack_bytes = align_to(function.local_count * 4, 16);
+    let mut labels = LabelAllocator::new(function, target);
     assembly.push_str(&format!(".globl {label}\n"));
     assembly.push_str(&format!("{label}:\n"));
     assembly.push_str("\tpushq %rbp\n");
@@ -128,11 +152,11 @@ fn emit_x86_64_function(
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal { slot, value } => {
-                emit_x86_64_expr(value, assembly)?;
+                emit_x86_64_expr(value, &mut labels, assembly)?;
                 assembly.push_str(&format!("\tmovl %eax, {}(%rbp)\n", x86_local_offset(*slot)));
             }
             Instruction::JumpIfZero { condition, label } => {
-                emit_x86_64_expr(condition, assembly)?;
+                emit_x86_64_expr(condition, &mut labels, assembly)?;
                 assembly.push_str("\tcmpl $0, %eax\n");
                 assembly.push_str(&format!(
                     "\tje {}\n",
@@ -152,7 +176,7 @@ fn emit_x86_64_function(
                 ));
             }
             Instruction::Return(expr) => {
-                emit_x86_64_expr(expr, assembly)?;
+                emit_x86_64_expr(expr, &mut labels, assembly)?;
                 assembly.push_str("\tleave\n");
                 assembly.push_str("\tret\n");
             }
@@ -165,6 +189,7 @@ fn emit_aarch64_expr(
     expr: &LoweredExpr,
     temporary_base: usize,
     depth: usize,
+    labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
@@ -174,7 +199,7 @@ fn emit_aarch64_expr(
             Ok(())
         }
         LoweredExpr::Unary { op, expr } => {
-            emit_aarch64_expr(expr, temporary_base, depth, assembly)?;
+            emit_aarch64_expr(expr, temporary_base, depth, labels, assembly)?;
             match op {
                 UnaryOp::Plus => {}
                 UnaryOp::Minus => assembly.push_str("\tneg w0, w0\n"),
@@ -187,10 +212,30 @@ fn emit_aarch64_expr(
             Ok(())
         }
         LoweredExpr::Binary { op, left, right } => {
+            if *op == BinaryOp::LogicalAnd {
+                return emit_aarch64_logical_and(
+                    left,
+                    right,
+                    temporary_base,
+                    depth,
+                    labels,
+                    assembly,
+                );
+            }
+            if *op == BinaryOp::LogicalOr {
+                return emit_aarch64_logical_or(
+                    left,
+                    right,
+                    temporary_base,
+                    depth,
+                    labels,
+                    assembly,
+                );
+            }
             let temporary_offset = temporary_base + (depth * 4);
-            emit_aarch64_expr(left, temporary_base, depth + 1, assembly)?;
+            emit_aarch64_expr(left, temporary_base, depth + 1, labels, assembly)?;
             assembly.push_str(&format!("\tstr w0, [sp, #{temporary_offset}]\n"));
-            emit_aarch64_expr(right, temporary_base, depth + 1, assembly)?;
+            emit_aarch64_expr(right, temporary_base, depth + 1, labels, assembly)?;
             assembly.push_str("\tmov w1, w0\n");
             assembly.push_str(&format!("\tldr w0, [sp, #{temporary_offset}]\n"));
             match op {
@@ -210,6 +255,7 @@ fn emit_aarch64_expr(
                 BinaryOp::GreaterEqual => emit_aarch64_comparison("ge", assembly),
                 BinaryOp::Equal => emit_aarch64_comparison("eq", assembly),
                 BinaryOp::NotEqual => emit_aarch64_comparison("ne", assembly),
+                BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {}
                 BinaryOp::BitAnd => assembly.push_str("\tand w0, w0, w1\n"),
                 BinaryOp::BitXor => assembly.push_str("\teor w0, w0, w1\n"),
                 BinaryOp::BitOr => assembly.push_str("\torr w0, w0, w1\n"),
@@ -219,7 +265,11 @@ fn emit_aarch64_expr(
     }
 }
 
-fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<()> {
+fn emit_x86_64_expr(
+    expr: &LoweredExpr,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
     match expr {
         LoweredExpr::Integer(value) => {
             let value = i32::try_from(*value)
@@ -232,7 +282,7 @@ fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<
             Ok(())
         }
         LoweredExpr::Unary { op, expr } => {
-            emit_x86_64_expr(expr, assembly)?;
+            emit_x86_64_expr(expr, labels, assembly)?;
             match op {
                 UnaryOp::Plus => {}
                 UnaryOp::Minus => assembly.push_str("\tnegl %eax\n"),
@@ -246,9 +296,15 @@ fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<
             Ok(())
         }
         LoweredExpr::Binary { op, left, right } => {
-            emit_x86_64_expr(left, assembly)?;
+            if *op == BinaryOp::LogicalAnd {
+                return emit_x86_64_logical_and(left, right, labels, assembly);
+            }
+            if *op == BinaryOp::LogicalOr {
+                return emit_x86_64_logical_or(left, right, labels, assembly);
+            }
+            emit_x86_64_expr(left, labels, assembly)?;
             assembly.push_str("\tpushq %rax\n");
-            emit_x86_64_expr(right, assembly)?;
+            emit_x86_64_expr(right, labels, assembly)?;
             assembly.push_str("\tmovl %eax, %ecx\n");
             assembly.push_str("\tpopq %rax\n");
             match op {
@@ -272,6 +328,7 @@ fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<
                 BinaryOp::GreaterEqual => emit_x86_64_comparison("setge", assembly),
                 BinaryOp::Equal => emit_x86_64_comparison("sete", assembly),
                 BinaryOp::NotEqual => emit_x86_64_comparison("setne", assembly),
+                BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {}
                 BinaryOp::BitAnd => assembly.push_str("\tandl %ecx, %eax\n"),
                 BinaryOp::BitXor => assembly.push_str("\txorl %ecx, %eax\n"),
                 BinaryOp::BitOr => assembly.push_str("\torl %ecx, %eax\n"),
@@ -279,6 +336,98 @@ fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<
             Ok(())
         }
     }
+}
+
+fn emit_aarch64_logical_and(
+    left: &LoweredExpr,
+    right: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let false_label = labels.fresh();
+    let end_label = labels.fresh();
+    emit_aarch64_expr(left, temporary_base, depth, labels, assembly)?;
+    assembly.push_str("\tcmp w0, #0\n");
+    assembly.push_str(&format!("\tb.eq {false_label}\n"));
+    emit_aarch64_expr(right, temporary_base, depth, labels, assembly)?;
+    assembly.push_str("\tcmp w0, #0\n");
+    assembly.push_str(&format!("\tb.eq {false_label}\n"));
+    emit_aarch64_i32(1, assembly)?;
+    assembly.push_str(&format!("\tb {end_label}\n"));
+    assembly.push_str(&format!("{false_label}:\n"));
+    emit_aarch64_i32(0, assembly)?;
+    assembly.push_str(&format!("{end_label}:\n"));
+    Ok(())
+}
+
+fn emit_aarch64_logical_or(
+    left: &LoweredExpr,
+    right: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let true_label = labels.fresh();
+    let end_label = labels.fresh();
+    emit_aarch64_expr(left, temporary_base, depth, labels, assembly)?;
+    assembly.push_str("\tcmp w0, #0\n");
+    assembly.push_str(&format!("\tb.ne {true_label}\n"));
+    emit_aarch64_expr(right, temporary_base, depth, labels, assembly)?;
+    assembly.push_str("\tcmp w0, #0\n");
+    assembly.push_str(&format!("\tb.ne {true_label}\n"));
+    emit_aarch64_i32(0, assembly)?;
+    assembly.push_str(&format!("\tb {end_label}\n"));
+    assembly.push_str(&format!("{true_label}:\n"));
+    emit_aarch64_i32(1, assembly)?;
+    assembly.push_str(&format!("{end_label}:\n"));
+    Ok(())
+}
+
+fn emit_x86_64_logical_and(
+    left: &LoweredExpr,
+    right: &LoweredExpr,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let false_label = labels.fresh();
+    let end_label = labels.fresh();
+    emit_x86_64_expr(left, labels, assembly)?;
+    assembly.push_str("\tcmpl $0, %eax\n");
+    assembly.push_str(&format!("\tje {false_label}\n"));
+    emit_x86_64_expr(right, labels, assembly)?;
+    assembly.push_str("\tcmpl $0, %eax\n");
+    assembly.push_str(&format!("\tje {false_label}\n"));
+    assembly.push_str("\tmovl $1, %eax\n");
+    assembly.push_str(&format!("\tjmp {end_label}\n"));
+    assembly.push_str(&format!("{false_label}:\n"));
+    assembly.push_str("\tmovl $0, %eax\n");
+    assembly.push_str(&format!("{end_label}:\n"));
+    Ok(())
+}
+
+fn emit_x86_64_logical_or(
+    left: &LoweredExpr,
+    right: &LoweredExpr,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let true_label = labels.fresh();
+    let end_label = labels.fresh();
+    emit_x86_64_expr(left, labels, assembly)?;
+    assembly.push_str("\tcmpl $0, %eax\n");
+    assembly.push_str(&format!("\tjne {true_label}\n"));
+    emit_x86_64_expr(right, labels, assembly)?;
+    assembly.push_str("\tcmpl $0, %eax\n");
+    assembly.push_str(&format!("\tjne {true_label}\n"));
+    assembly.push_str("\tmovl $0, %eax\n");
+    assembly.push_str(&format!("\tjmp {end_label}\n"));
+    assembly.push_str(&format!("{true_label}:\n"));
+    assembly.push_str("\tmovl $1, %eax\n");
+    assembly.push_str(&format!("{end_label}:\n"));
+    Ok(())
 }
 
 fn emit_aarch64_comparison(condition: &str, assembly: &mut String) {
@@ -313,10 +462,33 @@ fn instruction_depth(instruction: &Instruction) -> usize {
     }
 }
 
+fn next_available_label(function: &LoweredFunction) -> usize {
+    function
+        .instructions
+        .iter()
+        .filter_map(instruction_label)
+        .max()
+        .map_or(0, |label| label + 1)
+}
+
+fn instruction_label(instruction: &Instruction) -> Option<usize> {
+    match instruction {
+        Instruction::StoreLocal { .. } | Instruction::Return(_) => None,
+        Instruction::JumpIfZero { label, .. }
+        | Instruction::Jump { label }
+        | Instruction::Label { label } => Some(*label),
+    }
+}
+
 fn expr_depth(expr: &LoweredExpr) -> usize {
     match expr {
         LoweredExpr::Integer(_) | LoweredExpr::Local(_) => 0,
         LoweredExpr::Unary { expr, .. } => expr_depth(expr),
+        LoweredExpr::Binary {
+            op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
+            left,
+            right,
+        } => expr_depth(left).max(expr_depth(right)),
         LoweredExpr::Binary { left, right, .. } => 1 + expr_depth(left).max(expr_depth(right)),
     }
 }

@@ -76,6 +76,12 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         }
         Expr::Binary { op, left, right } => {
             let left = const_eval(left)?;
+            if *op == BinaryOp::LogicalAnd && left == 0 {
+                return Ok(0);
+            }
+            if *op == BinaryOp::LogicalOr && left != 0 {
+                return Ok(1);
+            }
             let right = const_eval(right)?;
             eval_binary(*op, left, right)
         }
@@ -313,6 +319,8 @@ fn eval_binary(op: BinaryOp, left: i64, right: i64) -> CompileResult<i64> {
         BinaryOp::GreaterEqual => Ok(i64::from(left >= right)),
         BinaryOp::Equal => Ok(i64::from(left == right)),
         BinaryOp::NotEqual => Ok(i64::from(left != right)),
+        BinaryOp::LogicalAnd => Ok(i64::from(left != 0 && right != 0)),
+        BinaryOp::LogicalOr => Ok(i64::from(left != 0 || right != 0)),
         BinaryOp::BitAnd => Ok(left & right),
         BinaryOp::BitXor => Ok(left ^ right),
         BinaryOp::BitOr => Ok(left | right),

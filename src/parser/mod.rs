@@ -73,6 +73,8 @@ pub enum BinaryOp {
     GreaterEqual,
     Equal,
     NotEqual,
+    LogicalAnd,
+    LogicalOr,
     BitAnd,
     BitXor,
     BitOr,
@@ -253,7 +255,15 @@ impl Parser<'_> {
     }
 
     fn expression(&mut self) -> CompileResult<Expr> {
-        self.bit_or()
+        self.logical_or()
+    }
+
+    fn logical_or(&mut self) -> CompileResult<Expr> {
+        self.left_associative(Self::logical_and, &[("||", BinaryOp::LogicalOr)])
+    }
+
+    fn logical_and(&mut self) -> CompileResult<Expr> {
+        self.left_associative(Self::bit_or, &[("&&", BinaryOp::LogicalAnd)])
     }
 
     fn bit_or(&mut self) -> CompileResult<Expr> {

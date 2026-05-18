@@ -150,3 +150,35 @@ fn compiler_emits_back_edges_for_while_loops() {
         }
     }
 }
+
+#[test]
+fn compiler_emits_short_circuit_logical_branches() {
+    // given
+    let source = "int main(void) { int x = 0; if (x != 0 && 10 / x > 1) { return 1; } if (x == 0 || 10 / x > 1) { return 42; } return 2; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("b.ne Lmain_"));
+            assert!(assembly.contains("sdiv w0, w0, w1"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains("je Lmain_"));
+            assert!(assembly.contains("jne Lmain_"));
+            assert!(assembly.contains("idivl %ecx"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("je .Lmain_"));
+            assert!(assembly.contains("jne .Lmain_"));
+            assert!(assembly.contains("idivl %ecx"));
+        }
+    }
+}
