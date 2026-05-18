@@ -1278,6 +1278,31 @@ int main(void) { return 0; }";
 }
 
 #[test]
+fn compiler_accepts_pointer_member_post_increment_value_slice() {
+    // given
+    let source = r"typedef struct {
+    unsigned char* sequence;
+    unsigned char* p;
+} cheatseq_t;
+void seed(cheatseq_t* cht, int key) {
+    if (*cht->p == 0) *(cht->p++) = key;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("seed:"));
+    assert!(assembly.contains("\taddq $1, %rax\n"));
+    assert!(assembly.contains("\tmovq %rax, 8(%rcx)\n"));
+}
+
+#[test]
 fn compiler_rejects_pointer_return_signatures() {
     // given
     let source = "char *name(void) { return 0; } int main(void) { return 0; }";

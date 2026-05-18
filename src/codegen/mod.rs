@@ -740,7 +740,7 @@ fn emit_aarch64_memory_expr(
             emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::PostIncrement { target } => {
-            emit_aarch64_post_increment(target, temporary_base, depth, labels.target, assembly)
+            emit_aarch64_post_increment(target, temporary_base, depth, labels, assembly)
         }
         _ => Err(CompileError::new(
             "internal error: expected aarch64 memory expression",
@@ -1200,7 +1200,7 @@ fn emit_aarch64_post_increment(
     target: &LoweredLValue,
     temporary_base: usize,
     depth: usize,
-    codegen_target: Target,
+    labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = lowered_lvalue_width(target);
@@ -1214,18 +1214,69 @@ fn emit_aarch64_post_increment(
             emit_aarch64_load_temporary(width, value_offset, assembly)
         }
         LoweredLValue::Global { name, .. } => {
-            emit_aarch64_load_global(name, width, codegen_target, assembly)?;
+            emit_aarch64_load_global(name, width, labels.target, assembly)?;
             emit_aarch64_store_temporary(width, value_offset, assembly)?;
             emit_aarch64_increment_result(width, assembly)?;
-            emit_aarch64_store_global(name, width, codegen_target, assembly)?;
+            emit_aarch64_store_global(name, width, labels.target, assembly)?;
             emit_aarch64_load_temporary(width, value_offset, assembly)
         }
-        LoweredLValue::GlobalByteSubscript { .. }
-        | LoweredLValue::PointerSubscript { .. }
-        | LoweredLValue::PointerField { .. } => Err(CompileError::new(
-            "post-increment expression supports direct lvalues only",
-        )),
+        LoweredLValue::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => emit_aarch64_post_increment_pointer_field(
+            PointerFieldExpr {
+                pointer,
+                offset: *offset,
+                scalar_type: *scalar_type,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+        LoweredLValue::GlobalByteSubscript { .. } | LoweredLValue::PointerSubscript { .. } => Err(
+            CompileError::new("post-increment expression supports direct lvalues only"),
+        ),
     }
+}
+
+fn emit_aarch64_post_increment_pointer_field(
+    field: PointerFieldExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(field.scalar_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let base_offset = temporary_base + ((depth + 1) * TEMPORARY_BYTES);
+    emit_aarch64_expr_with_width(
+        field.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 2,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    write_assembly!(
+        assembly,
+        "\tldr {}, [x16, #{}]\n",
+        aarch64_result_register(width),
+        field.offset
+    )?;
+    emit_aarch64_store_temporary(width, value_offset, assembly)?;
+    emit_aarch64_increment_result(width, assembly)?;
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    write_assembly!(
+        assembly,
+        "\tstr {}, [x16, #{}]\n",
+        aarch64_result_register(width),
+        field.offset
+    )?;
+    emit_aarch64_load_temporary(width, value_offset, assembly)
 }
 
 fn emit_aarch64_increment_result(width: ValueWidth, assembly: &mut String) -> CompileResult<()> {
@@ -2284,7 +2335,7 @@ fn emit_x86_64_post_increment(
     temporary_base: usize,
     depth: usize,
     codegen_target: Target,
-    _labels: &mut LabelAllocator<'_>,
+    labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = lowered_lvalue_width(target);
@@ -2304,12 +2355,68 @@ fn emit_x86_64_post_increment(
             emit_x86_64_store_global(name, width, codegen_target, assembly)?;
             emit_x86_64_load_temporary(width, value_offset, assembly)
         }
-        LoweredLValue::GlobalByteSubscript { .. }
-        | LoweredLValue::PointerSubscript { .. }
-        | LoweredLValue::PointerField { .. } => Err(CompileError::new(
-            "post-increment expression supports direct lvalues only",
-        )),
+        LoweredLValue::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => emit_x86_64_post_increment_pointer_field(
+            PointerFieldExpr {
+                pointer,
+                offset: *offset,
+                scalar_type: *scalar_type,
+            },
+            temporary_base,
+            depth,
+            codegen_target,
+            labels,
+            assembly,
+        ),
+        LoweredLValue::GlobalByteSubscript { .. } | LoweredLValue::PointerSubscript { .. } => Err(
+            CompileError::new("post-increment expression supports direct lvalues only"),
+        ),
     }
+}
+
+fn emit_x86_64_post_increment_pointer_field(
+    field: PointerFieldExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(field.scalar_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let base_offset = temporary_base + ((depth + 1) * TEMPORARY_BYTES);
+    emit_x86_64_expr_with_width(
+        field.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 2,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    write_assembly!(
+        assembly,
+        "\tmov{} {}(%rcx), {}\n",
+        x86_64_instruction_suffix(width),
+        field.offset,
+        x86_64_result_register(width)
+    )?;
+    emit_x86_64_store_temporary(width, value_offset, assembly)?;
+    emit_x86_64_increment_result(width, assembly)?;
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    write_assembly!(
+        assembly,
+        "\tmov{} {}, {}(%rcx)\n",
+        x86_64_instruction_suffix(width),
+        x86_64_result_register(width),
+        field.offset
+    )?;
+    emit_x86_64_load_temporary(width, value_offset, assembly)
 }
 
 fn emit_x86_64_increment_result(width: ValueWidth, assembly: &mut String) -> CompileResult<()> {
