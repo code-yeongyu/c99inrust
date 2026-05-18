@@ -1909,3 +1909,60 @@ FAIL r_draw.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Local Char Array String Slice
+
+`compile -S` now accepts local `char name[] = "literal"` declarations by
+lowering them as pointer locals initialized from existing string-literal
+storage. This covers the previous focused `r_draw.c` blocker:
+
+```c
+char name1[] = "FLOOR7_2";
+char name2[] = "GRNROCK";
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_char_array_string_initializer_slice
+local_char_array_string_initializer_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+```
+
+Focused `r_draw.c` compile now moves to a later parser blocker:
+
+```text
+error: unsupported function parameter
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779117283`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779117283.txt
+ok=10
+fail=52
+```
+
+Representative moved blocker:
+
+```text
+FAIL r_draw.c
+  before local char array string slice:
+    error: 6207:15: expected punctuator ;
+  after local char array string slice:
+    error: unsupported function parameter
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

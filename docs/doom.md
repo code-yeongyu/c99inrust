@@ -95,6 +95,8 @@ Post-increment expressions on pointer struct members now produce the old field
 value while updating the field.
 Prefix increment and decrement expressions are parsed through the existing
 assignment-expression path, covering scalar conditions such as `++fuzzpos`.
+Local `char name[] = "literal"` declarations are accepted by lowering them as
+pointer locals initialized from string-literal storage.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -107,9 +109,9 @@ The current `am_map.c` blocker is the local static aggregate declaration
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The current `r_draw.c` blocker has moved past `(unsigned)dc_x`, the first
-`do { ... } while (...)` loops, and prefix increment in `R_DrawFuzzColumn`. It
-is now a local char-array string initializer such as
-`char name1[] = "FLOOR7_2";` inside `R_FillBackScreen`.
+`do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, and the
+local char-array string initializers in `R_FillBackScreen`. It is now an
+unsupported function-parameter shape reached later in the translation unit.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
