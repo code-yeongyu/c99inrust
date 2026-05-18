@@ -217,3 +217,35 @@ fn compiler_emits_for_loop_back_edges() {
         }
     }
 }
+
+#[test]
+fn compiler_emits_zero_arg_function_calls() {
+    // given
+    let source = "int answer(void) { return 40; } int main(void) { return 2 + answer(); }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains(".globl _answer"));
+            assert!(assembly.contains("str x30, [sp, #"));
+            assert!(assembly.contains("bl _answer"));
+            assert!(assembly.contains("ldr x30, [sp, #"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains(".globl _answer"));
+            assert!(assembly.contains("call _answer"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains(".globl answer"));
+            assert!(assembly.contains("call answer"));
+        }
+    }
+    assert!(assembly.contains("ret"));
+}

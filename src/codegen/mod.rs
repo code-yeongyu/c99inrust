@@ -88,13 +88,22 @@ fn emit_aarch64_function(
         .unwrap_or(0);
     let local_bytes = function.local_count * 4;
     let temporary_base = local_bytes;
-    let stack_bytes = align_to(local_bytes + (temporary_count * 4), 16);
+    let call_frame_bytes = if function_uses_call(function) { 8 } else { 0 };
+    let stack_bytes = align_to(local_bytes + (temporary_count * 4) + call_frame_bytes, 16);
+    let link_register_offset = if call_frame_bytes > 0 {
+        Some(stack_bytes - 8)
+    } else {
+        None
+    };
     let mut labels = LabelAllocator::new(function, target);
     assembly.push_str(&format!(".globl {label}\n"));
     assembly.push_str(".p2align 2\n");
     assembly.push_str(&format!("{label}:\n"));
     if stack_bytes > 0 {
         assembly.push_str(&format!("\tsub sp, sp, #{stack_bytes}\n"));
+    }
+    if let Some(offset) = link_register_offset {
+        assembly.push_str(&format!("\tstr x30, [sp, #{offset}]\n"));
     }
     for instruction in &function.instructions {
         match instruction {
@@ -124,6 +133,9 @@ fn emit_aarch64_function(
             }
             Instruction::Return(expr) => {
                 emit_aarch64_expr(expr, temporary_base, 0, &mut labels, assembly)?;
+                if let Some(offset) = link_register_offset {
+                    assembly.push_str(&format!("\tldr x30, [sp, #{offset}]\n"));
+                }
                 if stack_bytes > 0 {
                     assembly.push_str(&format!("\tadd sp, sp, #{stack_bytes}\n"));
                 }
@@ -140,7 +152,15 @@ fn emit_x86_64_function(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let label = label_name(&function.name, target);
-    let stack_bytes = align_to(function.local_count * 4, 16);
+    let temporary_count = function
+        .instructions
+        .iter()
+        .map(instruction_depth)
+        .max()
+        .unwrap_or(0);
+    let local_bytes = function.local_count * 4;
+    let temporary_base = local_bytes;
+    let stack_bytes = align_to(local_bytes + (temporary_count * 4), 16);
     let mut labels = LabelAllocator::new(function, target);
     assembly.push_str(&format!(".globl {label}\n"));
     assembly.push_str(&format!("{label}:\n"));
@@ -152,11 +172,11 @@ fn emit_x86_64_function(
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal { slot, value } => {
-                emit_x86_64_expr(value, &mut labels, assembly)?;
+                emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
                 assembly.push_str(&format!("\tmovl %eax, {}(%rbp)\n", x86_local_offset(*slot)));
             }
             Instruction::JumpIfZero { condition, label } => {
-                emit_x86_64_expr(condition, &mut labels, assembly)?;
+                emit_x86_64_expr(condition, temporary_base, 0, target, &mut labels, assembly)?;
                 assembly.push_str("\tcmpl $0, %eax\n");
                 assembly.push_str(&format!(
                     "\tje {}\n",
@@ -176,7 +196,7 @@ fn emit_x86_64_function(
                 ));
             }
             Instruction::Return(expr) => {
-                emit_x86_64_expr(expr, &mut labels, assembly)?;
+                emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
                 assembly.push_str("\tleave\n");
                 assembly.push_str("\tret\n");
             }
@@ -193,6 +213,10 @@ fn emit_aarch64_expr(
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
+        LoweredExpr::Call { callee } => {
+            assembly.push_str(&format!("\tbl {}\n", label_name(callee, labels.target)));
+            Ok(())
+        }
         LoweredExpr::Integer(value) => emit_aarch64_i32(*value, assembly),
         LoweredExpr::Local(slot) => {
             assembly.push_str(&format!("\tldr w0, [sp, #{}]\n", local_offset(*slot)));
@@ -267,10 +291,17 @@ fn emit_aarch64_expr(
 
 fn emit_x86_64_expr(
     expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
+        LoweredExpr::Call { callee } => {
+            assembly.push_str(&format!("\tcall {}\n", label_name(callee, target)));
+            Ok(())
+        }
         LoweredExpr::Integer(value) => {
             let value = i32::try_from(*value)
                 .map_err(|_| CompileError::new("integer literal does not fit i32"))?;
@@ -282,7 +313,7 @@ fn emit_x86_64_expr(
             Ok(())
         }
         LoweredExpr::Unary { op, expr } => {
-            emit_x86_64_expr(expr, labels, assembly)?;
+            emit_x86_64_expr(expr, temporary_base, depth, target, labels, assembly)?;
             match op {
                 UnaryOp::Plus => {}
                 UnaryOp::Minus => assembly.push_str("\tnegl %eax\n"),
@@ -297,16 +328,39 @@ fn emit_x86_64_expr(
         }
         LoweredExpr::Binary { op, left, right } => {
             if *op == BinaryOp::LogicalAnd {
-                return emit_x86_64_logical_and(left, right, labels, assembly);
+                return emit_x86_64_logical_and(
+                    left,
+                    right,
+                    temporary_base,
+                    depth,
+                    target,
+                    labels,
+                    assembly,
+                );
             }
             if *op == BinaryOp::LogicalOr {
-                return emit_x86_64_logical_or(left, right, labels, assembly);
+                return emit_x86_64_logical_or(
+                    left,
+                    right,
+                    temporary_base,
+                    depth,
+                    target,
+                    labels,
+                    assembly,
+                );
             }
-            emit_x86_64_expr(left, labels, assembly)?;
-            assembly.push_str("\tpushq %rax\n");
-            emit_x86_64_expr(right, labels, assembly)?;
+            let temporary_offset = temporary_base + (depth * 4);
+            emit_x86_64_expr(left, temporary_base, depth + 1, target, labels, assembly)?;
+            assembly.push_str(&format!(
+                "\tmovl %eax, {}(%rbp)\n",
+                x86_stack_offset(temporary_offset)
+            ));
+            emit_x86_64_expr(right, temporary_base, depth + 1, target, labels, assembly)?;
             assembly.push_str("\tmovl %eax, %ecx\n");
-            assembly.push_str("\tpopq %rax\n");
+            assembly.push_str(&format!(
+                "\tmovl {}(%rbp), %eax\n",
+                x86_stack_offset(temporary_offset)
+            ));
             match op {
                 BinaryOp::Mul => assembly.push_str("\timull %ecx, %eax\n"),
                 BinaryOp::Div => {
@@ -389,15 +443,18 @@ fn emit_aarch64_logical_or(
 fn emit_x86_64_logical_and(
     left: &LoweredExpr,
     right: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let false_label = labels.fresh();
     let end_label = labels.fresh();
-    emit_x86_64_expr(left, labels, assembly)?;
+    emit_x86_64_expr(left, temporary_base, depth, target, labels, assembly)?;
     assembly.push_str("\tcmpl $0, %eax\n");
     assembly.push_str(&format!("\tje {false_label}\n"));
-    emit_x86_64_expr(right, labels, assembly)?;
+    emit_x86_64_expr(right, temporary_base, depth, target, labels, assembly)?;
     assembly.push_str("\tcmpl $0, %eax\n");
     assembly.push_str(&format!("\tje {false_label}\n"));
     assembly.push_str("\tmovl $1, %eax\n");
@@ -411,15 +468,18 @@ fn emit_x86_64_logical_and(
 fn emit_x86_64_logical_or(
     left: &LoweredExpr,
     right: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let true_label = labels.fresh();
     let end_label = labels.fresh();
-    emit_x86_64_expr(left, labels, assembly)?;
+    emit_x86_64_expr(left, temporary_base, depth, target, labels, assembly)?;
     assembly.push_str("\tcmpl $0, %eax\n");
     assembly.push_str(&format!("\tjne {true_label}\n"));
-    emit_x86_64_expr(right, labels, assembly)?;
+    emit_x86_64_expr(right, temporary_base, depth, target, labels, assembly)?;
     assembly.push_str("\tcmpl $0, %eax\n");
     assembly.push_str(&format!("\tjne {true_label}\n"));
     assembly.push_str("\tmovl $0, %eax\n");
@@ -482,7 +542,7 @@ fn instruction_label(instruction: &Instruction) -> Option<usize> {
 
 fn expr_depth(expr: &LoweredExpr) -> usize {
     match expr {
-        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => 0,
+        LoweredExpr::Call { .. } | LoweredExpr::Integer(_) | LoweredExpr::Local(_) => 0,
         LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
@@ -493,12 +553,40 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
     }
 }
 
+fn function_uses_call(function: &LoweredFunction) -> bool {
+    function.instructions.iter().any(instruction_uses_call)
+}
+
+fn instruction_uses_call(instruction: &Instruction) -> bool {
+    match instruction {
+        Instruction::StoreLocal { value, .. }
+        | Instruction::JumpIfZero {
+            condition: value, ..
+        }
+        | Instruction::Return(value) => expr_uses_call(value),
+        Instruction::Jump { .. } | Instruction::Label { .. } => false,
+    }
+}
+
+fn expr_uses_call(expr: &LoweredExpr) -> bool {
+    match expr {
+        LoweredExpr::Call { .. } => true,
+        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
+        LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
+        LoweredExpr::Binary { left, right, .. } => expr_uses_call(left) || expr_uses_call(right),
+    }
+}
+
 fn local_offset(slot: usize) -> usize {
     slot * 4
 }
 
 fn x86_local_offset(slot: usize) -> String {
     format!("-{}", (slot + 1) * 4)
+}
+
+fn x86_stack_offset(byte_offset: usize) -> String {
+    format!("-{}", byte_offset + 4)
 }
 
 fn align_to(value: usize, alignment: usize) -> usize {

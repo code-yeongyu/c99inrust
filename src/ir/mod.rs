@@ -36,6 +36,9 @@ pub enum Instruction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredExpr {
+    Call {
+        callee: String,
+    },
     Integer(i64),
     Local(usize),
     Unary {
@@ -59,6 +62,9 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
 
 pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
     match expr {
+        Expr::Call { callee } => Err(CompileError::new(format!(
+            "call to {callee} is not a constant expression"
+        ))),
         Expr::Identifier(name) => Err(CompileError::new(format!(
             "identifier {name} is not a constant expression"
         ))),
@@ -304,6 +310,9 @@ impl LoweringContext {
 
     fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
         match expr {
+            Expr::Call { callee } => Ok(LoweredExpr::Call {
+                callee: callee.clone(),
+            }),
             Expr::Identifier(name) => {
                 let Some(slot) = self.local_slot(name) else {
                     return Err(CompileError::new(format!("unknown local: {name}")));

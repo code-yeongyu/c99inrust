@@ -43,6 +43,9 @@ pub enum Statement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
+    Call {
+        callee: String,
+    },
     Identifier(String),
     Integer(i64),
     Unary {
@@ -426,6 +429,11 @@ impl Parser<'_> {
                 TokenKind::Identifier(value) => {
                     let value = value.clone();
                     self.advance();
+                    if self.check_punctuator("(") {
+                        self.advance();
+                        self.expect_punctuator(")")?;
+                        return Ok(Expr::Call { callee: value });
+                    }
                     Ok(Expr::Identifier(value))
                 }
                 TokenKind::Punctuator(value) if value == "(" => {
