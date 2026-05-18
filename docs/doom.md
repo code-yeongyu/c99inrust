@@ -51,14 +51,24 @@ current integer return ABI, emits signed integer expression slices for
 covers the Doom `FixedDiv2` double-expression slice plus the Linux
 `<values.h>` integer limit macros used by `doomtype.h`. It also emits the
 global int and `unsigned char` table slice needed by `m_random.c`, including
-right-associative chained assignment and global byte-array subscripts. Pointer
-returns remain unsupported.
+right-associative chained assignment and global byte-array subscripts. It now
+also lowers the Doom `m_bbox.c` pointer-parameter subscript slice, including
+anonymous enum constants, pointer-width parameter spills, and int element
+load/store for `box[index]`. Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but four of the 62 C files still fail before object generation. `m_fixed.c`,
-`m_random.c`, `m_swap.c`, and `r_sky.c` currently reach assembly generation.
+but five of the 62 C files still fail before object generation. `m_bbox.c`,
+`m_fixed.c`, `m_random.c`, `m_swap.c`, and `r_sky.c` currently reach assembly
+generation.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
+
+Repeat the compile-progress scan with:
+
+```bash
+cargo build
+tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-compile-scan.txt
+```
 
 ## Playability Gate
 

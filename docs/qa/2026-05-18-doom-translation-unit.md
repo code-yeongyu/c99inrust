@@ -467,6 +467,108 @@ FAIL r_sky.c
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
 
+## Manual CLI QA After Repeatable Scan Script
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99-doom-m-bbox-qa-20260518194530
+scan=/tmp/c99-doom-m-bbox-qa-20260518194530.txt
+pane=/tmp/c99-doom-m-bbox-qa-20260518194530-pane.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99-doom-m-bbox-qa-20260518194530.txt
+ok=5
+fail=57
+OK m_bbox.c
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+The real CLI `build` path was also run in a bash-backed tmux session because
+the default tmux shell is fish:
+
+```text
+tmux_session=c99-cli-bash-qa-20260518195007
+source=/var/folders/nj/hqfr8ndn5q56cqw7jqgbrck40000gn/T/c99inrust-cli-qa.XXXXXX.h7E4NIjTnu/answer.c
+log=/var/folders/nj/hqfr8ndn5q56cqw7jqgbrck40000gn/T/c99inrust-cli-qa.XXXXXX.h7E4NIjTnu/manual-qa.log
+build=0
+exe=42
+```
+
+## Compile Scan After Bounding Box Pointer Slice
+
+`compile -S` now accepts the Doom `m_bbox.c` slice. This adds anonymous enum
+constants as integer identifiers, preserves pointer parameters as pointer-width
+local slots, and lowers `int` element pointer subscripts for both expression
+loads and assignment targets. The immediate Doom blocker
+`assignment to subscript targets is not supported yet` is cleared for
+`m_bbox.c`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_m_bbox_pointer_subscript_slice
+m_bbox_pointer_subscript_slice_matches_host_c_compiler_exit_code
+```
+
+Manual single-file QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/DOOM/linuxdoom-1.10 /tmp/DOOM/linuxdoom-1.10/m_bbox.c -o /tmp/doom-m_bbox-next.s
+lines=147
+observed=_M_ClearBox,_M_AddToBox
+observed=str w0, [x16, w17, sxtw #2]
+observed=ldr w0, [x16, w0, sxtw #2]
+```
+
+Cross-target assembly QA:
+
+```text
+target/debug/c99inrust compile -S --target x86_64-unknown-linux-gnu -D NORMALUNIX -D LINUX -I /tmp/DOOM/linuxdoom-1.10 /tmp/DOOM/linuxdoom-1.10/m_bbox.c -o /tmp/doom-m_bbox-linux-x86_64.s
+observed=movl (%rcx,%rax,4), %eax
+observed=movl %eax, (%rcx,%rdx,4)
+observed=.section .note.GNU-stack,"",@progbits
+
+target/debug/c99inrust compile -S --target x86_64-apple-darwin -D NORMALUNIX -D LINUX -I /tmp/DOOM/linuxdoom-1.10 /tmp/DOOM/linuxdoom-1.10/m_bbox.c -o /tmp/doom-m_bbox-darwin-x86_64.s
+observed=_M_ClearBox,_M_AddToBox
+observed=movl (%rcx,%rax,4), %eax
+observed=movl %eax, (%rcx,%rdx,4)
+```
+
+Current tmux compile scan:
+
+```text
+tmux_session=c99-doom-m-bbox-qa-20260518194530
+scan=/tmp/c99-doom-m-bbox-qa-20260518194530.txt
+pane=/tmp/c99-doom-m-bbox-qa-20260518194530-pane.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99-doom-m-bbox-qa-20260518194530.txt
+ok=5
+fail=57
+OK m_bbox.c
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+FAIL i_main.c
+  error: assignment to undeclared local or global: myargc
+FAIL p_inter.c
+  error: unsupported function parameter
+FAIL z_zone.c
+  error: 753:9: expected punctuator ;
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
+
 ## Compile Scan After m_random Globals and Subscripts
 
 The compiler now captures the Doom `m_random.c` global random table and mutable
