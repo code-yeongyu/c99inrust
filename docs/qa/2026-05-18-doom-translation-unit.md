@@ -2962,3 +2962,99 @@ old-style function definitions.
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After String Pointer Global Slice
+
+`compile -S` now accepts the focused `dstrings.c` and `f_finale.c` translation
+units. This slice adds file-scope pointer string initializers, file-scope
+pointer string-array initializers, typed referents for extern pointer arrays,
+and simple struct typedef aliases such as `typedef post_t column_t;`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_global_pointer_string_initializer_slice
+compiler_accepts_global_pointer_string_array_initializer_slice
+compiler_accepts_extern_typed_pointer_array_member_slice
+compiler_accepts_struct_typedef_alias_pointer_member_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/dstrings.c \
+  -o /tmp/c99inrust-dstrings.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/f_finale.c \
+  -o /tmp/c99inrust-f_finale.s
+```
+
+Focused `dstrings.c` and `f_finale.c` compiles now succeed and emit assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779136701`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779136701.txt
+ok=19
+fail=43
+```
+
+Translation units currently reaching assembly:
+
+```text
+am_map.c
+d_items.c
+d_main.c
+d_net.c
+doomdef.c
+doomstat.c
+dstrings.c
+f_finale.c
+i_main.c
+m_argv.c
+m_bbox.c
+m_cheat.c
+m_fixed.c
+m_random.c
+m_swap.c
+r_draw.c
+r_sky.c
+st_lib.c
+tables.c
+```
+
+Representative moved blockers:
+
+```text
+FAIL dstrings.c
+  before this slice:
+    error: translation unit has no supported function definitions
+  after this slice:
+    OK dstrings.c
+
+FAIL f_finale.c
+  before this slice:
+    error: unknown local or global: e1text
+  after this slice:
+    OK f_finale.c
+
+FAIL r_segs.c
+  before this slice:
+    error: unknown local or global: column_t
+  after this slice:
+    error: unknown local or global: MAXSHORT
+```
+
+Next visible blockers include function-pointer arrays in `f_wipe.c`,
+enum-sized arrays in several modules, old-style function definitions, and
+missing Doom constants such as `MAXSHORT`.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

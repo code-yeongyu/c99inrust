@@ -169,14 +169,20 @@ shapes reached by `d_net.c`: plain `unsigned` locals, `goto` labels, integer
 literal suffixes such as `0x12345678l`, struct arrays inside struct fields,
 global struct object assignment from pointer dereference, and unsigned
 32-bit mask immediates. This also moves `tables.c` to assembly generation.
+File-scope pointer string initializers and pointer string-array initializers
+are emitted with backing string data, covering `f_finale.c` text globals and
+the data-only `dstrings.c` quit-message table. Extern pointer arrays now retain
+their struct referent, and simple struct typedef aliases such as
+`typedef post_t column_t;` keep the aliased layout for pointer casts and member
+access.
 Pointer returns remain unsupported.
 
-The current Doom compile scan reaches actual supported function bodies, but 45
+The current Doom compile scan reaches actual supported function bodies, but 43
 of the 62 C files still fail before object generation. `am_map.c`,
-`d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `i_main.c`,
-`m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`,
-`r_draw.c`, `r_sky.c`, `st_lib.c`, and `tables.c` currently reach assembly
-generation.
+`d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
+`f_finale.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
+`m_random.c`, `m_swap.c`, `r_draw.c`, `r_sky.c`, `st_lib.c`, and `tables.c`
+currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -192,6 +198,9 @@ locals, `FILE*`, `R_OK`, `SEEK_*`, response-file `char*` pointer arithmetic,
 and `NULL`. The former `d_net.c` blockers moved past local plain `unsigned`,
 `goto`, suffixed integer literals, struct-array field subscripts, and the
 `reboundstore = *netbuffer` / `*netbuffer = reboundstore` struct copy shape.
+The former `dstrings.c` and `f_finale.c` blockers moved past file-scope string
+pointer data, `hu_font[c]->width`, `column_t*` casts, and `column->topdelta` /
+`column->length` member access.
 Many remaining files are blocked by enum-sized arrays, old-style function
 definitions, function-pointer declarations, and unsupported expression forms.
 The current `f_wipe.c` blocker is the local static function-pointer array
