@@ -184,6 +184,7 @@ pub enum Statement {
     LocalPointerArray {
         name: String,
         length: usize,
+        initializer: Option<Vec<Expr>>,
     },
     LocalStruct {
         name: String,
@@ -662,6 +663,12 @@ impl Parser<'_> {
         if let Some(statement) = self.block_extern_declaration()? {
             return Ok(statement);
         }
+        if let Some(statement) = self.local_function_pointer_array_declaration()? {
+            return Ok(statement);
+        }
+        if let Some(statement) = self.block_function_prototype_declaration() {
+            return Ok(statement);
+        }
         if let Some(statement) = self.static_aggregate_declaration()? {
             return Ok(statement);
         }
@@ -995,7 +1002,116 @@ impl Parser<'_> {
         let Some(length) = explicit_length else {
             return Err(CompileError::new("local pointer arrays require a size"));
         };
-        Ok(Statement::LocalPointerArray { name, length })
+        Ok(Statement::LocalPointerArray {
+            name,
+            length,
+            initializer: None,
+        })
+    }
+
+    fn local_function_pointer_array_declaration(&mut self) -> CompileResult<Option<Statement>> {
+        let Some((scalar_type, type_end)) = self.declaration_type_span_at_current() else {
+            return Ok(None);
+        };
+        if scalar_type != ScalarType::Int
+            || !self
+                .tokens
+                .get(type_end)
+                .is_some_and(|token| token_is_punctuator(token, "("))
+            || !self
+                .tokens
+                .get(type_end + 1)
+                .is_some_and(|token| token_is_punctuator(token, "*"))
+            || !self
+                .tokens
+                .get(type_end + 3)
+                .is_some_and(|token| token_is_punctuator(token, "["))
+        {
+            return Ok(None);
+        }
+
+        self.index = type_end;
+        self.expect_punctuator("(")?;
+        self.expect_punctuator("*")?;
+        let name = self.expect_identifier()?;
+        self.expect_punctuator("[")?;
+        let explicit_length = if self.check_punctuator("]") {
+            None
+        } else {
+            Some(local_array_length(
+                &self.expression()?,
+                self.known_constants,
+            )?)
+        };
+        self.expect_punctuator("]")?;
+        self.expect_punctuator(")")?;
+        self.skip_balanced_parentheses()?;
+        let initializer = if self.check_punctuator("=") {
+            self.advance();
+            Some(self.local_pointer_array_initializer()?)
+        } else {
+            None
+        };
+        let length = match (explicit_length, &initializer) {
+            (Some(length), _) => length,
+            (None, Some(values)) if !values.is_empty() => values.len(),
+            (None, _) => {
+                return Err(CompileError::new(
+                    "local function pointer arrays require a size or initializer",
+                ));
+            }
+        };
+        self.expect_punctuator(";")?;
+        Ok(Some(Statement::LocalPointerArray {
+            name,
+            length,
+            initializer,
+        }))
+    }
+
+    fn skip_balanced_parentheses(&mut self) -> CompileResult<()> {
+        self.expect_punctuator("(")?;
+        let mut depth = 1usize;
+        while !self.check_end() {
+            if self.check_punctuator("(") {
+                depth += 1;
+                self.advance();
+                continue;
+            }
+            if self.check_punctuator(")") {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| CompileError::new("unbalanced parentheses"))?;
+                self.advance();
+                if depth == 0 {
+                    return Ok(());
+                }
+                continue;
+            }
+            self.advance();
+        }
+        Err(CompileError::new("unterminated parenthesized declarator"))
+    }
+
+    fn local_pointer_array_initializer(&mut self) -> CompileResult<Vec<Expr>> {
+        self.expect_punctuator("{")?;
+        let mut values = Vec::new();
+        if self.check_punctuator("}") {
+            self.advance();
+            return Ok(values);
+        }
+        loop {
+            values.push(self.expression()?);
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+            self.expect_punctuator(",")?;
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+        }
     }
 
     fn block_extern_declaration(&mut self) -> CompileResult<Option<Statement>> {
@@ -1020,6 +1136,17 @@ impl Parser<'_> {
         }
         self.index += semicolon_index + 1;
         Ok(Some(Statement::ExternGlobal(global)))
+    }
+
+    fn block_function_prototype_declaration(&mut self) -> Option<Statement> {
+        let tokens = &self.tokens[self.index..];
+        let semicolon_index = top_level_punctuator_index(tokens, ";")?;
+        let declaration = &tokens[..semicolon_index];
+        let open_index = top_level_function_open_paren(declaration)?;
+        let name_index = previous_identifier_index(declaration, open_index)?;
+        supported_return_type(&declaration[..name_index])?;
+        self.index += semicolon_index + 1;
+        Some(Statement::Empty)
     }
 
     fn local_struct_declaration(&mut self) -> CompileResult<Option<Statement>> {

@@ -3082,6 +3082,42 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_local_function_pointer_array_call_slice() {
+    // given
+    let source = r"int init(int width, int height, int ticks) {
+    return 1;
+}
+int step(int width, int height, int ticks) {
+    return 2;
+}
+int done(int width, int height, int ticks) {
+    return 3;
+}
+int run(int wipeno, int width, int height, int ticks) {
+    static int (*wipes[])(int, int, int) = {
+        init, step, done
+    };
+    void mark(int, int, int, int);
+    mark(0, 0, width, height);
+    return (*wipes[wipeno])(width, height, ticks);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tleaq init(%rip), %rax\n"));
+    assert!(assembly.contains("\tleaq step(%rip), %rax\n"));
+    assert!(assembly.contains("\tleaq done(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall mark\n"));
+    assert!(assembly.contains("\tcall *%rax\n"));
+}
+
+#[test]
 fn compiler_accepts_short_pointer_arithmetic_dereference_slice() {
     // given
     let source = r"short* blockmap;

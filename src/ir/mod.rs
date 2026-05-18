@@ -871,9 +871,11 @@ impl LoweringContext {
                 length,
                 initializer,
             } => self.lower_local_int_array(name, *length, initializer.as_deref()),
-            Statement::LocalPointerArray { name, length } => {
-                self.lower_local_pointer_array(name, *length)
-            }
+            Statement::LocalPointerArray {
+                name,
+                length,
+                initializer,
+            } => self.lower_local_pointer_array(name, *length, initializer.as_deref()),
             Statement::LocalStruct { name, struct_name } => {
                 self.lower_local_struct_object(name, struct_name)
             }
@@ -1061,8 +1063,35 @@ impl LoweringContext {
         Ok(())
     }
 
-    fn lower_local_pointer_array(&mut self, name: &str, length: usize) -> CompileResult<()> {
-        self.declare_pointer_array(name, length).map(|_| ())
+    fn lower_local_pointer_array(
+        &mut self,
+        name: &str,
+        length: usize,
+        initializer: Option<&[Expr]>,
+    ) -> CompileResult<()> {
+        let slot = self.declare_pointer_array(name, length)?;
+        if let Some(values) = initializer {
+            if values.len() > length {
+                return Err(CompileError::new(
+                    "local pointer array initializer is too large",
+                ));
+            }
+            let offset = self.local_offset(slot)?;
+            let byte_size = local_pointer_array_byte_size(length)?;
+            for (index, value) in values.iter().enumerate() {
+                let index = i64::try_from(index)
+                    .map_err(|_| CompileError::new("local pointer array index overflow"))?;
+                let target = LoweredLValue::PointerSubscript {
+                    pointer: Box::new(LoweredExpr::LocalAddress { offset, byte_size }),
+                    index: Box::new(LoweredExpr::Integer(index)),
+                    element_type: ScalarType::Pointer,
+                    element_byte_size: scalar_size(ScalarType::Pointer),
+                };
+                let value = self.lower_expr(value)?;
+                self.push_store(target, value);
+            }
+        }
+        Ok(())
     }
 
     fn lower_extern_global(&mut self, global: &Global) -> CompileResult<()> {
@@ -1491,6 +1520,11 @@ impl LoweringContext {
     }
 
     fn lower_indirect_call_expr(&self, callee: &Expr, args: &[Expr]) -> CompileResult<LoweredExpr> {
+        let callee = if let Expr::Dereference { pointer } = callee {
+            pointer.as_ref()
+        } else {
+            callee
+        };
         let callee = self.lower_expr(callee)?;
         if lowered_expr_scalar_type(&callee) != Some(ScalarType::Pointer) {
             return Err(CompileError::new("indirect call requires a pointer callee"));
