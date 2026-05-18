@@ -42,16 +42,18 @@ check, lower, compile, link, or run Doom yet.
 
 `compile -S` now accepts full translation units enough to skip top-level
 declarations and prototypes before attempting supported function definitions.
-It also accepts `int` and `void` function return types, skips parameter-list
-tokens for unsupported parameter binding, emits terminal returns for `void`
-functions that can fall through, and treats supported scalar/typedef return
+It also accepts `int` and `void` function return types, binds supported integer
+parameters into ABI-backed local slots, emits terminal returns for `void`
+functions that can fall through, treats supported scalar/typedef return
 specifiers such as `fixed_t`, `boolean`, `char`, and `unsigned short` as the
-current integer return ABI. Pointer returns remain unsupported.
+current integer return ABI, and emits signed integer expression slices for
+`long long` casts, function call arguments, and `?:` conditionals. Pointer
+returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
 but one of the 62 C files still fail before object generation. `m_swap.c`
-currently reaches assembly generation after parameter binding support. Evidence
-is recorded in
+currently reaches assembly generation. `m_fixed.c` now gets through `FixedMul`
+and stops in the active `FixedDiv2` floating-point path. Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
 ## Playability Gate

@@ -316,3 +316,79 @@ FAIL r_sky.c
 The next high-value blockers are cast expressions, call arguments, and broader
 declarator parsing. `m_swap.c` is the first public Doom C translation unit to
 reach assembly generation in this workspace baseline.
+
+## Compile Scan After Expression Slice
+
+The compiler now parses/lower/emits three C expression forms reached by public
+Doom bodies:
+
+```text
+signed long long casts with 64-bit intermediates
+integer function call arguments in ABI registers
+conditional expressions with branch-shaped codegen
+```
+
+Regression coverage added:
+
+```text
+compiler_emits_signed_long_long_cast_intermediates
+signed_long_long_cast_slice_matches_host_c_compiler_exit_code
+compiler_emits_integer_function_call_arguments
+function_call_argument_slice_matches_host_c_compiler_exit_code
+compiler_emits_conditional_expression_branches
+conditional_expression_slice_matches_host_c_compiler_exit_code
+```
+
+Current compile scan:
+
+```text
+scan=/tmp/c99inrust-doom-compile-scan-after-conditional.txt
+ok=1
+fail=61
+OK m_swap.c
+```
+
+Manual CLI QA was run inside tmux session `c99exprqa` with
+`target/debug/c99inrust`. The session closed by running `exit`.
+
+```text
+tmux_session=c99exprqa
+long_long_cast_exit=4
+call_args_exit=42
+conditional_exit=42
+m_fixed_exit=2
+error: 461:5: expected identifier
+manual_qa=PASS
+```
+
+Local Rust/slop gate for the expression slice:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+rust-programmer no-excuse: PASS for 5 changed files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test --all-targets --all-features: PASS, 51 tests
+cargo nextest run --all-targets --all-features: PASS, 51 tests
+cargo machete: PASS
+cargo deny check: PASS
+cargo audit: PASS
+unsafe/miri: N/A; unsafe code is forbidden in Cargo.toml and src/lib.rs
+remove-ai-slops: PASS for this slice; no debug leftovers, warning suppressions,
+dead code, unsafe blocks, or needless behavior-changing cleanup found
+```
+
+Representative moved failures:
+
+```text
+FAIL m_fixed.c
+  before: 434:14: expected expression
+  after:  461:5: expected identifier
+FAIL p_maputl.c
+  before: 5456:14: expected punctuator )
+  after:  5474:13: expected punctuator =
+```
+
+The next high-value blocker for `m_fixed.c` is the active `FixedDiv2` floating
+path: `double` local declarations, double casts/arithmetic/comparisons, string
+arguments, and call statements. Full Doom compile/link/run remains incomplete.
