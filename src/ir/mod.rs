@@ -616,7 +616,8 @@ fn lower_function_with_globals(
     for statement in &function.statements {
         context.lower_statement(statement)?;
     }
-    if function.return_type == ReturnType::Int && !context.has_return {
+    if matches!(function.return_type, ReturnType::Int | ReturnType::Pointer) && !context.has_return
+    {
         return Err(CompileError::new(format!(
             "function {} has no return statement",
             function.name
@@ -898,12 +899,15 @@ impl LoweringContext {
 
     fn lower_return(&mut self, expr: Option<&Expr>) -> CompileResult<()> {
         match (self.return_type, expr) {
-            (ReturnType::Int, Some(expr)) => {
+            (ReturnType::Int | ReturnType::Pointer, Some(expr)) => {
                 let value = self.lower_expr(expr)?;
                 self.instructions.push(Instruction::Return(Some(value)));
             }
             (ReturnType::Int, None) => {
                 return Err(CompileError::new("int function must return a value"));
+            }
+            (ReturnType::Pointer, None) => {
+                return Err(CompileError::new("pointer function must return a value"));
             }
             (ReturnType::Void, Some(_)) => {
                 return Err(CompileError::new("void function cannot return a value"));

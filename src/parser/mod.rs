@@ -130,6 +130,7 @@ pub struct Parameter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReturnType {
     Int,
+    Pointer,
     Void,
 }
 
@@ -2494,22 +2495,14 @@ fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Gl
 }
 
 fn parse_unsigned_char_array_length(tokens: &[Token]) -> CompileResult<usize> {
-    match tokens {
-        [
-            Token {
-                kind: TokenKind::Integer(value),
-                line,
-                column,
-            },
-        ] => usize::try_from(*value).map_err(|_| {
-            CompileError::new("unsigned char array length does not fit usize").at(*line, *column)
-        }),
-        [first, ..] => {
-            Err(CompileError::new("expected unsigned char array length")
-                .at(first.line, first.column))
-        }
-        [] => Err(CompileError::new("expected unsigned char array length")),
+    if tokens.is_empty() {
+        return Err(CompileError::new("expected unsigned char array length"));
     }
+    let value = parse_integer_initializer(tokens)?;
+    if value <= 0 {
+        return Err(CompileError::new("global array length must be positive"));
+    }
+    usize::try_from(value).map_err(|_| CompileError::new("global array length is too large"))
 }
 
 fn parse_global_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
@@ -3923,6 +3916,7 @@ fn top_level_function_open_paren(tokens: &[Token]) -> Option<usize> {
 fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
     let mut saw_void = false;
     let mut saw_non_void_type = false;
+    let mut saw_pointer = false;
     for token in tokens {
         match &token.kind {
             TokenKind::Identifier(_) => saw_non_void_type = true,
@@ -3945,17 +3939,18 @@ fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
                 | Keyword::Unsigned => saw_non_void_type = true,
                 _ => return None,
             },
-            TokenKind::Punctuator(value) if value == "*" => return None,
+            TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
             TokenKind::Punctuator(_) | TokenKind::Integer(_) | TokenKind::CharLiteral(_) => {
                 return None;
             }
             TokenKind::StringLiteral(_) | TokenKind::End => return None,
         }
     }
-    match (saw_void, saw_non_void_type) {
-        (true, false) => Some(ReturnType::Void),
-        (false, true) => Some(ReturnType::Int),
-        (true, true) | (false, false) => None,
+    match (saw_void, saw_non_void_type, saw_pointer) {
+        (true, false, false) => Some(ReturnType::Void),
+        (_, _, true) if saw_void || saw_non_void_type => Some(ReturnType::Pointer),
+        (false, true, false) => Some(ReturnType::Int),
+        _ => None,
     }
 }
 

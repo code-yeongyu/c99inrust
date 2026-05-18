@@ -2269,6 +2269,28 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_global_short_array_expression_length_slice() {
+    // given
+    let source = r"short openings[2*3];
+int main(void) {
+    openings[5] = 7;
+    return openings[5];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("openings:"));
+    assert!(assembly.contains("\t.zero 24\n"));
+    assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+}
+
+#[test]
 fn compiler_accepts_global_pointer_string_initializer_slice() {
     // given
     let source = r#"char* e1text = "E1";
@@ -2851,19 +2873,18 @@ int main(void) { return 0; }";
 }
 
 #[test]
-fn compiler_rejects_pointer_return_signatures() {
+fn compiler_accepts_pointer_return_signatures() {
     // given
     let source = "char *name(void) { return 0; } int main(void) { return 0; }";
 
     // when
     let tokens = lex(source).expect("lexer should succeed");
-    let error = parse_supported_translation_unit(&tokens)
-        .expect_err("translation unit should reject pointer returns");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
 
     // then
-    assert!(
-        error
-            .to_string()
-            .contains("unsupported function definition: name")
-    );
+    assert!(assembly.contains("name:"));
+    assert!(assembly.contains("\tmovl $0, %eax\n"));
 }
