@@ -4003,3 +4003,87 @@ FAIL wi_stuff.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After HU Double Pointer Parameter Slice
+
+Parameter pointer referents now preserve pointer depth, so a parameter such as
+`patch_t** font` is tracked as a pointer to `patch_t*` rather than directly to
+`patch_t`. That lets indexed double-pointer member chains such as
+`font[0]->height` lower as a pointer load followed by struct member access.
+
+Regression coverage added:
+
+```text
+compiler_accepts_double_pointer_parameter_member_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/hu_lib.c \
+  -o /tmp/hu_lib.s
+```
+
+The focused compile now reaches assembly generation.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779147078`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779147078.txt
+ok=44
+fail=18
+```
+
+Moved translation unit:
+
+```text
+OK hu_lib.c
+```
+
+Remaining blockers:
+
+```text
+FAIL g_game.c
+  error: 9119:5: expected expression
+FAIL hu_stuff.c
+  error: 5841:5: expected expression
+FAIL i_net.c
+  error: 3905:5: expected expression
+FAIL i_sound.c
+  error: 4750:43: expected expression
+FAIL i_system.c
+  error: 4552:5: expected expression
+FAIL i_video.c
+  error: unsupported function parameter
+FAIL info.c
+  error: translation unit has no supported function definitions
+FAIL m_misc.c
+  error: 5541:5: expected expression
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL p_setup.c
+  error: assignment to non-pointer subscript targets is not supported
+FAIL p_switch.c
+  error: pointer member access requires a typed pointer
+FAIL r_bsp.c
+  error: 5355:5: expected expression
+FAIL s_sound.c
+  error: pointer member access requires a typed pointer
+FAIL sounds.c
+  error: 450:3: expected expression
+FAIL st_stuff.c
+  error: 8149:5: expected expression
+FAIL v_video.c
+  error: 5145:5: expected expression
+FAIL w_wad.c
+  error: 602:5: expected expression
+FAIL wi_stuff.c
+  error: unsupported global integer initializer
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

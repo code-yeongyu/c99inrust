@@ -235,12 +235,16 @@ function body lives in another translation unit. Typed `ptr +/- integer`
 expressions now lower through scaled pointer-offset IR, including struct
 pointer arithmetic used by `(vissprite_p-1)->next`. This moves `r_main.c` and
 `r_things.c` to assembly generation.
+Function parameter referents now preserve pointer depth for double-pointer
+parameters such as `patch_t** font`, allowing `font[0]->height` and matching
+`hu_textline_t.f` access through indexed pointer members. This moves
+`hu_lib.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 19
+The current Doom compile scan reaches actual supported function bodies, but 18
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
-`f_finale.c`, `f_wipe.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`,
-`m_fixed.c`, `m_menu.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`,
+`f_finale.c`, `f_wipe.c`, `hu_lib.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`,
+`m_cheat.c`, `m_fixed.c`, `m_menu.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`,
 `p_doors.c`, `p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
 `p_maputl.c`, `p_plats.c`, `p_pspr.c`, `p_saveg.c`, `p_sight.c`, `p_spec.c`,
 `p_telept.c`, `p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_main.c`,
@@ -296,6 +300,8 @@ The former `r_main.c` and `r_things.c` blockers moved past prototype-only draw
 function designators such as `R_DrawColumn` / `R_DrawTranslatedColumn`, and
 the `r_things.c` sprite sort path now accepts scaled struct-pointer arithmetic
 before `->` member access.
+The former `hu_lib.c` blocker moved past double-pointer parameter referents for
+`patch_t** font` and indexed member chains such as `font[0]->height`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
 char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`
