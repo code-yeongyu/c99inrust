@@ -382,6 +382,42 @@ fn compiler_skips_top_level_declarations_before_supported_functions() {
 }
 
 #[test]
+fn compiler_accepts_ignorable_static_metadata_translation_unit() {
+    // given
+    let source = "static const char rcsid[] = \"doom\";";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(program.functions.is_empty());
+    assert!(program.globals.is_empty());
+    assert!(assembly.is_empty());
+}
+
+#[test]
+fn compiler_rejects_unsupported_data_only_translation_unit() {
+    // given
+    let source = "typedef int weaponinfo_t; weaponinfo_t weaponinfo[2] = { 1, 2 };";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let error = parse_supported_translation_unit(&tokens)
+        .expect_err("translation unit should reject unsupported data-only globals");
+
+    // then
+    assert!(
+        error
+            .to_string()
+            .contains("translation unit has no supported function definitions")
+    );
+}
+
+#[test]
 fn compiler_emits_void_functions_with_value_less_return() {
     // given
     let source = "void tick(void) { return; } int main(void) { return 42; }";

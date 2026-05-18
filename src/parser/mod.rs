@@ -254,6 +254,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let mut constants = Vec::new();
     let mut globals = Vec::new();
     let mut functions = Vec::new();
+    let mut unsupported_data_declaration = false;
     for item_tokens in &external_items {
         let enum_constants = parse_enum_constants(item_tokens)?;
         if !enum_constants.is_empty() {
@@ -265,6 +266,9 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             continue;
         }
         let Some(name) = function_definition_name(item_tokens) else {
+            if unsupported_data_declaration_blocks_empty_unit(item_tokens) {
+                unsupported_data_declaration = true;
+            }
             continue;
         };
         if !function_definition_has_supported_signature(item_tokens) {
@@ -289,7 +293,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             )));
         }
     }
-    if functions.is_empty() {
+    if functions.is_empty() && unsupported_data_declaration {
         return Err(CompileError::new(
             "translation unit has no supported function definitions",
         ));
@@ -1069,6 +1073,46 @@ fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<
     parse_global_int(tokens)
 }
 
+fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {
+    if ignorable_static_const_char_array(tokens) {
+        return false;
+    }
+    matches!(
+        classify_external_item(tokens),
+        Some(ExternalItem::Declaration { .. })
+    )
+}
+
+fn ignorable_static_const_char_array(tokens: &[Token]) -> bool {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return false;
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return false;
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return false;
+    };
+    if !global_specifiers_are_static_const_char(&declaration[..name_index]) {
+        return false;
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return false;
+    };
+    let Some(assign_index) = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+    else {
+        return false;
+    };
+    let initializer = &declaration[close_bracket + 2 + assign_index..];
+    matches!(
+        initializer,
+        [Token {
+            kind: TokenKind::StringLiteral(_),
+            ..
+        }]
+    )
+}
+
 fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -1203,6 +1247,21 @@ fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
         }
     }
     saw_unsigned && saw_char
+}
+
+fn global_specifiers_are_static_const_char(tokens: &[Token]) -> bool {
+    let mut saw_static = false;
+    let mut saw_const = false;
+    let mut saw_char = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Static) => saw_static = true,
+            TokenKind::Keyword(Keyword::Const) => saw_const = true,
+            TokenKind::Keyword(Keyword::Char) => saw_char = true,
+            _ => return false,
+        }
+    }
+    saw_static && saw_const && saw_char
 }
 
 fn global_specifiers_are_pointer(tokens: &[Token]) -> bool {

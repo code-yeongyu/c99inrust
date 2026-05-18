@@ -160,14 +160,17 @@ impl Target {
 ///
 /// # Errors
 ///
-/// Returns an error when the program has no functions or an expression cannot
-/// be represented by the current `int`-only backend.
+/// Returns an error when an expression cannot be represented by the current
+/// scalar backend.
 pub fn emit_assembly(program: &LoweredProgram, target: Target) -> CompileResult<String> {
-    if program.functions.is_empty() {
-        return Err(CompileError::new("program has no functions"));
-    }
     let mut assembly = String::new();
     emit_globals(&program.globals, target, &mut assembly)?;
+    if program.functions.is_empty() {
+        if target == Target::X86_64UnknownLinuxGnu && !assembly.is_empty() {
+            assembly.push_str(".section .note.GNU-stack,\"\",@progbits\n");
+        }
+        return Ok(assembly);
+    }
     assembly.push_str(".text\n");
     for function in &program.functions {
         match target {
