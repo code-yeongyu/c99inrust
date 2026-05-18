@@ -17,7 +17,7 @@ if preprocessing did not exist.
 
 The implemented backend emits assembly for the current int-only function-body
 slice: local `int` declarations, scoped blocks, assignments, `if`/`else`,
-`while`, arithmetic/bitwise/comparison/logical expressions, and returns.
+`while`, `for`, arithmetic/bitwise/comparison/logical expressions, and returns.
 
 - `aarch64-apple-darwin`
 - `x86_64-apple-darwin`
