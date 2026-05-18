@@ -222,13 +222,19 @@ Local function-pointer arrays with function-designator initializers, such as
 arrays. Block-scope function prototypes are skipped, and `(*funcptr)(...)`
 calls lower through the existing indirect-call path. This moves `f_wipe.c` to
 assembly generation.
+The Doom-era `<fcntl.h>` builtin now supplies open flags such as `O_RDONLY`,
+`O_WRONLY`, `O_CREAT`, `O_TRUNC`, and `O_BINARY`. Global `char` matrices such
+as `char savegamestrings[10][24]` now decay to row pointers and support nested
+byte subscripts, including string-list initializers. File-scope function
+pointers and function-pointer struct fields are represented as pointer storage.
+This moves `m_menu.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 22
+The current Doom compile scan reaches actual supported function bodies, but 21
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `f_wipe.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`,
-`m_fixed.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`,
-`p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
+`m_fixed.c`, `m_menu.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`,
+`p_doors.c`, `p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
 `p_maputl.c`, `p_plats.c`, `p_pspr.c`, `p_saveg.c`, `p_sight.c`, `p_spec.c`,
 `p_telept.c`, `p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_plane.c`,
 `r_segs.c`, `r_sky.c`, `st_lib.c`, `tables.c`, and `z_zone.c` currently reach
@@ -275,6 +281,10 @@ generation.
 The former `f_wipe.c` blocker moved past the local static function-pointer
 array `static int (*wipes[])(int, int, int) = { ... }`, block-scope prototype
 `void V_MarkRect(int, int, int, int);`, and `(*wipes[index])(...)` calls.
+The former `m_menu.c` blockers moved past `<fcntl.h>` open flags,
+`savegamestrings[slot][index]` global char-matrix access, file-scope callback
+pointer `messageRoutine`, and `menuitem_t.routine` / `menu_t.routine`
+function-pointer fields.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
 char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`
