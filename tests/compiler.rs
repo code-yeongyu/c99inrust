@@ -713,6 +713,34 @@ int main(int argc, char **argv) {
 }
 
 #[test]
+fn compiler_accepts_m_argv_post_increment_slice() {
+    // given
+    let source = r"int myargc;
+char **myargv;
+int M_CheckParm(char *check) {
+    int i;
+    for (i = 1; i < myargc; i++) {
+        if (!strcasecmp(check, myargv[i]))
+            return i;
+    }
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let linux_x86_64_assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("linux assembly should emit");
+
+    // then
+    assert!(linux_x86_64_assembly.contains("M_CheckParm"));
+    assert!(linux_x86_64_assembly.contains("myargc"));
+    assert!(linux_x86_64_assembly.contains("myargv"));
+    assert!(linux_x86_64_assembly.contains("\taddl %ecx, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_typedef_return_signatures() {
     // given
     let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return 42; } int main(void) { return 0; }";

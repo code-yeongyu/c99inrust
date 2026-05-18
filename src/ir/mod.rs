@@ -265,6 +265,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Assignment { .. } => Err(CompileError::new(
             "assignment expression is not an integer constant expression",
         )),
+        Expr::PostIncrement { .. } => Err(CompileError::new(
+            "post-increment expression is not an integer constant expression",
+        )),
         Expr::Unary { op, expr } => {
             let value = const_eval(expr)?;
             match op {
@@ -455,6 +458,9 @@ impl LoweringContext {
                 post.as_deref(),
                 body,
             ),
+            Statement::Expression(Expr::PostIncrement { target }) => {
+                self.lower_post_increment_statement(target)
+            }
             Statement::Expression(expr) => {
                 let expr = self.lower_expr(expr)?;
                 self.instructions.push(Instruction::Eval(expr));
@@ -671,6 +677,9 @@ impl LoweringContext {
                     value: Box::new(self.lower_expr(value)?),
                 })
             }
+            Expr::PostIncrement { .. } => Err(CompileError::new(
+                "post-increment values are not supported yet",
+            )),
             Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
@@ -789,6 +798,25 @@ impl LoweringContext {
             }
         }
     }
+
+    fn lower_post_increment_statement(&mut self, target: &LValue) -> CompileResult<()> {
+        let target = self.lower_lvalue(target)?;
+        if lowered_lvalue_scalar_type(&target) != ScalarType::Int {
+            return Err(CompileError::new(
+                "post-increment currently supports int lvalues only",
+            ));
+        }
+        let current = lowered_lvalue_to_expr(&target);
+        self.push_store(
+            target,
+            LoweredExpr::Binary {
+                op: BinaryOp::Add,
+                left: Box::new(current),
+                right: Box::new(LoweredExpr::Integer(1)),
+            },
+        );
+        Ok(())
+    }
 }
 
 const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
@@ -820,6 +848,32 @@ const fn lowered_lvalue_scalar_type(target: &LoweredLValue) -> ScalarType {
             element_type: scalar_type,
             ..
         } => *scalar_type,
+    }
+}
+
+fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
+    match target {
+        LoweredLValue::Local {
+            offset,
+            scalar_type,
+            ..
+        } => LoweredExpr::Local {
+            offset: *offset,
+            scalar_type: *scalar_type,
+        },
+        LoweredLValue::Global { name, scalar_type } => LoweredExpr::Global {
+            name: name.clone(),
+            scalar_type: *scalar_type,
+        },
+        LoweredLValue::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+        } => LoweredExpr::PointerSubscript {
+            pointer: pointer.clone(),
+            index: index.clone(),
+            element_type: *element_type,
+        },
     }
 }
 

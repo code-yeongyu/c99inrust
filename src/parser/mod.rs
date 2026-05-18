@@ -111,6 +111,9 @@ pub enum Expr {
         target: LValue,
         value: Box<Self>,
     },
+    PostIncrement {
+        target: LValue,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Self>,
@@ -432,9 +435,7 @@ impl Parser<'_> {
         if self.current_identifier_starts_assignment() {
             self.assignment_statement(true)
         } else {
-            let expr = self.expression()?;
-            self.expect_punctuator(";")?;
-            Ok(Statement::Expression(expr))
+            self.expression_statement(true)
         }
     }
 
@@ -516,7 +517,7 @@ impl Parser<'_> {
         let post = if self.check_punctuator(")") {
             None
         } else {
-            Some(Box::new(self.assignment_statement(false)?))
+            Some(Box::new(self.expression_statement(false)?))
         };
         self.expect_punctuator(")")?;
         let body = Box::new(self.statement()?);
@@ -536,6 +537,14 @@ impl Parser<'_> {
         }
         self.expect_punctuator("}")?;
         Ok(statements)
+    }
+
+    fn expression_statement(&mut self, expect_semicolon: bool) -> CompileResult<Statement> {
+        let expr = self.expression()?;
+        if expect_semicolon {
+            self.expect_punctuator(";")?;
+        }
+        Ok(statement_from_expression(expr))
     }
 
     fn expression(&mut self) -> CompileResult<Expr> {
@@ -691,14 +700,25 @@ impl Parser<'_> {
 
     fn postfix(&mut self) -> CompileResult<Expr> {
         let mut expr = self.primary()?;
-        while self.check_punctuator("[") {
-            self.advance();
-            let index = self.expression()?;
-            self.expect_punctuator("]")?;
-            expr = Expr::Subscript {
-                array: Box::new(expr),
-                index: Box::new(index),
-            };
+        loop {
+            if self.check_punctuator("[") {
+                self.advance();
+                let index = self.expression()?;
+                self.expect_punctuator("]")?;
+                expr = Expr::Subscript {
+                    array: Box::new(expr),
+                    index: Box::new(index),
+                };
+                continue;
+            }
+            if self.check_punctuator("++") {
+                self.advance();
+                expr = Expr::PostIncrement {
+                    target: lvalue_from_expr(expr)?,
+                };
+                continue;
+            }
+            break;
         }
         Ok(expr)
     }
@@ -888,6 +908,16 @@ fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
         Expr::Identifier(name) => Ok(LValue::Identifier(name)),
         Expr::Subscript { array, index } => Ok(LValue::Subscript { array, index }),
         _ => Err(CompileError::new("unsupported assignment target")),
+    }
+}
+
+fn statement_from_expression(expr: Expr) -> Statement {
+    match expr {
+        Expr::Assignment { target, value } => Statement::Assignment {
+            target,
+            value: *value,
+        },
+        _ => Statement::Expression(expr),
     }
 }
 
