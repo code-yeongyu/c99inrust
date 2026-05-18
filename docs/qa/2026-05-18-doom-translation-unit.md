@@ -1736,3 +1736,57 @@ if (!cht->p)
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Pointer Member Slice
+
+`compile -S` now accepts pointer-valued struct member loads and stores. This
+covers the `m_cheat.c` `cheatseq_t` field shape:
+
+```c
+if (!cht->p)
+    cht->p = cht->sequence;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_pointer_struct_member_values_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+error: post-increment expression supports direct lvalues only
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779115498`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779115498.txt
+ok=9
+fail=53
+```
+
+Representative moved blocker:
+
+```text
+FAIL m_cheat.c
+  before pointer member slice: struct member value is not supported
+  after pointer member slice: post-increment expression supports direct lvalues only
+```
+
+The next `m_cheat.c` blocker is a post-increment expression on a pointer field:
+
+```c
+*(cht->p++) = key;
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
