@@ -87,7 +87,9 @@ conversion and wraparound semantics remain future work. Post-increment
 expressions now produce their old value while updating direct `int` and pointer
 lvalues, and empty statements are accepted for Doom loops such as
 `while (*(p++) != 1);`. `do { ... } while (...)` statements now lower to a
-body-first loop with a conditional back edge.
+body-first loop with a conditional back edge. Static unsigned-byte globals can
+now be zero-filled and assigned through byte subscripts, covering tables such as
+`cheat_xlate_table[256]`.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -101,8 +103,8 @@ The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The current `m_cheat.c` blocker has moved past `(unsigned char)key`,
 `unsigned char *p, c;`, `while (*(p++) != 1);`, and the `cht_GetParam`
-`do { ... } while (...)` loop, and is now the static byte array
-`cheat_xlate_table[256]`.
+`do { ... } while (...)` loop, and `cheat_xlate_table[256]`. It is now pointer
+struct-member values such as `cht->p`.
 The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and the first
 `do { ... } while (...)` loops, and is now prefix increment in
 `if (++fuzzpos == 50)` inside `R_DrawFuzzColumn`.

@@ -1679,3 +1679,60 @@ if (++fuzzpos == 50)
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Byte Array Slice
+
+`compile -S` now accepts zero-filled static unsigned-byte globals and assignment
+through byte-array subscripts. This covers the next `m_cheat.c` table shape:
+
+```c
+static unsigned char cheat_xlate_table[256];
+...
+for (i=0;i<256;i++) cheat_xlate_table[i] = SCRAMBLE(i);
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_m_cheat_xlate_table_slice
+m_cheat_xlate_table_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+error: struct member value is not supported
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779114786`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779114786.txt
+ok=9
+fail=53
+```
+
+Representative moved blocker:
+
+```text
+FAIL m_cheat.c
+  before byte array slice: unknown local or global: cheat_xlate_table
+  after byte array slice: struct member value is not supported
+```
+
+The next `m_cheat.c` blocker is reading pointer fields from `cheatseq_t`:
+
+```c
+if (!cht->p)
+    cht->p = cht->sequence;
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
