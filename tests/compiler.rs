@@ -1075,6 +1075,31 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_global_pointer_array_slice() {
+    // given
+    let source = r"int* ylookup[4];
+int main(void) {
+    int* p;
+    p = 0;
+    ylookup[2] = p;
+    return ylookup[2] ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("ylookup:"));
+    assert!(assembly.contains("\t.zero 32\n"));
+    assert!(assembly.contains("\tmovq %rax, (%rcx,%rdx,8)\n"));
+    assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
+}
+
+#[test]
 fn compiler_accepts_m_cheat_xlate_table_slice() {
     // given
     let source = r"static unsigned char cheat_xlate_table[256];
