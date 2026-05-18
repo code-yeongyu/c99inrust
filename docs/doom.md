@@ -93,6 +93,8 @@ now be zero-filled and assigned through byte subscripts, covering tables such as
 assigned, covering `cheatseq_t` fields such as `cht->p` and `cht->sequence`.
 Post-increment expressions on pointer struct members now produce the old field
 value while updating the field.
+Prefix increment and decrement expressions are parsed through the existing
+assignment-expression path, covering scalar conditions such as `++fuzzpos`.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -104,9 +106,10 @@ The current `am_map.c` blocker is the local static aggregate declaration
 `AM_getIslope` member expressions.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
-The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and the first
-`do { ... } while (...)` loops, and is now prefix increment in
-`if (++fuzzpos == 50)` inside `R_DrawFuzzColumn`.
+The current `r_draw.c` blocker has moved past `(unsigned)dc_x`, the first
+`do { ... } while (...)` loops, and prefix increment in `R_DrawFuzzColumn`. It
+is now a local char-array string initializer such as
+`char name1[] = "FLOOR7_2";` inside `R_FillBackScreen`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 

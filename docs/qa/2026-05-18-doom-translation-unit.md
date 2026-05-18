@@ -1845,3 +1845,67 @@ if (++fuzzpos == 50)
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Prefix Increment Slice
+
+`compile -S` now accepts prefix increment and decrement expressions by parsing
+them through the existing assignment-expression path. This covers the previous
+`r_draw.c` blocker:
+
+```c
+if (++fuzzpos == 50)
+    fuzzpos = 0;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_prefix_increment_condition_slice
+prefix_increment_condition_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+```
+
+Focused `r_draw.c` compile now moves to a later parser blocker:
+
+```text
+error: 6207:15: expected punctuator ;
+```
+
+The corresponding preprocessed source is the local char-array string
+initializer in `R_FillBackScreen`:
+
+```c
+char name1[] = "FLOOR7_2";
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779116723`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779116723.txt
+ok=10
+fail=52
+```
+
+Representative moved blocker:
+
+```text
+FAIL r_draw.c
+  before prefix increment slice:
+    error: 5903:6 expected expression
+  after prefix increment slice:
+    error: 6207:15: expected punctuator ;
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
