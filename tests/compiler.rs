@@ -307,3 +307,91 @@ fn compiler_skips_top_level_declarations_before_supported_functions() {
     assert!(assembly.contains(".globl _main"));
     assert!(assembly.contains("movz w0, #42"));
 }
+
+#[test]
+fn compiler_emits_void_functions_with_value_less_return() {
+    // given
+    let source = "void tick(void) { return; } int main(void) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _tick"));
+    assert!(assembly.contains("_tick:\n\tret"));
+    assert!(assembly.contains(".globl _main"));
+}
+
+#[test]
+fn compiler_adds_terminal_return_to_void_functions_that_can_fall_through() {
+    // given
+    let source = "void tick(void) { if (0) { return; } } int main(void) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("_tick:\n\tmovz w0, #0"));
+    assert!(assembly.contains("Ltick_0:\n\tret"));
+}
+
+#[test]
+fn compiler_rejects_value_less_return_from_int_functions() {
+    // given
+    let source = "int main(void) { return; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let error = lower(&program).expect_err("lowering should reject a value-less int return");
+
+    // then
+    assert!(
+        error
+            .to_string()
+            .contains("int function must return a value")
+    );
+}
+
+#[test]
+fn compiler_rejects_value_return_from_void_functions() {
+    // given
+    let source = "void tick(void) { return 1; } int main(void) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let error = lower(&program).expect_err("lowering should reject a valued void return");
+
+    // then
+    assert!(
+        error
+            .to_string()
+            .contains("void function cannot return a value")
+    );
+}
+
+#[test]
+fn compiler_accepts_parameter_list_signatures_when_body_does_not_use_parameters() {
+    // given
+    let source = "int main(int argc, char **argv) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _main"));
+    assert!(assembly.contains("movz w0, #42"));
+}
