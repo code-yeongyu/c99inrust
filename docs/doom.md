@@ -86,7 +86,8 @@ integer ABI for Doom-shaped positive-value expression slices; full unsigned
 conversion and wraparound semantics remain future work. Post-increment
 expressions now produce their old value while updating direct `int` and pointer
 lvalues, and empty statements are accepted for Doom loops such as
-`while (*(p++) != 1);`.
+`while (*(p++) != 1);`. `do { ... } while (...)` statements now lower to a
+body-first loop with a conditional back edge.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -99,10 +100,12 @@ The current `am_map.c` blocker is the local static aggregate declaration
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The current `m_cheat.c` blocker has moved past `(unsigned char)key`,
-`unsigned char *p, c;`, and `while (*(p++) != 1);`, and is now the
-`do { ... } while (...)` loop in `cht_GetParam`.
-The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and is now a
-`do { ... } while (...)` loop in `R_DrawColumn`.
+`unsigned char *p, c;`, `while (*(p++) != 1);`, and the `cht_GetParam`
+`do { ... } while (...)` loop, and is now the static byte array
+`cheat_xlate_table[256]`.
+The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and the first
+`do { ... } while (...)` loops, and is now prefix increment in
+`if (++fuzzpos == 50)` inside `R_DrawFuzzColumn`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 

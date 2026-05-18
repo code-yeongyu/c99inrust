@@ -1598,3 +1598,84 @@ while (c && *p!=0xff );
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Do-While Slice
+
+`compile -S` now accepts `do { ... } while (...)` statements and lowers them to
+a body-first loop. This covers the next `m_cheat.c` loop shape:
+
+```c
+do
+{
+    c = *p;
+    *(buffer++) = c;
+    *(p++) = 0;
+}
+while (c && *p!=0xff );
+```
+
+Regression coverage added:
+
+```text
+compiler_emits_back_edges_for_do_while_loops
+compiler_accepts_doom_do_while_pointer_copy_slice
+do_while_loop_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+error: unknown local or global: cheat_xlate_table
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+error: 5903:6: expected expression
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779114005`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779114005.txt
+ok=9
+fail=53
+```
+
+Representative moved blockers:
+
+```text
+FAIL m_cheat.c
+  before do-while slice: 139:5: expected expression
+  after do-while slice: unknown local or global: cheat_xlate_table
+
+FAIL r_draw.c
+  before do-while slice: 5741:5: expected expression
+  after do-while slice: 5903:6: expected expression
+```
+
+The next `m_cheat.c` blocker is the static unsigned byte array used by the
+cheat translation table:
+
+```c
+static unsigned char cheat_xlate_table[256];
+...
+cheat_xlate_table[(unsigned char)key]
+```
+
+The next `r_draw.c` blocker is prefix increment in `R_DrawFuzzColumn`:
+
+```c
+if (++fuzzpos == 50)
+    fuzzpos = 0;
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
