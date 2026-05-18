@@ -2874,3 +2874,91 @@ FAIL d_main.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After d_net Flow Slice
+
+`compile -S` now accepts the focused `d_net.c` translation unit. This slice
+adds the Doom declaration, control-flow, literal, and struct-copy forms reached
+by `d_net.c`, including plain `unsigned` local declarations, `goto` labels,
+suffixed integer literals such as `0x12345678l`, struct arrays inside struct
+fields, address-taking and assignment through those struct-array fields, global
+struct object assignment from a pointer dereference, and unsigned 32-bit mask
+immediates.
+
+Regression coverage added:
+
+```text
+compiler_accepts_plain_unsigned_local_declaration_slice
+compiler_accepts_goto_label_slice
+lexer_accepts_integer_literal_suffixes
+compiler_accepts_struct_array_field_subscript_address_slice
+compiler_accepts_global_struct_object_assignment_from_pointer_slice
+compiler_accepts_unsigned_32_bit_mask_literals_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/d_net.c \
+  -o /tmp/c99inrust-d_net.s
+```
+
+Focused `d_net.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779135763`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779135763.txt
+ok=17
+fail=45
+```
+
+Translation units currently reaching assembly:
+
+```text
+am_map.c
+d_items.c
+d_main.c
+d_net.c
+doomdef.c
+doomstat.c
+i_main.c
+m_argv.c
+m_bbox.c
+m_cheat.c
+m_fixed.c
+m_random.c
+m_swap.c
+r_draw.c
+r_sky.c
+st_lib.c
+tables.c
+```
+
+Representative moved blockers:
+
+```text
+FAIL d_net.c
+  before this slice:
+    error: 4134:5: expected expression
+  after this slice:
+    OK d_net.c
+
+FAIL tables.c
+  before this slice:
+    error: 178:5: expected expression
+  after this slice:
+    OK tables.c
+```
+
+Next visible blockers include file-scope pointer string initializers in
+`dstrings.c` and `f_finale.c`, function-pointer arrays, enum-sized arrays, and
+old-style function definitions.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

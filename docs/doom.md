@@ -164,13 +164,19 @@ matrices with row decay, global plain `char` arrays, and byte loads/stores
 through `char*` pointer arithmetic and nested `char**` subscripts. The
 preprocessor supplies the Doom-era libc constants `R_OK`, `SEEK_SET`,
 `SEEK_CUR`, `SEEK_END`, and `NULL`.
+The compiler now also accepts the declaration, control-flow, and struct-copy
+shapes reached by `d_net.c`: plain `unsigned` locals, `goto` labels, integer
+literal suffixes such as `0x12345678l`, struct arrays inside struct fields,
+global struct object assignment from pointer dereference, and unsigned
+32-bit mask immediates. This also moves `tables.c` to assembly generation.
 Pointer returns remain unsupported.
 
-The current Doom compile scan reaches actual supported function bodies, but 47
+The current Doom compile scan reaches actual supported function bodies, but 45
 of the 62 C files still fail before object generation. `am_map.c`,
-`d_items.c`, `d_main.c`, `doomdef.c`, `doomstat.c`, `i_main.c`, `m_argv.c`,
-`m_bbox.c`, `m_cheat.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`, `r_draw.c`,
-`r_sky.c`, and `st_lib.c` currently reach assembly generation.
+`d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `i_main.c`,
+`m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`,
+`r_draw.c`, `r_sky.c`, `st_lib.c`, and `tables.c` currently reach assembly
+generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -183,9 +189,11 @@ tables such as `cheat_player_arrow`.
 The former `d_items.c` blocker moved past the conflicting `weaponinfo`
 extern/definition pair. The former `d_main.c` blockers moved past enum typedef
 locals, `FILE*`, `R_OK`, `SEEK_*`, response-file `char*` pointer arithmetic,
-and `NULL`. Many remaining files are blocked by enum-sized arrays, old-style
-function definitions, function-pointer declarations, and unsupported expression
-forms.
+and `NULL`. The former `d_net.c` blockers moved past local plain `unsigned`,
+`goto`, suffixed integer literals, struct-array field subscripts, and the
+`reboundstore = *netbuffer` / `*netbuffer = reboundstore` struct copy shape.
+Many remaining files are blocked by enum-sized arrays, old-style function
+definitions, function-pointer declarations, and unsupported expression forms.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
