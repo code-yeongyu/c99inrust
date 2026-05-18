@@ -7,7 +7,7 @@ use c99inrust::diagnostics::{CompileError, CompileResult};
 use c99inrust::front_end::lexer::lex;
 use c99inrust::front_end::preprocessor::Preprocessor;
 use c99inrust::ir::lower;
-use c99inrust::parser::parse;
+use c99inrust::parser::{parse, parse_translation_unit};
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect()) {
@@ -26,6 +26,7 @@ fn run(args: Vec<String>) -> CompileResult<()> {
     match command.as_str() {
         "lex" => lex_command(&args[1..]),
         "preprocess" => preprocess_command(&args[1..]),
+        "parse-check" => parse_check_command(&args[1..]),
         "compile" => compile_command(&args[1..]),
         "doom-audit" => doom_audit_command(&args[1..]),
         "help" | "--help" | "-h" => usage(),
@@ -47,6 +48,23 @@ fn preprocess_command(args: &[String]) -> CompileResult<()> {
     let common = parse_common_args(args, "preprocess")?;
     let unit = preprocessor_from(&common).preprocess_file(&common.input)?;
     print!("{}", unit.source);
+    Ok(())
+}
+
+fn parse_check_command(args: &[String]) -> CompileResult<()> {
+    let common = parse_common_args(args, "parse-check")?;
+    let unit = preprocessor_from(&common).preprocess_file(&common.input)?;
+    let tokens = lex(&unit.source)?;
+    let surface = parse_translation_unit(&tokens)?;
+    println!("items={}", surface.items.len());
+    println!("typedefs={}", surface.typedef_count());
+    println!("prototypes={}", surface.prototype_count());
+    println!("declarations={}", surface.declaration_count());
+    println!(
+        "function-definitions={}",
+        surface.function_definition_count()
+    );
+    println!("struct-forwards={}", surface.struct_forward_count());
     Ok(())
 }
 
@@ -217,6 +235,7 @@ fn usage() -> CompileResult<()> {
     println!("usage:");
     println!("  c99inrust lex <input.c>");
     println!("  c99inrust preprocess [-D NAME[=VALUE]] [-I include] <input.c>");
+    println!("  c99inrust parse-check [-D NAME[=VALUE]] [-I include] <input.c>");
     println!(
         "  c99inrust compile [-S] [--target native] [-D NAME[=VALUE]] [-I include] <input.c> -o <out.s>"
     );
