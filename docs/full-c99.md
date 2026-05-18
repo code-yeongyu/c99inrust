@@ -18,7 +18,8 @@ Each new language feature needs:
 The first oracle tests live in `tests/clang_oracle.rs`. They compile a C snippet
 with both compilers, link both outputs through the platform toolchain, run both
 executables, and compare exit codes. Current covered slices include constant
-returns, arithmetic precedence, and local `int` declarations/assignments.
+returns, arithmetic precedence, local `int` declarations/assignments, and
+`if`/`else` control flow over integer comparisons.
 
 ## Undefined Behavior Policy
 

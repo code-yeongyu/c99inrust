@@ -16,8 +16,8 @@ if preprocessing did not exist.
 ## Current Target Model
 
 The implemented backend emits assembly for the current int-only function-body
-slice: local `int` declarations, assignments, arithmetic/bitwise expressions,
-and returns.
+slice: local `int` declarations, scoped blocks, assignments, `if`/`else`,
+arithmetic/bitwise/comparison expressions, and returns.
 
 - `aarch64-apple-darwin`
 - `x86_64-apple-darwin`

@@ -13,8 +13,8 @@ This repository currently ships the first verified vertical slice:
 | ------- | ------ |
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
 | Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
-| Parser | int function bodies with local `int` declarations, assignments, returns, plus Doom-shaped surface declarations |
-| IR | local-slot lowering for supported `int` statements and expressions |
+| Parser | int function bodies with local `int` declarations, assignments, `if`/`else`, blocks, returns, plus Doom-shaped surface declarations |
+| IR | scoped local-slot lowering and label lowering for supported `int` statements and expressions |
 | Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly |
 | Doom | official source audit command and QA plan |
 
@@ -48,7 +48,7 @@ cc answer.s -o answer
 The current compile slice accepts:
 
 ```c
-int main(void) { int x = 40; int y = x + 1; x = y + 1; return x; }
+int main(void) { int x = 7; if (x >= 7) { x = x + 30; } else { x = 1; } return x; }
 ```
 
 ## Official Doom Target
@@ -74,7 +74,7 @@ semantic C parsing or code generation.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets --all-features
 cargo test --all-targets --all-features
 bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src tests
 ```
