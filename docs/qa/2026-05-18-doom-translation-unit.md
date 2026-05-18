@@ -1531,3 +1531,70 @@ for (i=0 , patch = texture->patches;
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Post-Increment Value Slice
+
+`compile -S` now accepts post-increment expressions as values for direct `int`
+and pointer lvalues, and it accepts empty statements. This covers the next
+`m_cheat.c` loop condition shape:
+
+```c
+while (*(p++) != 1);
+```
+
+The expression lowering now leaves the old value in the result register while
+writing back the incremented value. Pointer increments still use the compiler's
+current unscaled pointer arithmetic model.
+
+Regression coverage added:
+
+```text
+compiler_emits_post_increment_value_slice
+compiler_accepts_pointer_post_increment_dereference_slice
+post_increment_value_slice_matches_host_c_compiler_exit_code
+empty_while_post_increment_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+error: 139:5: expected expression
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779113438`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779113438.txt
+ok=9
+fail=53
+```
+
+Representative moved blocker:
+
+```text
+FAIL m_cheat.c
+  before post-increment value slice: 137:24: expected expression
+  after post-increment value slice: 139:5: expected expression
+```
+
+The next `m_cheat.c` blocker is a `do` loop:
+
+```c
+do
+{
+    c = *p;
+    *(buffer++) = c;
+    *(p++) = 0;
+}
+while (c && *p!=0xff );
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
