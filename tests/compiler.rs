@@ -1386,6 +1386,35 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_global_char_matrix_row_decay_slice() {
+    // given
+    let source = r#"void use(char* value);
+char savegamestrings[10][24];
+char detailNames[2][9] = {"M_GDHIGH", "M_GDLOW"};
+int main(void) {
+    use(savegamestrings[1]);
+    use(&savegamestrings[1][0]);
+    use(detailNames[1]);
+    savegamestrings[1][0] = 7;
+    return savegamestrings[1][0] + detailNames[0][0];
+}"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("savegamestrings:"));
+    assert!(assembly.contains("detailNames:"));
+    assert!(assembly.contains("\tcall use\n"));
+    assert!(assembly.contains("\tmovb %al, (%rcx,%rdx,1)\n"));
+    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_mixed_pointer_scalar_local_declaration_slice() {
     // given
     let source = "int main(void) { unsigned char *p, c; p = 0; c = 7; return c; }";
@@ -3079,6 +3108,58 @@ int main(void) {
     // then
     assert!(assembly.contains("\tcall *%rax\n"));
     assert!(assembly.contains("\tleaq check(%rip), %rax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_function_pointer_assignment_call_slice() {
+    // given
+    let source = r"void (*messageRoutine)(int response);
+void set(void (*routine)(int response), int ch) {
+    messageRoutine = routine;
+    if (messageRoutine)
+        messageRoutine(ch);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("messageRoutine:"));
+    assert!(assembly.contains("\tmovq %rax, messageRoutine(%rip)\n"));
+    assert!(assembly.contains("\tcall *%rax\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_function_pointer_field_call_slice() {
+    // given
+    let source = r"typedef struct {
+    void (*routine)(int choice);
+} menuitem_t;
+void choose(int choice) {
+}
+int main(void) {
+    menuitem_t item;
+    item.routine = choose;
+    if (item.routine)
+        item.routine(1);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tleaq choose(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq %rax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tcall *%rax\n"));
 }
 
 #[test]

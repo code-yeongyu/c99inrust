@@ -312,7 +312,8 @@ fn lower_extern_global_binding(
         | GlobalInitializer::PointerStringArray { .. }
         | GlobalInitializer::StructObject { .. }
         | GlobalInitializer::StructArray { .. }
-        | GlobalInitializer::UnsignedCharArray(_) => return Ok(None),
+        | GlobalInitializer::UnsignedCharArray(_)
+        | GlobalInitializer::UnsignedCharMatrix { .. } => return Ok(None),
     };
     Ok(Some(binding))
 }
@@ -373,6 +374,10 @@ fn lower_defined_global_initializer(
         GlobalInitializer::UnsignedCharArray(values) => Ok((
             LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
             GlobalBinding::UnsignedCharArray,
+        )),
+        GlobalInitializer::UnsignedCharMatrix { values, columns } => Ok((
+            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
+            GlobalBinding::UnsignedCharMatrix { columns: *columns },
         )),
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
@@ -751,6 +756,9 @@ enum GlobalBinding {
         length: Option<usize>,
     },
     UnsignedCharArray,
+    UnsignedCharMatrix {
+        columns: usize,
+    },
 }
 
 impl GlobalBinding {
@@ -772,7 +780,8 @@ impl GlobalBinding {
             | Self::PointerArray { .. }
             | Self::StructObject { .. }
             | Self::StructArray { .. }
-            | Self::UnsignedCharArray => None,
+            | Self::UnsignedCharArray
+            | Self::UnsignedCharMatrix { .. } => None,
         }
     }
 
@@ -783,6 +792,7 @@ impl GlobalBinding {
                 | Self::PointerArray { .. }
                 | Self::StructArray { .. }
                 | Self::UnsignedCharArray
+                | Self::UnsignedCharMatrix { .. }
         )
     }
 }
@@ -1833,6 +1843,9 @@ impl LoweringContext {
     }
 
     fn lower_subscript(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredExpr> {
+        if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
+            return Ok(pointer);
+        }
         if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
         {
@@ -1903,6 +1916,14 @@ impl LoweringContext {
     }
 
     fn lower_subscript_lvalue(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredLValue> {
+        if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
+            return Ok(LoweredLValue::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(LoweredExpr::Integer(0)),
+                element_type: ScalarType::Int,
+                element_byte_size: 1,
+            });
+        }
         if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
         {
@@ -1990,6 +2011,9 @@ impl LoweringContext {
     fn lower_address_of(&self, target: &LValue) -> CompileResult<LoweredExpr> {
         match target {
             LValue::Subscript { array, index } => {
+                if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
+                    return Ok(pointer);
+                }
                 if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
                     return Ok(address.pointer);
                 }
@@ -2254,6 +2278,25 @@ impl LoweringContext {
         }))
     }
 
+    fn resolve_global_byte_matrix_row(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(GlobalBinding::UnsignedCharMatrix { columns }) = self.global_bindings.get(name)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(LoweredExpr::PointerOffset {
+            pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size: *columns,
+        }))
+    }
+
     fn resolve_struct_address(&self, expr: &Expr) -> CompileResult<StructAddress> {
         if let Expr::Identifier(name) = expr
             && let Some(LocalBinding::StructObject {
@@ -2419,6 +2462,14 @@ impl LoweringContext {
             }
         }
         if let Expr::Subscript { array, .. } = expr {
+            if let Expr::Identifier(name) = array.as_ref()
+                && matches!(
+                    self.global_bindings.get(name),
+                    Some(GlobalBinding::UnsignedCharMatrix { .. })
+                )
+            {
+                return Ok("char".to_owned());
+            }
             if let Expr::Identifier(name) = array.as_ref()
                 && let Some(GlobalBinding::PointerArray {
                     referent: Some(referent),

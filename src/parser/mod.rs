@@ -101,6 +101,10 @@ pub enum GlobalInitializer {
         length: usize,
     },
     UnsignedCharArray(Vec<u8>),
+    UnsignedCharMatrix {
+        values: Vec<u8>,
+        columns: usize,
+    },
 }
 
 impl GlobalInitializer {
@@ -2436,6 +2440,16 @@ fn parse_struct_field_declaration(
     if parse_nested_aggregate_field_declaration(tokens, is_union, context, output)? {
         return Ok(true);
     }
+    if let Some(name) = function_pointer_name(tokens) {
+        push_struct_field(
+            &name,
+            FieldType::Pointer { referent: None },
+            is_union,
+            context.available_structs.as_slice(),
+            output,
+        )?;
+        return Ok(true);
+    }
     let ranges = top_level_comma_ranges(tokens);
     let Some((first_start, first_end)) = ranges.first().copied() else {
         return Ok(false);
@@ -2828,6 +2842,9 @@ fn parse_supported_global_declaration(
     if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
         return Ok(None);
     }
+    if let Some(global) = parse_global_function_pointer(tokens) {
+        return Ok(Some(global));
+    }
     if top_level_function_open_paren(tokens).is_some() {
         return Ok(None);
     }
@@ -2874,6 +2891,17 @@ fn parse_supported_global_declarations(
     }
     parse_supported_global_declaration(tokens, known_structs, constants)
         .map(|global| global.map_or_else(Vec::new, |global| vec![global]))
+}
+
+fn parse_global_function_pointer(tokens: &[Token]) -> Option<Global> {
+    let declaration = tokens.get(..tokens.len().checked_sub(1)?)?;
+    let name = function_pointer_name(declaration)?;
+    let initializer = if token_has_keyword(declaration, Keyword::Extern) {
+        GlobalInitializer::ExternPointer { referent: None }
+    } else {
+        GlobalInitializer::PointerNull { referent: None }
+    };
+    Some(Global { name, initializer })
 }
 
 fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {
@@ -2947,6 +2975,46 @@ fn parse_global_unsigned_char_array(
             ),
         );
     };
+    if declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        let second_open = close_bracket + 1;
+        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+            return Err(
+                CompileError::new("unterminated global matrix declarator").at(
+                    declaration[second_open].line,
+                    declaration[second_open].column,
+                ),
+            );
+        };
+        let rows = parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?;
+        let columns = parse_unsigned_char_array_length(
+            &declaration[second_open + 1..second_close],
+            constants,
+        )?;
+        let length = rows
+            .checked_mul(columns)
+            .ok_or_else(|| CompileError::new("global byte matrix size overflow"))?;
+        let values = if let Some(assign_index) =
+            top_level_punctuator_index(&declaration[second_close + 1..], "=")
+        {
+            let assign_index = second_close + 1 + assign_index;
+            parse_char_matrix_initializer(&declaration[assign_index + 1..], rows, columns)?
+        } else {
+            vec![0; length]
+        };
+        let name = token_identifier(&declaration[name_index])
+            .ok_or_else(|| CompileError::new("expected global matrix name"))?
+            .to_owned();
+        return Ok(Some(Global {
+            name,
+            initializer: GlobalInitializer::UnsignedCharMatrix { values, columns },
+        }));
+    }
     let values = if let Some(assign_index) =
         top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
     {
@@ -3717,6 +3785,41 @@ fn parse_string_array_initializer(tokens: &[Token]) -> CompileResult<Vec<String>
         }
     }
     Ok(values)
+}
+
+fn parse_char_matrix_initializer(
+    tokens: &[Token],
+    rows: usize,
+    columns: usize,
+) -> CompileResult<Vec<u8>> {
+    let values = parse_string_array_initializer(tokens)?;
+    if values.len() > rows {
+        return Err(CompileError::new(
+            "global char matrix initializer has too many rows",
+        ));
+    }
+    let length = rows
+        .checked_mul(columns)
+        .ok_or_else(|| CompileError::new("global char matrix size overflow"))?;
+    let mut bytes = Vec::with_capacity(length);
+    for value in values {
+        if value.len() > columns {
+            return Err(CompileError::new(
+                "global char matrix initializer row is too large",
+            ));
+        }
+        let row_end = bytes
+            .len()
+            .checked_add(columns)
+            .ok_or_else(|| CompileError::new("global char matrix row size overflow"))?;
+        bytes.extend_from_slice(value.as_bytes());
+        if value.len() < columns {
+            bytes.push(0);
+        }
+        bytes.resize(row_end, 0);
+    }
+    bytes.resize(length, 0);
+    Ok(bytes)
 }
 
 fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {

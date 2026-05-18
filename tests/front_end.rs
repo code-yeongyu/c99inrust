@@ -151,6 +151,22 @@ fn preprocessor_provides_doom_netinet_port_base() {
 }
 
 #[test]
+fn preprocessor_provides_doom_fcntl_open_constants() {
+    // given
+    let source = "#include <fcntl.h>\nint flags = O_WRONLY | O_CREAT | O_TRUNC | O_BINARY;\nint read = O_RDONLY;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-fcntl.c", source)
+        .expect("preprocessor should provide Doom-era fcntl open constants");
+
+    // then
+    assert!(unit.source.contains("#include <fcntl.h>"));
+    assert!(unit.source.contains("int flags = 1 | 64 | 512 | 0;"));
+    assert!(unit.source.contains("int read = 0;"));
+}
+
+#[test]
 fn preprocessor_provides_doom_stdio_seek_constants() {
     // given
     let source = "#include <stdio.h>\nint end = SEEK_END;\nint set = SEEK_SET;\nint nil = NULL;\n";
