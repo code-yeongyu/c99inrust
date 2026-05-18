@@ -174,3 +174,79 @@ global variable storage and lookup
 This is still not a playable Doom claim. Full success requires compiling all
 translation units, linking the Doom executable, and manually running a playable
 public Doom target.
+
+## Compile Scan After Scalar Return Slice
+
+`compile -S` now accepts scalar and typedef-backed return specifiers before the
+function name. This covers Doom-style split-line signatures such as
+`fixed_t\nFixedMul\n(...)`, boolean-like typedef returns, `char`, and
+`unsigned short`. Pointer returns such as `char *name(void)` are still rejected
+instead of being lowered through the integer ABI.
+
+Regression coverage added:
+
+```text
+compiler_accepts_typedef_return_signatures
+compiler_accepts_split_line_typedef_return_signatures
+compiler_accepts_unsigned_scalar_return_signatures
+compiler_rejects_pointer_return_signatures
+typedef_return_signature_slice_matches_host_c_compiler_exit_code
+unsigned_return_signature_slice_matches_host_c_compiler_exit_code
+```
+
+Current compile scan:
+
+```text
+scan=/tmp/c99inrust-doom-compile-scan-after-scalar-signature.txt
+ok=0
+fail=62
+```
+
+Manual CLI QA was run inside tmux session `c99scalarqa` with
+`target/debug/c99inrust`:
+
+```text
+tmux_session=c99scalarqa
+fixed_exit=42
+unsigned_exit=42
+error: 1:1: unsupported function definition: name
+manual_qa=PASS
+```
+
+Local Rust/slop gate for the scalar return slice:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+rust-programmer no-excuse: PASS for 3 changed files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test --all-targets --all-features: PASS, 42 tests
+cargo nextest run --all-targets --all-features: PASS, 42 tests
+cargo machete: PASS
+cargo deny check: PASS
+cargo audit: PASS
+unsafe/miri: N/A; unsafe code is forbidden in Cargo.toml and src/lib.rs
+remove-ai-slops: PASS for this slice; no debug leftovers, warning suppressions,
+dead code, or needless behavior-changing cleanup found
+```
+
+Representative moved failures:
+
+```text
+FAIL hu_stuff.c
+  before: unsupported function definition: ForeignTranslation
+  after:  5601:21: expected punctuator ;
+FAIL m_fixed.c
+  before: unsupported function definition: FixedMul
+  after:  434:14: expected expression
+FAIL m_swap.c
+  before: unsupported function definition: SwapSHORT
+  after:  unknown local: x
+FAIL p_maputl.c
+  before: unsupported function definition: P_AproxDistance
+  after:  5456:14: expected punctuator )
+```
+
+The next high-value blocker is parameter binding plus ABI prologue stores.
+`m_swap.c` now reaches `SwapSHORT`'s body and fails because parameter `x` is not
+registered as a local yet.

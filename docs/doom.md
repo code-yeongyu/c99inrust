@@ -43,8 +43,10 @@ check, lower, compile, link, or run Doom yet.
 `compile -S` now accepts full translation units enough to skip top-level
 declarations and prototypes before attempting supported function definitions.
 It also accepts `int` and `void` function return types, skips parameter-list
-tokens for unsupported parameter binding, and emits terminal returns for `void`
-functions that can fall through.
+tokens for unsupported parameter binding, emits terminal returns for `void`
+functions that can fall through, and treats supported scalar/typedef return
+specifiers such as `fixed_t`, `boolean`, `char`, and `unsigned short` as the
+current integer return ABI. Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
 62 C files still fail before object generation. Evidence is recorded in
