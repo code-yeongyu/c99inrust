@@ -168,3 +168,38 @@ cargo audit: PASS, 1 crate scanned
 unsafe/miri: N/A; crate has unsafe_code = "forbid" and #![forbid(unsafe_code)]
 remove-ai-slops scan: PASS for this slice; no debug leftovers, dead code, warning suppressions, or needless behavior-changing cleanup found
 ```
+
+## Scalar Return Slice Recheck
+
+Date: 2026-05-18
+Scope: `src/parser/mod.rs`, `tests/compiler.rs`, `tests/clang_oracle.rs`
+
+Commands run locally after the scalar return signature slice:
+
+```text
+rustup run stable cargo fmt --all -- --check
+rustup run stable cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src/parser/mod.rs tests/compiler.rs tests/clang_oracle.rs
+LSP diagnostics on the three changed Rust files
+rustup run stable cargo test --all-targets --all-features
+cargo nextest run --all-targets --all-features
+cargo machete
+cargo deny check
+cargo audit
+```
+
+Results:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+no-excuse: PASS for 3 files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test: PASS, 42 tests
+nextest: PASS, 42 tests
+cargo machete: PASS, no unused dependencies
+cargo deny: PASS, advisories/bans/licenses/sources ok
+cargo audit: PASS, 1 crate scanned
+unsafe/miri: N/A; crate has unsafe_code = "forbid" and #![forbid(unsafe_code)]
+remove-ai-slops scan: PASS for this slice; no debug leftovers, dead code, warning suppressions, or needless behavior-changing cleanup found
+```
