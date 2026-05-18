@@ -63,3 +63,22 @@ fn compiler_emits_stack_slots_for_local_int_assignments() {
     }
     assert!(assembly.contains("ret"));
 }
+
+#[test]
+fn compiler_marks_linux_assembly_stack_non_executable() {
+    // given
+    let source = "int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let linux_assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("linux assembly should emit");
+    let apple_assembly =
+        emit_assembly(&lowered, Target::X86_64AppleDarwin).expect("apple assembly should emit");
+
+    // then
+    assert!(linux_assembly.contains(".section .note.GNU-stack,\"\",@progbits"));
+    assert!(!apple_assembly.contains(".note.GNU-stack"));
+}

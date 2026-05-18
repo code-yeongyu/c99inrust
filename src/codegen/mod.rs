@@ -46,6 +46,9 @@ pub fn emit_assembly(program: &LoweredProgram, target: Target) -> CompileResult<
             }
         }
     }
+    if target == Target::X86_64UnknownLinuxGnu {
+        assembly.push_str(".section .note.GNU-stack,\"\",@progbits\n");
+    }
     Ok(assembly)
 }
 
