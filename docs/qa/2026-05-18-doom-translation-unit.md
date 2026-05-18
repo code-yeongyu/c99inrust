@@ -1025,3 +1025,67 @@ FAIL p_inter.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After Fixed-Point Initializer Recheck
+
+`compile -S` now accepts Doom-shaped decimal fixed-point global initializer
+expressions such as:
+
+```text
+static fixed_t scale_mtof = (.2*(1<<16));
+```
+
+The initializer is parsed through the expression parser, evaluates the leading
+decimal literal as an exact rational value for the supported arithmetic slice,
+and truncates the final scalar value to the integer global storage used by
+`fixed_t`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_fixed_point_global_initializer_slice
+fixed_point_global_initializer_matches_host_c_compiler_exit_code
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779107716
+scan=/tmp/c99inrust-doom-scan-1779107716.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779107716.txt
+ok=9
+fail=53
+```
+
+This did not add a new OK translation unit, but it moved `am_map.c` to the next
+global initializer blocker:
+
+```text
+before: FAIL am_map.c
+  error: 7104:29: unsupported global integer initializer
+after: FAIL am_map.c
+  error: 7117:32: unsupported global integer initializer
+```
+
+The new `am_map.c` blocker is a struct-style global initializer:
+
+```text
+static cheatseq_t cheat_amap = { cheat_amap_seq, 0 };
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7117:32: unsupported global integer initializer
+FAIL i_net.c
+  error: 3905:5: expected expression
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL p_inter.c
+  error: unsupported function parameter
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.

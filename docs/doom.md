@@ -66,7 +66,9 @@ header `extern` arrays, including simple checked enum arithmetic such as
 `(8+16+32)` with C operator precedence for the supported arithmetic operators.
 Unparenthesized numeric scalar global initializers such as `200 - 32` are also
 accepted, and the preprocessor supplies the Doom-era `IPPORT_USERRESERVED`
-constant for `<netinet/in.h>`. Pointer returns remain unsupported.
+constant for `<netinet/in.h>`. Decimal fixed-point global initializers such as
+`(.2*(1<<16))` are folded into integer storage for the `am_map.c` scale slice.
+Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
 but nine of the 62 C files still fail before object generation. `doomdef.c`,
