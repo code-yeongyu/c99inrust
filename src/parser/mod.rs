@@ -328,7 +328,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             constants.extend(enum_constants);
             continue;
         }
-        if let Some(global) = parse_supported_global_declaration(item_tokens)? {
+        if let Some(global) = parse_supported_global_declaration(item_tokens, &structs)? {
             globals.push(global);
             continue;
         }
@@ -1601,7 +1601,10 @@ fn next_enum_separator(tokens: &[Token], start: usize) -> usize {
         .map_or(tokens.len(), |offset| start + offset)
 }
 
-fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_supported_global_declaration(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Global>> {
     if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
         return Ok(None);
     }
@@ -1617,7 +1620,7 @@ fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<
     if let Some(global) = parse_global_extern_pointer_array(tokens)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_int_array(tokens)? {
+    if let Some(global) = parse_global_int_array(tokens, known_structs)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_extern_scalar(tokens)? {
@@ -1626,7 +1629,7 @@ fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<
     if let Some(global) = parse_global_pointer(tokens)? {
         return Ok(Some(global));
     }
-    parse_global_int(tokens)
+    parse_global_int(tokens, known_structs)
 }
 
 fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {
@@ -1805,7 +1808,10 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
     }))
 }
 
-fn parse_global_int_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_int_array(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -1815,7 +1821,7 @@ fn parse_global_int_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
         return Ok(None);
     };
-    if !global_specifiers_are_int(&declaration[..name_index]) {
+    if !global_specifiers_are_int(&declaration[..name_index], known_structs) {
         return Ok(None);
     }
     let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
@@ -1903,7 +1909,10 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
     }))
 }
 
-fn parse_global_int(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_int(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -1914,7 +1923,7 @@ fn parse_global_int(tokens: &[Token]) -> CompileResult<Option<Global>> {
     let Some(name_index) = previous_identifier_index(declaration, end_index) else {
         return Ok(None);
     };
-    if !global_specifiers_are_int(&declaration[..name_index]) {
+    if !global_specifiers_are_int(&declaration[..name_index], known_structs) {
         return Ok(None);
     }
     if declaration
@@ -2001,15 +2010,20 @@ fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> b
     saw_type && saw_pointer
 }
 
-fn global_specifiers_are_int(tokens: &[Token]) -> bool {
-    !token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, false)
+fn global_specifiers_are_int(tokens: &[Token], known_structs: &[StructLayout]) -> bool {
+    !token_has_keyword(tokens, Keyword::Extern)
+        && global_specifiers_are_int_like(tokens, false, known_structs)
 }
 
 fn global_specifiers_are_extern_int(tokens: &[Token]) -> bool {
-    token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, true)
+    token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, true, &[])
 }
 
-fn global_specifiers_are_int_like(tokens: &[Token], allow_extern: bool) -> bool {
+fn global_specifiers_are_int_like(
+    tokens: &[Token],
+    allow_extern: bool,
+    known_structs: &[StructLayout],
+) -> bool {
     let mut saw_int = false;
     for token in tokens {
         match &token.kind {
@@ -2017,7 +2031,13 @@ fn global_specifiers_are_int_like(tokens: &[Token], allow_extern: bool) -> bool 
             TokenKind::Keyword(
                 Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Signed,
             ) => {}
-            TokenKind::Keyword(Keyword::Int) | TokenKind::Identifier(_) => saw_int = true,
+            TokenKind::Keyword(Keyword::Int) => saw_int = true,
+            TokenKind::Identifier(name) => {
+                if known_structs.iter().any(|layout| layout.name == *name) {
+                    return false;
+                }
+                saw_int = true;
+            }
             _ => return false,
         }
     }

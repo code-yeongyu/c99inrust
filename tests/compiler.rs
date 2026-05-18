@@ -790,6 +790,36 @@ int main(void) { return 42; }";
 }
 
 #[test]
+fn compiler_skips_struct_array_initializer_before_supported_function() {
+    // given
+    let source = r"typedef struct {
+    int x;
+    int y;
+} mpoint_t;
+typedef struct {
+    mpoint_t a;
+    mpoint_t b;
+} mline_t;
+mline_t player_arrow[] = {
+    { { -8, 0 }, { 8, 0 } },
+    { { 8, 0 }, { 0, 8 } }
+};
+int main(void) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("player_arrow:"));
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("movl $42, %eax"));
+}
+
+#[test]
 fn compiler_accepts_multi_declarator_local_int_slice() {
     // given
     let source = "int main(void) { int dx, dy; dx = 40; dy = 2; return dx + dy; }";
