@@ -9,11 +9,25 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
-    pub return_expr: Expr,
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Statement {
+    Declaration {
+        name: String,
+        initializer: Option<Expr>,
+    },
+    Assignment {
+        name: String,
+        value: Expr,
+    },
+    Return(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
+    Identifier(String),
     Integer(i64),
     Unary {
         op: UnaryOp,
@@ -137,11 +151,42 @@ impl Parser<'_> {
         }
         self.expect_punctuator(")")?;
         self.expect_punctuator("{")?;
-        self.expect_keyword(Keyword::Return)?;
-        let return_expr = self.expression()?;
-        self.expect_punctuator(";")?;
+        let mut statements = Vec::new();
+        while !self.check_punctuator("}") {
+            statements.push(self.statement()?);
+        }
         self.expect_punctuator("}")?;
-        Ok(Function { name, return_expr })
+        Ok(Function { name, statements })
+    }
+
+    fn statement(&mut self) -> CompileResult<Statement> {
+        if self.check_keyword(Keyword::Int) {
+            return self.declaration_statement();
+        }
+        if self.check_keyword(Keyword::Return) {
+            self.advance();
+            let expr = self.expression()?;
+            self.expect_punctuator(";")?;
+            return Ok(Statement::Return(expr));
+        }
+        let name = self.expect_identifier()?;
+        self.expect_punctuator("=")?;
+        let value = self.expression()?;
+        self.expect_punctuator(";")?;
+        Ok(Statement::Assignment { name, value })
+    }
+
+    fn declaration_statement(&mut self) -> CompileResult<Statement> {
+        self.expect_keyword(Keyword::Int)?;
+        let name = self.expect_identifier()?;
+        let initializer = if self.check_punctuator("=") {
+            self.advance();
+            Some(self.expression()?)
+        } else {
+            None
+        };
+        self.expect_punctuator(";")?;
+        Ok(Statement::Declaration { name, initializer })
     }
 
     fn expression(&mut self) -> CompileResult<Expr> {
@@ -238,6 +283,11 @@ impl Parser<'_> {
                     let value = *value;
                     self.advance();
                     Ok(Expr::Integer(value))
+                }
+                TokenKind::Identifier(value) => {
+                    let value = value.clone();
+                    self.advance();
+                    Ok(Expr::Identifier(value))
                 }
                 TokenKind::Punctuator(value) if value == "(" => {
                     self.advance();

@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, Function, Program, UnaryOp};
+use crate::parser::{BinaryOp, Expr, Function, Program, Statement, UnaryOp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredProgram {
@@ -9,7 +11,29 @@ pub struct LoweredProgram {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredFunction {
     pub name: String,
-    pub return_value: i64,
+    pub local_count: usize,
+    pub instructions: Vec<Instruction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Instruction {
+    StoreLocal { slot: usize, value: LoweredExpr },
+    Return(LoweredExpr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoweredExpr {
+    Integer(i64),
+    Local(usize),
+    Unary {
+        op: UnaryOp,
+        expr: Box<LoweredExpr>,
+    },
+    Binary {
+        op: BinaryOp,
+        left: Box<LoweredExpr>,
+        right: Box<LoweredExpr>,
+    },
 }
 
 pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
@@ -22,6 +46,9 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
 
 pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
     match expr {
+        Expr::Identifier(name) => Err(CompileError::new(format!(
+            "identifier {name} is not a constant expression"
+        ))),
         Expr::Integer(value) => Ok(*value),
         Expr::Unary { op, expr } => {
             let value = const_eval(expr)?;
@@ -43,10 +70,75 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 }
 
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
+    let mut locals = HashMap::new();
+    let mut instructions = Vec::new();
+    let mut has_return = false;
+    for statement in &function.statements {
+        match statement {
+            Statement::Declaration { name, initializer } => {
+                if locals.contains_key(name) {
+                    return Err(CompileError::new(format!(
+                        "duplicate local declaration: {name}"
+                    )));
+                }
+                let slot = locals.len();
+                locals.insert(name.clone(), slot);
+                let value = initializer
+                    .as_ref()
+                    .map_or(Ok(LoweredExpr::Integer(0)), |expr| {
+                        lower_expr(expr, &locals)
+                    })?;
+                instructions.push(Instruction::StoreLocal { slot, value });
+            }
+            Statement::Assignment { name, value } => {
+                let Some(slot) = locals.get(name).copied() else {
+                    return Err(CompileError::new(format!(
+                        "assignment to undeclared local: {name}"
+                    )));
+                };
+                instructions.push(Instruction::StoreLocal {
+                    slot,
+                    value: lower_expr(value, &locals)?,
+                });
+            }
+            Statement::Return(expr) => {
+                instructions.push(Instruction::Return(lower_expr(expr, &locals)?));
+                has_return = true;
+            }
+        }
+    }
+    if !has_return {
+        return Err(CompileError::new(format!(
+            "function {} has no return statement",
+            function.name
+        )));
+    }
     Ok(LoweredFunction {
         name: function.name.clone(),
-        return_value: const_eval(&function.return_expr)?,
+        local_count: locals.len(),
+        instructions,
     })
+}
+
+fn lower_expr(expr: &Expr, locals: &HashMap<String, usize>) -> CompileResult<LoweredExpr> {
+    match expr {
+        Expr::Identifier(name) => {
+            let Some(slot) = locals.get(name).copied() else {
+                return Err(CompileError::new(format!("unknown local: {name}")));
+            };
+            Ok(LoweredExpr::Local(slot))
+        }
+        Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
+        Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
+            op: *op,
+            expr: Box::new(lower_expr(expr, locals)?),
+        }),
+        Expr::Binary { op, left, right } => Ok(LoweredExpr::Binary {
+            op: *op,
+            left: Box::new(lower_expr(left, locals)?),
+            right: Box::new(lower_expr(right, locals)?),
+        }),
+    }
 }
 
 fn eval_binary(op: BinaryOp, left: i64, right: i64) -> CompileResult<i64> {
