@@ -2941,6 +2941,33 @@ void run(state_t* state, void* mobj) {
 }
 
 #[test]
+fn compiler_accepts_doom_function_designator_callback_argument_slice() {
+    // given
+    let source = r"typedef int boolean;
+typedef boolean (*thing_checker_t)(int);
+int main(void) {
+    return P_BlockThingsIterator(1, 2, PIT_StompThing);
+}
+boolean PIT_StompThing(int thing) {
+    return thing;
+}
+boolean P_BlockThingsIterator(int x, int y, thing_checker_t checker) {
+    return 1;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tleaq PIT_StompThing(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall P_BlockThingsIterator\n"));
+}
+
+#[test]
 fn compiler_accepts_member_access_on_pointer_return_call_slice() {
     // given
     let source = r"typedef struct {

@@ -223,6 +223,8 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
     let (globals, global_bindings) = lower_globals(&program.globals, &constants, &structs)?;
     let pointer_return_functions =
         lower_pointer_return_functions(&program.pointer_return_functions);
+    let function_names =
+        lower_function_names(&program.functions, &program.pointer_return_functions);
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function_with_globals(
@@ -231,6 +233,7 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
             &global_bindings,
             &constants,
             &pointer_return_functions,
+            &function_names,
         )?);
     }
     let constant_returns = constant_return_functions(&functions);
@@ -530,6 +533,21 @@ fn lower_pointer_return_functions(
         .collect()
 }
 
+fn lower_function_names(
+    functions: &[Function],
+    pointer_return_functions: &[PointerReturnFunction],
+) -> HashSet<String> {
+    functions
+        .iter()
+        .map(|function| function.name.clone())
+        .chain(
+            pointer_return_functions
+                .iter()
+                .map(|function| function.name.clone()),
+        )
+        .collect()
+}
+
 /// Evaluates a constant integer expression.
 ///
 /// # Errors
@@ -626,12 +644,14 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     let global_bindings = HashMap::new();
     let constants = HashMap::new();
     let pointer_return_functions = HashMap::new();
+    let function_names = HashSet::new();
     lower_function_with_globals(
         function,
         &structs,
         &global_bindings,
         &constants,
         &pointer_return_functions,
+        &function_names,
     )
 }
 
@@ -641,6 +661,7 @@ fn lower_function_with_globals(
     global_bindings: &HashMap<String, GlobalBinding>,
     constants: &HashMap<String, i64>,
     pointer_return_functions: &HashMap<String, Option<String>>,
+    function_names: &HashSet<String>,
 ) -> CompileResult<LoweredFunction> {
     let mut context = LoweringContext::new(
         function.return_type,
@@ -648,6 +669,7 @@ fn lower_function_with_globals(
         global_bindings,
         constants,
         pointer_return_functions,
+        function_names,
     );
     for parameter in &function.parameters {
         context.declare_local(
@@ -783,6 +805,7 @@ struct LoweringContext {
     global_bindings: HashMap<String, GlobalBinding>,
     constants: HashMap<String, i64>,
     pointer_return_functions: HashMap<String, Option<String>>,
+    function_names: HashSet<String>,
     scopes: Vec<HashMap<String, LocalBinding>>,
     local_slots: Vec<LocalSlot>,
     next_local_offset: usize,
@@ -801,6 +824,7 @@ impl LoweringContext {
         global_bindings: &HashMap<String, GlobalBinding>,
         constants: &HashMap<String, i64>,
         pointer_return_functions: &HashMap<String, Option<String>>,
+        function_names: &HashSet<String>,
     ) -> Self {
         Self {
             return_type,
@@ -808,6 +832,7 @@ impl LoweringContext {
             global_bindings: global_bindings.clone(),
             constants: constants.clone(),
             pointer_return_functions: pointer_return_functions.clone(),
+            function_names: function_names.clone(),
             scopes: vec![HashMap::new()],
             local_slots: Vec::new(),
             next_local_offset: 0,
@@ -1509,6 +1534,11 @@ impl LoweringContext {
         }
         if let Some(value) = self.constants.get(name) {
             return Ok(LoweredExpr::Integer(*value));
+        }
+        if self.function_names.contains(name) {
+            return Ok(LoweredExpr::GlobalAddress {
+                name: name.to_owned(),
+            });
         }
         Err(CompileError::new(format!(
             "unknown local or global: {name}"
