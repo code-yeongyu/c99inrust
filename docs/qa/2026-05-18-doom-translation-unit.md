@@ -1407,6 +1407,71 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After Doom Function Designator Callback Slice
+
+Bare function identifiers that name known functions now lower to symbol
+addresses when used as callback values. This covers Doom calls such as
+`P_BlockThingsIterator(bx, by, PIT_VileCheck)` and
+`P_BlockThingsIterator(bx, by, PIT_StompThing)` without requiring an explicit
+function-pointer cast.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doom_function_designator_callback_argument_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_enemy.c \
+  -o /tmp/c99inrust-p_enemy.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_map.c \
+  -o /tmp/c99inrust-p_map.s
+```
+
+`p_enemy.c` now reaches assembly generation. `p_map.c` moved past
+`PIT_StompThing` and now stops later on the typed-struct blocker
+`unknown struct: intercept_t`.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779142396`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779142396.txt
+ok=36
+fail=26
+```
+
+Newly green since the previous scan:
+
+```text
+p_enemy.c
+```
+
+Representative remaining blockers:
+
+```text
+FAIL p_map.c
+  error: unknown struct: intercept_t
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL r_main.c
+  error: assignment to undeclared local or global: colfunc
+FAIL r_things.c
+  error: assignment to undeclared local or global: colfunc
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `d_items.c` Struct Array Declaration Merge
 
 This slice moved `d_items.c` from the conflicting `weaponinfo` declaration

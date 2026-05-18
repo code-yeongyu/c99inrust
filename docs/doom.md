@@ -203,16 +203,20 @@ member access, and extern struct objects can merge with their later
 definitions. This moves the Doom thinker/action shapes in `p_ceilng.c`,
 `p_doors.c`, `p_floor.c`, `p_plats.c`, `p_saveg.c`, `p_telept.c`, and
 `p_tick.c` to assembly generation.
+Bare function designators that name known functions now lower to symbol
+addresses as callback arguments, moving the `P_BlockThingsIterator(...,
+PIT_VileCheck)` shape in `p_enemy.c` to assembly generation and moving
+`p_map.c` to its next `intercept_t` struct-typing blocker.
 
-The current Doom compile scan reaches actual supported function bodies, but 27
+The current Doom compile scan reaches actual supported function bodies, but 26
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
-`m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`, `p_floor.c`,
-`p_inter.c`, `p_lights.c`, `p_plats.c`, `p_pspr.c`, `p_saveg.c`,
-`p_sight.c`, `p_spec.c`, `p_telept.c`, `p_tick.c`, `p_user.c`, `r_draw.c`,
-`r_plane.c`, `r_segs.c`, `r_sky.c`, `st_lib.c`, `tables.c`, and `z_zone.c`
-currently reach assembly generation.
+`m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`, `p_enemy.c`,
+`p_floor.c`, `p_inter.c`, `p_lights.c`, `p_plats.c`, `p_pspr.c`,
+`p_saveg.c`, `p_sight.c`, `p_spec.c`, `p_telept.c`, `p_tick.c`,
+`p_user.c`, `r_draw.c`, `r_plane.c`, `r_segs.c`, `r_sky.c`, `st_lib.c`,
+`tables.c`, and `z_zone.c` currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -239,14 +243,13 @@ as `short openings[320*64]` and pointer-returning signatures such as
 The former enum-constant blockers in `i_sound.c`, `p_inter.c`, `m_menu.c`,
 `p_enemy.c`, `s_sound.c`, `sounds.c`, and `st_stuff.c` now reach later
 unsupported expression, struct, pointer, or old-style declaration forms.
-The former local enum typedef blocker in `p_enemy.c` moved past
-`dirtype_t d[3]`. The former enum typedef parameter and action-function
-pointer blockers in `p_ceilng.c`, `p_doors.c`, `p_floor.c`, and `p_plats.c`
-now reach assembly generation.
+The former local enum typedef and callback designator blockers in `p_enemy.c`
+moved past `dirtype_t d[3]` and `PIT_VileCheck`. The former enum typedef
+parameter and action-function pointer blockers in `p_ceilng.c`, `p_doors.c`,
+`p_floor.c`, and `p_plats.c` now reach assembly generation.
 Many remaining files are blocked by old-style function definitions,
 function-pointer declarations, typed-pointer gaps, unsupported expression
-forms, and a few undeclared callback-symbol references such as
-`PIT_VileCheck` and `PIT_StompThing`.
+forms, and typed struct alias gaps such as `intercept_t`.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
