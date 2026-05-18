@@ -215,6 +215,10 @@ fn lower_globals(
                 )?;
                 continue;
             }
+            GlobalInitializer::ExternPointerArray => {
+                insert_global_binding(&mut bindings, &global.name, GlobalBinding::PointerArray)?;
+                continue;
+            }
             GlobalInitializer::Int(value) => (
                 LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
                     CompileError::new(format!(

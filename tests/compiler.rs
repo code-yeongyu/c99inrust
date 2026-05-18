@@ -1100,6 +1100,50 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_extern_global_pointer_array_slice() {
+    // given
+    let source = r"typedef unsigned char byte;
+extern byte* screens[5];
+int main(void) {
+    return screens[0] ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("screens:\n"));
+    assert!(assembly.contains("\tleaq screens(%rip), %rcx\n"));
+    assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
+}
+
+#[test]
+fn compiler_accepts_extern_global_pointer_array_symbolic_length() {
+    // given
+    let source = r"enum { NUMSPRITES = 2 };
+extern char *sprnames[NUMSPRITES];
+int main(void) {
+    return sprnames[1] ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("sprnames:\n"));
+    assert!(assembly.contains("\tleaq sprnames(%rip), %rcx\n"));
+    assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
+}
+
+#[test]
 fn compiler_accepts_global_int_array_slice() {
     // given
     let source = r"int columnofs[4];

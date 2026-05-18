@@ -1395,6 +1395,43 @@ int main(void) {
 }
 
 #[test]
+fn extern_global_pointer_array_slice_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "extern_global_pointer_array_slice",
+        source: r"typedef unsigned char byte;
+extern byte* screens[2];
+byte* screens[2];
+int main(void) {
+    screens[0] = 0;
+    return screens[0] ? 1 : 0;
+}
+",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
 fn global_int_array_slice_matches_host_c_compiler_exit_code() {
     // given
     if cfg!(windows) || !command_exists("cc") {

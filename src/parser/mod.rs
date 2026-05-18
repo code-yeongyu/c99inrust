@@ -45,6 +45,7 @@ pub struct Global {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalInitializer {
     Extern(ScalarType),
+    ExternPointerArray,
     Int(i64),
     IntArray(Vec<i32>),
     IntConstant(String),
@@ -1584,6 +1585,9 @@ fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<
     if let Some(global) = parse_global_pointer_array(tokens)? {
         return Ok(Some(global));
     }
+    if let Some(global) = parse_global_extern_pointer_array(tokens)? {
+        return Ok(Some(global));
+    }
     if let Some(global) = parse_global_int_array(tokens)? {
         return Ok(Some(global));
     }
@@ -1736,6 +1740,39 @@ fn parse_global_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>>
     Ok(Some(Global {
         name,
         initializer: GlobalInitializer::PointerArray(length),
+    }))
+}
+
+fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_extern_pointer(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated extern global pointer-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
+        return Ok(None);
+    }
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected extern global pointer-array name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::ExternPointerArray,
     }))
 }
 
