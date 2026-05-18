@@ -112,6 +112,14 @@ Local integer arrays with initializer lists, such as
 array bindings. Local anonymous enum declarations add their constants to the
 current lowering context, and `register name = ...` is accepted as another
 old-style implicit-int local declaration.
+Known struct typedef locals such as `fpoint_t tmp;` and local `static` struct
+objects such as `static fline_t fl;` are accepted as stack-backed objects, with
+scalar member reads/writes and same-type struct assignment lowered as member
+copies. This is a compile-progress approximation; true persistent local static
+storage is still future work.
+`continue` statements are lowered for loops. Doom scalar typedef `angle_t` is
+accepted as an integer type, and top-level integer declarator lists such as
+`static fixed_t m_x, m_y;` emit one integer global per declarator.
 Plain `unsigned` parameters are accepted as integer parameters.
 The Doom typedef scalar set includes `lighttable_t`, enabling globals such as
 `lighttable_t* dc_colormap`.
@@ -135,11 +143,12 @@ but eleven of the 62 C files still fail before object generation. `doomdef.c`,
 `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
 `m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently reach assembly
 generation.
-The current `am_map.c` blocker is the local struct object declaration
-`fpoint_t tmp;` in `AM_clipMline`, not the earlier `AM_getIslope` member
+The current `am_map.c` blocker is typed global pointer/member support for the
+file-scope `static player_t *plr`, not the earlier `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
-statement, `case '-'` label, `litelevels` local integer array, local enum, or
-`register` implicit-int locals.
+statement, `case '-'` label, `litelevels` local integer array, local enum,
+`register` implicit-int locals, local `fpoint_t tmp`, static local `fline_t fl`,
+`continue`, `angle_t`, or `static fixed_t m_x, m_y` declarations.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first

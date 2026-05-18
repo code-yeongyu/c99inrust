@@ -1438,6 +1438,76 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `am_map.c` Struct Local And Continue Sweep
+
+`compile -S` now moves the focused `am_map.c` path past the local struct object
+and nearby control-flow/global declaration blockers:
+
+```c
+fpoint_t tmp;
+tmp.x = fl->a.x + (dx*(fl->a.y))/dy;
+fl->a = tmp;
+static fline_t fl;
+continue;
+angle_t a;
+static fixed_t m_x, m_y;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_struct_object_member_slice
+compiler_accepts_static_local_struct_object_slice
+compiler_accepts_continue_statement_slice
+compiler_accepts_angle_t_parameter_slice
+compiler_accepts_global_int_declarator_list_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+```
+
+Focused `am_map.c` compile now reaches typed global pointer/member support:
+
+```text
+error: unknown local or global: plr
+```
+
+That declaration is:
+
+```c
+static player_t *plr;
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779126907`; the session exited naturally after the scan
+without killing the tmux server:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779126907.txt
+ok=11
+fail=51
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before this sweep:
+    error: 7692:14: expected punctuator ;
+  after this sweep:
+    error: unknown local or global: plr
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After Pointer Walk Expression Slice
 
 `compile -S` now accepts the pointer-walk expression forms used by the middle of
