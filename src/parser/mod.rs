@@ -391,6 +391,7 @@ pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
         tokens,
         index: 0,
         known_structs: &[],
+        known_constants: &[],
     };
     parser.program()
 }
@@ -421,16 +422,17 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let mut functions = Vec::new();
     let mut unsupported_data_declaration = false;
     for item_tokens in &external_items {
-        if let Some(layout) = parse_struct_typedef(item_tokens, &structs)? {
+        if let Some(layout) = parse_struct_typedef(item_tokens, &structs, &constants)? {
             structs.push(layout);
             continue;
         }
-        let enum_constants = parse_enum_constants(item_tokens)?;
+        let enum_constants = parse_enum_constants(item_tokens, &constants)?;
         if !enum_constants.is_empty() {
             constants.extend(enum_constants);
             continue;
         }
-        let parsed_globals = parse_supported_global_declarations(item_tokens, &structs)?;
+        let parsed_globals =
+            parse_supported_global_declarations(item_tokens, &structs, &constants)?;
         if !parsed_globals.is_empty() {
             globals.extend(parsed_globals);
             continue;
@@ -456,6 +458,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             tokens: item_tokens,
             index: 0,
             known_structs: &structs,
+            known_constants: &constants,
         };
         functions.push(function_parser.function()?);
         if !function_parser.check_end() {
@@ -481,6 +484,7 @@ struct Parser<'a> {
     tokens: &'a [Token],
     index: usize,
     known_structs: &'a [StructLayout],
+    known_constants: &'a [Constant],
 }
 
 impl Parser<'_> {
@@ -767,7 +771,10 @@ impl Parser<'_> {
         let explicit_length = if self.check_punctuator("]") {
             None
         } else {
-            Some(local_array_length(&self.expression()?)?)
+            Some(local_array_length(
+                &self.expression()?,
+                self.known_constants,
+            )?)
         };
         self.expect_punctuator("]")?;
         if scalar_type == ScalarType::Pointer {
@@ -832,7 +839,7 @@ impl Parser<'_> {
             return Err(CompileError::new("local char matrix rows require a size"));
         };
         self.expect_punctuator("[")?;
-        let columns = local_array_length(&self.expression()?)?;
+        let columns = local_array_length(&self.expression()?, self.known_constants)?;
         self.expect_punctuator("]")?;
         let initializer = if self.check_punctuator("=") {
             self.advance();
@@ -938,7 +945,11 @@ impl Parser<'_> {
             return Err(CompileError::new("unterminated extern declaration"));
         };
         let declaration = &tokens[..=semicolon_index];
-        let Some(global) = parse_supported_global_declaration(declaration, self.known_structs)?
+        let Some(global) = parse_supported_global_declaration(
+            declaration,
+            self.known_structs,
+            self.known_constants,
+        )?
         else {
             return Ok(None);
         };
@@ -1009,7 +1020,11 @@ impl Parser<'_> {
             return Ok(values);
         }
         loop {
-            let value = eval_integer_initializer_expr(&self.expression()?)?.to_i64_trunc()?;
+            let value = eval_integer_initializer_expr_with_constants(
+                &self.expression()?,
+                self.known_constants,
+            )?
+            .to_i64_trunc()?;
             values.push(
                 i32::try_from(value)
                     .map_err(|_| CompileError::new("local int array initializer too large"))?,
@@ -1050,19 +1065,26 @@ impl Parser<'_> {
 
     fn local_enum_constants(&mut self) -> CompileResult<Vec<Constant>> {
         let mut constants = Vec::new();
+        let mut available_constants = self.known_constants.to_vec();
         let mut next_value = 0i64;
         while !self.check_punctuator("}") {
             let name = self.expect_identifier()?;
             let value = if self.check_punctuator("=") {
                 self.advance();
-                eval_integer_initializer_expr(&self.expression()?)?.to_i64_trunc()?
+                eval_integer_initializer_expr_with_constants(
+                    &self.expression()?,
+                    &available_constants,
+                )?
+                .to_i64_trunc()?
             } else {
                 next_value
             };
             next_value = value
                 .checked_add(1)
                 .ok_or_else(|| CompileError::new("enum constant overflow"))?;
-            constants.push(Constant { name, value });
+            let constant = Constant { name, value };
+            available_constants.push(constant.clone());
+            constants.push(constant);
             if self.check_punctuator(",") {
                 self.advance();
                 continue;
@@ -1995,7 +2017,10 @@ fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
     }
 }
 
-fn parse_enum_constants(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
+fn parse_enum_constants(
+    tokens: &[Token],
+    known_constants: &[Constant],
+) -> CompileResult<Vec<Constant>> {
     if !tokens_start_enum_declaration(tokens) {
         return Ok(Vec::new());
     }
@@ -2006,12 +2031,13 @@ fn parse_enum_constants(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
         return Err(CompileError::new("unterminated enum declaration")
             .at(tokens[open_brace].line, tokens[open_brace].column));
     };
-    parse_enum_body(&tokens[open_brace + 1..close_brace])
+    parse_enum_body(&tokens[open_brace + 1..close_brace], known_constants)
 }
 
 fn parse_struct_typedef(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<StructLayout>> {
     if !token_has_keyword(tokens, Keyword::Typedef) {
         return Ok(None);
@@ -2028,8 +2054,11 @@ fn parse_struct_typedef(
     let Some(name) = last_top_level_identifier(tokens) else {
         return Ok(None);
     };
-    let Some((fields, size)) =
-        parse_struct_fields(&tokens[open_brace + 1..close_brace], known_structs)?
+    let Some((fields, size)) = parse_struct_fields(
+        &tokens[open_brace + 1..close_brace],
+        known_structs,
+        constants,
+    )?
     else {
         return Ok(None);
     };
@@ -2060,6 +2089,7 @@ fn parse_struct_alias_typedef(
 fn parse_struct_fields(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<(Vec<StructField>, usize)>> {
     let mut fields = Vec::new();
     let mut offset = 0usize;
@@ -2074,6 +2104,7 @@ fn parse_struct_fields(
             && !parse_struct_field_declaration(
                 declaration,
                 known_structs,
+                constants,
                 &mut fields,
                 &mut offset,
                 &mut max_alignment,
@@ -2093,6 +2124,7 @@ fn parse_struct_fields(
 fn parse_struct_field_declaration(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
     fields: &mut Vec<StructField>,
     offset: &mut usize,
     max_alignment: &mut usize,
@@ -2129,7 +2161,7 @@ fn parse_struct_field_declaration(
         } else {
             base_type.clone()
         };
-        let field_type = if let Some(length) = struct_field_array_length(segment) {
+        let field_type = if let Some(length) = struct_field_array_length(segment, constants) {
             match field_type {
                 FieldType::Scalar(element_type) => FieldType::Array {
                     element_type,
@@ -2182,9 +2214,13 @@ fn declarator_name_index(tokens: &[Token]) -> Option<usize> {
     previous_identifier_index(tokens, before)
 }
 
-fn struct_field_array_length(tokens: &[Token]) -> Option<usize> {
+fn struct_field_array_length(tokens: &[Token], constants: &[Constant]) -> Option<usize> {
     let open_bracket = top_level_punctuator_index(tokens, "[")?;
     let close_bracket = matching_top_level_bracket(tokens, open_bracket)?;
+    let length_tokens = &tokens[open_bracket + 1..close_bracket];
+    if let Ok(length) = parse_unsigned_char_array_length(length_tokens, constants) {
+        return Some(length);
+    }
     match &tokens.get(open_bracket + 1)?.kind {
         TokenKind::Integer(value) => usize::try_from(*value).ok().filter(|length| *length > 0),
         _ => Some(1),
@@ -2260,8 +2296,8 @@ const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
     }
 }
 
-fn local_array_length(expr: &Expr) -> CompileResult<usize> {
-    let value = eval_integer_initializer_expr(expr)?.to_i64_trunc()?;
+fn local_array_length(expr: &Expr, constants: &[Constant]) -> CompileResult<usize> {
+    let value = eval_integer_initializer_expr_with_constants(expr, constants)?.to_i64_trunc()?;
     if value <= 0 {
         return Err(CompileError::new("local char array size must be positive"));
     }
@@ -2294,8 +2330,9 @@ fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> 
         .ok_or_else(|| CompileError::new("struct offset overflow"))
 }
 
-fn parse_enum_body(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
+fn parse_enum_body(tokens: &[Token], known_constants: &[Constant]) -> CompileResult<Vec<Constant>> {
     let mut constants = Vec::new();
+    let mut available_constants = known_constants.to_vec();
     let mut value = 0i64;
     let mut index = 0usize;
     while index < tokens.len() {
@@ -2313,13 +2350,18 @@ fn parse_enum_body(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
         {
             let initializer_start = index + 1;
             let initializer_end = next_enum_separator(tokens, initializer_start);
-            value = parse_integer_initializer(&tokens[initializer_start..initializer_end])?;
+            value = parse_integer_initializer_with_constants(
+                &tokens[initializer_start..initializer_end],
+                &available_constants,
+            )?;
             index = initializer_end;
         }
-        constants.push(Constant {
+        let constant = Constant {
             name: name.to_owned(),
             value,
-        });
+        };
+        available_constants.push(constant.clone());
+        constants.push(constant);
         value = value
             .checked_add(1)
             .ok_or_else(|| CompileError::new("enum constant overflow"))?;
@@ -2353,6 +2395,7 @@ fn next_enum_separator(tokens: &[Token], start: usize) -> usize {
 fn parse_supported_global_declaration(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
         return Ok(None);
@@ -2360,19 +2403,19 @@ fn parse_supported_global_declaration(
     if top_level_function_open_paren(tokens).is_some() {
         return Ok(None);
     }
-    if let Some(global) = parse_global_unsigned_char_array(tokens)? {
+    if let Some(global) = parse_global_unsigned_char_array(tokens, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer_string_array(tokens)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer_array(tokens)? {
+    if let Some(global) = parse_global_pointer_array(tokens, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_extern_pointer_array(tokens)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_struct_array(tokens, known_structs)? {
+    if let Some(global) = parse_global_struct_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_struct_object(tokens, known_structs)? {
@@ -2381,7 +2424,7 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_extern_int_array(tokens)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_int_array(tokens, known_structs)? {
+    if let Some(global) = parse_global_int_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_extern_scalar(tokens)? {
@@ -2390,17 +2433,18 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_pointer(tokens)? {
         return Ok(Some(global));
     }
-    parse_global_int(tokens, known_structs)
+    parse_global_int(tokens, known_structs, constants)
 }
 
 fn parse_supported_global_declarations(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Vec<Global>> {
-    if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs)? {
+    if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs, constants)? {
         return Ok(globals);
     }
-    parse_supported_global_declaration(tokens, known_structs)
+    parse_supported_global_declaration(tokens, known_structs, constants)
         .map(|global| global.map_or_else(Vec::new, |global| vec![global]))
 }
 
@@ -2451,7 +2495,10 @@ fn ignorable_static_const_char_array(tokens: &[Token]) -> bool {
     )
 }
 
-fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_unsigned_char_array(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -2481,8 +2528,10 @@ fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Gl
         };
         values
     } else {
-        let length =
-            parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?;
+        let length = parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?;
         vec![0; length]
     };
     let name = token_identifier(&declaration[name_index])
@@ -2494,18 +2543,24 @@ fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Gl
     }))
 }
 
-fn parse_unsigned_char_array_length(tokens: &[Token]) -> CompileResult<usize> {
+fn parse_unsigned_char_array_length(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<usize> {
     if tokens.is_empty() {
         return Err(CompileError::new("expected unsigned char array length"));
     }
-    let value = parse_integer_initializer(tokens)?;
+    let value = parse_integer_initializer_with_constants(tokens, constants)?;
     if value <= 0 {
         return Err(CompileError::new("global array length must be positive"));
     }
     usize::try_from(value).map_err(|_| CompileError::new("global array length is too large"))
 }
 
-fn parse_global_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_pointer_array(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -2529,7 +2584,8 @@ fn parse_global_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>>
     if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
         return Ok(None);
     }
-    let length = parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?;
+    let length =
+        parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket], constants)?;
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
         .to_owned();
@@ -2616,6 +2672,7 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
 fn parse_global_struct_array(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -2655,7 +2712,10 @@ fn parse_global_struct_array(
                 )
             })?
         } else {
-            parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?
+            parse_unsigned_char_array_length(
+                &declaration[open_bracket + 1..close_bracket],
+                constants,
+            )?
         };
         GlobalInitializer::StructArray {
             struct_name,
@@ -2764,6 +2824,7 @@ fn parse_global_extern_int_array(tokens: &[Token]) -> CompileResult<Option<Globa
 fn parse_global_int_array(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -2785,13 +2846,22 @@ fn parse_global_int_array(
             ),
         );
     };
-    let length = parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?;
-    let values = if let Some(assign_index) =
-        top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
-    {
-        let assign_index = close_bracket + 1 + assign_index;
-        parse_int_array_initializer(&declaration[assign_index + 1..], length)?
+    let explicit_length = if open_bracket + 1 == close_bracket {
+        None
     } else {
+        Some(parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?)
+    };
+    let assign_index = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+        .map(|offset| close_bracket + 1 + offset);
+    let values = if let Some(assign_index) = assign_index {
+        parse_int_array_initializer(&declaration[assign_index + 1..], explicit_length, constants)?
+    } else {
+        let Some(length) = explicit_length else {
+            return Err(CompileError::new("expected unsigned char array length"));
+        };
         vec![0; length]
     };
     let name = token_identifier(&declaration[name_index])
@@ -2873,6 +2943,7 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
 fn parse_global_int(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -2896,7 +2967,7 @@ fn parse_global_int(
     let initializer = if end_index == declaration.len() {
         GlobalInitializer::Int(0)
     } else {
-        parse_global_int_initializer(&declaration[end_index + 1..])?
+        parse_global_int_initializer(&declaration[end_index + 1..], constants)?
     };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global int name"))?
@@ -2907,6 +2978,7 @@ fn parse_global_int(
 fn parse_global_int_declarator_list(
     tokens: &[Token],
     known_structs: &[StructLayout],
+    constants: &[Constant],
 ) -> CompileResult<Option<Vec<Global>>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -2943,7 +3015,7 @@ fn parse_global_int_declarator_list(
         let initializer = if end_index == segment.len() {
             GlobalInitializer::Int(0)
         } else {
-            parse_global_int_initializer(&segment[end_index + 1..])?
+            parse_global_int_initializer(&segment[end_index + 1..], constants)?
         };
         let name = token_identifier(&segment[name_index])
             .ok_or_else(|| CompileError::new("expected global int name"))?
@@ -3092,8 +3164,11 @@ fn global_specifiers_are_int_like(
     saw_int
 }
 
-fn parse_global_int_initializer(tokens: &[Token]) -> CompileResult<GlobalInitializer> {
-    if let Ok(value) = parse_integer_initializer(tokens) {
+fn parse_global_int_initializer(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<GlobalInitializer> {
+    if let Ok(value) = parse_integer_initializer_with_constants(tokens, constants) {
         return Ok(GlobalInitializer::Int(value));
     }
     match tokens {
@@ -3110,7 +3185,11 @@ fn parse_global_int_initializer(tokens: &[Token]) -> CompileResult<GlobalInitial
     }
 }
 
-fn parse_int_array_initializer(tokens: &[Token], length: usize) -> CompileResult<Vec<i32>> {
+fn parse_int_array_initializer(
+    tokens: &[Token],
+    explicit_length: Option<usize>,
+    constants: &[Constant],
+) -> CompileResult<Vec<i32>> {
     let Some(first) = tokens.first() else {
         return Err(CompileError::new("expected global int array initializer"));
     };
@@ -3143,7 +3222,7 @@ fn parse_int_array_initializer(tokens: &[Token], length: usize) -> CompileResult
                     .at(tokens[start].line, tokens[start].column),
             );
         }
-        let value = parse_integer_initializer(&item[..item_len])?;
+        let value = parse_integer_initializer_with_constants(&item[..item_len], constants)?;
         values.push(i32::try_from(value).map_err(|_| {
             CompileError::new("global int array initializer does not fit i32")
                 .at(tokens[start].line, tokens[start].column)
@@ -3153,6 +3232,7 @@ fn parse_int_array_initializer(tokens: &[Token], length: usize) -> CompileResult
             start += 1;
         }
     }
+    let length = explicit_length.unwrap_or(values.len());
     if values.len() > length {
         return Err(CompileError::new("too many global int array initializers")
             .at(first.line, first.column));
@@ -3214,6 +3294,7 @@ fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {
         tokens,
         index: 0,
         known_structs: &[],
+        known_constants: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
@@ -3272,6 +3353,13 @@ fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
 }
 
 fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
+    parse_integer_initializer_with_constants(tokens, &[])
+}
+
+fn parse_integer_initializer_with_constants(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<i64> {
     if tokens.is_empty() {
         return Err(CompileError::new("expected global integer initializer"));
     }
@@ -3279,13 +3367,14 @@ fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
         tokens,
         index: 0,
         known_structs: &[],
+        known_constants: constants,
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
         return Err(CompileError::new("unsupported global integer initializer")
             .at(token.line, token.column));
     }
-    eval_integer_initializer_expr(&expr)?.to_i64_trunc()
+    eval_integer_initializer_expr_with_constants(&expr, constants)?.to_i64_trunc()
 }
 
 #[derive(Clone, Copy)]
@@ -3470,12 +3559,15 @@ fn initializer_shift_count(value: InitializerNumber) -> CompileResult<u32> {
     u32::try_from(value).map_err(|_| CompileError::new("integer initializer shift count too large"))
 }
 
-fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber> {
+fn eval_integer_initializer_expr_with_constants(
+    expr: &Expr,
+    constants: &[Constant],
+) -> CompileResult<InitializerNumber> {
     match expr {
         Expr::Integer(value) => Ok(InitializerNumber::integer(*value)),
         Expr::DoubleLiteral(value) => InitializerNumber::decimal(value),
         Expr::Unary { op, expr } => {
-            let value = eval_integer_initializer_expr(expr)?;
+            let value = eval_integer_initializer_expr_with_constants(expr, constants)?;
             match op {
                 UnaryOp::Plus => Ok(value),
                 UnaryOp::Minus => value.checked_neg(),
@@ -3490,7 +3582,7 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
             }
         }
         Expr::Cast { target, expr, .. } => {
-            let value = eval_integer_initializer_expr(expr)?;
+            let value = eval_integer_initializer_expr_with_constants(expr, constants)?;
             match target {
                 ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer => {
                     Ok(InitializerNumber::integer(value.to_i64_trunc()?))
@@ -3499,8 +3591,8 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
             }
         }
         Expr::Binary { op, left, right } => {
-            let left = eval_integer_initializer_expr(left)?;
-            let right = eval_integer_initializer_expr(right)?;
+            let left = eval_integer_initializer_expr_with_constants(left, constants)?;
+            let right = eval_integer_initializer_expr_with_constants(right, constants)?;
             eval_integer_binary_initializer_expr(*op, left, right)
         }
         Expr::Conditional {
@@ -3508,15 +3600,23 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
             then_expr,
             else_expr,
         } => {
-            if eval_integer_initializer_expr(condition)?.to_i128_integer()? == 0 {
-                eval_integer_initializer_expr(else_expr)
+            if eval_integer_initializer_expr_with_constants(condition, constants)?
+                .to_i128_integer()?
+                == 0
+            {
+                eval_integer_initializer_expr_with_constants(else_expr, constants)
             } else {
-                eval_integer_initializer_expr(then_expr)
+                eval_integer_initializer_expr_with_constants(then_expr, constants)
             }
         }
-        Expr::Identifier(name) => Err(CompileError::new(format!(
-            "identifier {name} is not an integer initializer"
-        ))),
+        Expr::Identifier(name) => constants
+            .iter()
+            .rev()
+            .find(|constant| constant.name == *name)
+            .map(|constant| InitializerNumber::integer(constant.value))
+            .ok_or_else(|| {
+                CompileError::new(format!("identifier {name} is not an integer initializer"))
+            }),
         Expr::Call { callee, .. } => Err(CompileError::new(format!(
             "call to {callee} is not an integer initializer"
         ))),

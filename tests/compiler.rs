@@ -670,6 +670,33 @@ fn compiler_accepts_local_int_array_sizeof_slice() {
 }
 
 #[test]
+fn compiler_accepts_local_int_array_global_enum_initializers_slice() {
+    // given
+    let source = r"typedef enum {
+    mus_None,
+    mus_e3m2,
+    mus_e3m4
+} musicenum_t;
+int main(void) {
+    int spmus[] = { mus_e3m4, mus_e3m2 };
+    return spmus[0];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl $2, -8(%rbp)\n"));
+    assert!(assembly.contains("\tmovl $1, -4(%rbp)\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_local_pointer_array_slice() {
     // given
     let source = r#"void use(char* value);
@@ -2288,6 +2315,75 @@ int main(void) {
     assert!(assembly.contains("openings:"));
     assert!(assembly.contains("\t.zero 24\n"));
     assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+}
+
+#[test]
+fn compiler_accepts_global_enum_sized_int_array_slice() {
+    // given
+    let source = r"enum { NUMAMMO = 4 };
+int maxammo[NUMAMMO] = { 200, 50, NUMAMMO, NUMAMMO + 1 };
+int main(void) {
+    return maxammo[2];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("maxammo:"));
+    assert!(assembly.contains("\t.long 200,50,4,5\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_unsized_global_enum_int_array_slice() {
+    // given
+    let source = r"typedef enum {
+    DI_EAST,
+    DI_WEST
+} dirtype_t;
+dirtype_t opposite[] = { DI_WEST, DI_EAST };
+int main(void) {
+    return opposite[0];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("opposite:"));
+    assert!(assembly.contains("\t.long 1,0\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_enum_sized_pointer_array_slice() {
+    // given
+    let source = r"enum { NUMCARDS = 3 };
+char *keys[NUMCARDS];
+int main(void) {
+    return keys[2] ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("keys:"));
+    assert!(assembly.contains("\t.zero 24\n"));
+    assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
 }
 
 #[test]
