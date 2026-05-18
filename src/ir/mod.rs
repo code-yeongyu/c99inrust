@@ -452,6 +452,12 @@ impl LoweringContext {
                 });
                 Ok(())
             }
+            Statement::DeclarationList(declarations) => {
+                for declaration in declarations {
+                    self.lower_statement(declaration)?;
+                }
+                Ok(())
+            }
             Statement::Assignment { target, value } => {
                 let target = self.lower_lvalue(target)?;
                 let value = self.lower_expr(value)?;

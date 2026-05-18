@@ -65,6 +65,7 @@ pub enum Statement {
         name: String,
         initializer: Option<Expr>,
     },
+    DeclarationList(Vec<Self>),
     Assignment {
         target: LValue,
         value: Expr,
@@ -459,19 +460,32 @@ impl Parser<'_> {
 
     fn declaration_statement(&mut self, scalar_type: ScalarType) -> CompileResult<Statement> {
         self.consume_declaration_type(scalar_type)?;
-        let name = self.expect_identifier()?;
-        let initializer = if self.check_punctuator("=") {
-            self.advance();
-            Some(self.expression()?)
+        let mut declarations = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            let initializer = if self.check_punctuator("=") {
+                self.advance();
+                Some(self.expression()?)
+            } else {
+                None
+            };
+            declarations.push(Statement::Declaration {
+                scalar_type,
+                name,
+                initializer,
+            });
+            if self.check_punctuator(",") {
+                self.advance();
+                continue;
+            }
+            self.expect_punctuator(";")?;
+            break;
+        }
+        if declarations.len() == 1 {
+            Ok(declarations.remove(0))
         } else {
-            None
-        };
-        self.expect_punctuator(";")?;
-        Ok(Statement::Declaration {
-            scalar_type,
-            name,
-            initializer,
-        })
+            Ok(Statement::DeclarationList(declarations))
+        }
     }
 
     fn if_statement(&mut self) -> CompileResult<Statement> {
