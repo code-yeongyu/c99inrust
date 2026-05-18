@@ -24,6 +24,7 @@ pub enum LoweredGlobalInitializer {
     IntArray(Vec<i32>),
     PointerNull,
     PointerArray(usize),
+    ZeroBytes(usize),
     UnsignedCharArray(Vec<u8>),
 }
 
@@ -103,15 +104,27 @@ pub enum LoweredExpr {
         name: String,
         index: Box<Self>,
     },
+    GlobalAddress {
+        name: String,
+    },
     PointerSubscript {
         pointer: Box<Self>,
         index: Box<Self>,
         element_type: ScalarType,
     },
+    PointerOffset {
+        pointer: Box<Self>,
+        index: Box<Self>,
+        byte_size: usize,
+    },
     PointerField {
         pointer: Box<Self>,
         offset: usize,
         scalar_type: ScalarType,
+    },
+    PointerFieldAddress {
+        pointer: Box<Self>,
+        offset: usize,
     },
     Assign {
         target: LoweredLValue,
@@ -196,7 +209,7 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
         .map(|layout| (layout.name.clone(), layout.clone()))
         .collect::<HashMap<_, _>>();
     let constants = lower_constants(&program.constants)?;
-    let (globals, global_bindings) = lower_globals(&program.globals, &constants)?;
+    let (globals, global_bindings) = lower_globals(&program.globals, &constants, &structs)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function_with_globals(
@@ -214,68 +227,17 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
 fn lower_globals(
     globals: &[Global],
     constants: &HashMap<String, i64>,
+    structs: &HashMap<String, StructLayout>,
 ) -> CompileResult<(Vec<LoweredGlobal>, HashMap<String, GlobalBinding>)> {
     let mut lowered = Vec::with_capacity(globals.len());
     let mut bindings = HashMap::with_capacity(globals.len());
     let mut definitions = HashSet::with_capacity(globals.len());
     for global in globals {
-        let (initializer, binding) = match &global.initializer {
-            GlobalInitializer::Extern(scalar_type) => {
-                insert_global_binding(
-                    &mut bindings,
-                    &global.name,
-                    GlobalBinding::from_scalar_type(*scalar_type)?,
-                )?;
-                continue;
-            }
-            GlobalInitializer::ExternPointerArray => {
-                insert_global_binding(&mut bindings, &global.name, GlobalBinding::PointerArray)?;
-                continue;
-            }
-            GlobalInitializer::Int(value) => (
-                LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
-                    CompileError::new(format!(
-                        "global int initializer does not fit i32: {}",
-                        global.name
-                    ))
-                })?),
-                GlobalBinding::Int,
-            ),
-            GlobalInitializer::IntArray(values) => (
-                LoweredGlobalInitializer::IntArray(values.clone()),
-                GlobalBinding::IntArray,
-            ),
-            GlobalInitializer::IntConstant(name) => {
-                let Some(value) = constants.get(name) else {
-                    return Err(CompileError::new(format!(
-                        "unknown global initializer constant: {name}"
-                    )));
-                };
-                (
-                    LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
-                        CompileError::new(format!(
-                            "global int initializer does not fit i32: {}",
-                            global.name
-                        ))
-                    })?),
-                    GlobalBinding::Int,
-                )
-            }
-            GlobalInitializer::PointerNull { referent } => (
-                LoweredGlobalInitializer::PointerNull,
-                GlobalBinding::Pointer {
-                    referent: referent.clone(),
-                },
-            ),
-            GlobalInitializer::PointerArray(length) => (
-                LoweredGlobalInitializer::PointerArray(*length),
-                GlobalBinding::PointerArray,
-            ),
-            GlobalInitializer::UnsignedCharArray(values) => (
-                LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
-                GlobalBinding::UnsignedCharArray,
-            ),
-        };
+        if let Some(binding) = lower_extern_global_binding(&global.initializer, structs)? {
+            insert_global_binding(&mut bindings, &global.name, binding)?;
+            continue;
+        }
+        let (initializer, binding) = lower_defined_global_initializer(global, constants, structs)?;
         if !definitions.insert(global.name.clone()) {
             return Err(CompileError::new(format!(
                 "duplicate global declaration: {}",
@@ -288,7 +250,159 @@ fn lower_globals(
             initializer,
         });
     }
+    insert_standard_stream_bindings(&mut bindings);
     Ok((lowered, bindings))
+}
+
+fn lower_extern_global_binding(
+    initializer: &GlobalInitializer,
+    structs: &HashMap<String, StructLayout>,
+) -> CompileResult<Option<GlobalBinding>> {
+    let binding = match initializer {
+        GlobalInitializer::Extern(scalar_type) => GlobalBinding::from_scalar_type(*scalar_type)?,
+        GlobalInitializer::ExternPointer { referent } => GlobalBinding::Pointer {
+            referent: referent.clone(),
+        },
+        GlobalInitializer::ExternIntArray => GlobalBinding::IntArray,
+        GlobalInitializer::ExternPointerArray => GlobalBinding::PointerArray,
+        GlobalInitializer::ExternStructArray { struct_name } => {
+            let layout = structs.get(struct_name).ok_or_else(|| {
+                CompileError::new(format!("unknown struct-array type: {struct_name}"))
+            })?;
+            GlobalBinding::StructArray {
+                struct_name: struct_name.clone(),
+                byte_size: layout.size,
+                length: None,
+            }
+        }
+        GlobalInitializer::Int(_)
+        | GlobalInitializer::IntArray(_)
+        | GlobalInitializer::IntConstant(_)
+        | GlobalInitializer::PointerNull { .. }
+        | GlobalInitializer::PointerArray(_)
+        | GlobalInitializer::StructObject { .. }
+        | GlobalInitializer::StructArray { .. }
+        | GlobalInitializer::UnsignedCharArray(_) => return Ok(None),
+    };
+    Ok(Some(binding))
+}
+
+fn lower_defined_global_initializer(
+    global: &Global,
+    constants: &HashMap<String, i64>,
+    structs: &HashMap<String, StructLayout>,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    match &global.initializer {
+        GlobalInitializer::Int(value) => Ok((
+            LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
+                CompileError::new(format!(
+                    "global int initializer does not fit i32: {}",
+                    global.name
+                ))
+            })?),
+            GlobalBinding::Int,
+        )),
+        GlobalInitializer::IntArray(values) => Ok((
+            LoweredGlobalInitializer::IntArray(values.clone()),
+            GlobalBinding::IntArray,
+        )),
+        GlobalInitializer::IntConstant(name) => {
+            lower_int_constant_global(name, &global.name, constants)
+        }
+        GlobalInitializer::PointerNull { referent } => Ok((
+            LoweredGlobalInitializer::PointerNull,
+            GlobalBinding::Pointer {
+                referent: referent.clone(),
+            },
+        )),
+        GlobalInitializer::PointerArray(length) => Ok((
+            LoweredGlobalInitializer::PointerArray(*length),
+            GlobalBinding::PointerArray,
+        )),
+        GlobalInitializer::StructObject { struct_name } => {
+            lower_struct_object_global(struct_name, structs)
+        }
+        GlobalInitializer::StructArray {
+            struct_name,
+            length,
+        } => lower_struct_array_global(struct_name, *length, structs),
+        GlobalInitializer::UnsignedCharArray(values) => Ok((
+            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
+            GlobalBinding::UnsignedCharArray,
+        )),
+        GlobalInitializer::Extern(_)
+        | GlobalInitializer::ExternPointer { .. }
+        | GlobalInitializer::ExternIntArray
+        | GlobalInitializer::ExternPointerArray
+        | GlobalInitializer::ExternStructArray { .. } => Err(CompileError::new(
+            "internal error: extern global reached definition lowering",
+        )),
+    }
+}
+
+fn lower_int_constant_global(
+    name: &str,
+    global_name: &str,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    let Some(value) = constants.get(name) else {
+        return Err(CompileError::new(format!(
+            "unknown global initializer constant: {name}"
+        )));
+    };
+    Ok((
+        LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
+            CompileError::new(format!(
+                "global int initializer does not fit i32: {global_name}"
+            ))
+        })?),
+        GlobalBinding::Int,
+    ))
+}
+
+fn lower_struct_object_global(
+    struct_name: &str,
+    structs: &HashMap<String, StructLayout>,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    let layout = structs
+        .get(struct_name)
+        .ok_or_else(|| CompileError::new(format!("unknown struct object type: {struct_name}")))?;
+    Ok((
+        LoweredGlobalInitializer::ZeroBytes(layout.size),
+        GlobalBinding::StructObject {
+            struct_name: struct_name.to_owned(),
+            byte_size: layout.size,
+        },
+    ))
+}
+
+fn lower_struct_array_global(
+    struct_name: &str,
+    length: usize,
+    structs: &HashMap<String, StructLayout>,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    let layout = structs
+        .get(struct_name)
+        .ok_or_else(|| CompileError::new(format!("unknown struct-array type: {struct_name}")))?;
+    let byte_len = length
+        .checked_mul(layout.size)
+        .ok_or_else(|| CompileError::new("global struct-array size overflow"))?;
+    Ok((
+        LoweredGlobalInitializer::ZeroBytes(byte_len),
+        GlobalBinding::StructArray {
+            struct_name: struct_name.to_owned(),
+            byte_size: layout.size,
+            length: Some(length),
+        },
+    ))
+}
+
+fn insert_standard_stream_bindings(bindings: &mut HashMap<String, GlobalBinding>) {
+    for name in ["stdin", "stdout", "stderr"] {
+        bindings
+            .entry(name.to_owned())
+            .or_insert(GlobalBinding::Pointer { referent: None });
+    }
 }
 
 fn insert_global_binding(
@@ -376,7 +490,7 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
                 UnaryOp::LogicalNot => Ok(i64::from(value == 0)),
             }
         }
-        Expr::Cast { target, expr } => {
+        Expr::Cast { target, expr, .. } => {
             let value = const_eval(expr)?;
             cast_const_value(*target, value)
         }
@@ -480,8 +594,19 @@ enum LocalBinding {
 enum GlobalBinding {
     Int,
     IntArray,
-    Pointer { referent: Option<String> },
+    Pointer {
+        referent: Option<String>,
+    },
     PointerArray,
+    StructObject {
+        struct_name: String,
+        byte_size: usize,
+    },
+    StructArray {
+        struct_name: String,
+        byte_size: usize,
+        length: Option<usize>,
+    },
     UnsignedCharArray,
 }
 
@@ -500,8 +625,22 @@ impl GlobalBinding {
         match self {
             Self::Int => Some(ScalarType::Int),
             Self::Pointer { .. } => Some(ScalarType::Pointer),
-            Self::IntArray | Self::PointerArray | Self::UnsignedCharArray => None,
+            Self::IntArray
+            | Self::PointerArray
+            | Self::StructObject { .. }
+            | Self::StructArray { .. }
+            | Self::UnsignedCharArray => None,
         }
+    }
+
+    const fn is_addressable_array(&self) -> bool {
+        matches!(
+            self,
+            Self::IntArray
+                | Self::PointerArray
+                | Self::StructArray { .. }
+                | Self::UnsignedCharArray
+        )
     }
 }
 
@@ -562,8 +701,9 @@ impl LoweringContext {
             Statement::Declaration {
                 scalar_type,
                 name,
+                referent,
                 initializer,
-            } => self.lower_declaration(*scalar_type, name, initializer.as_ref()),
+            } => self.lower_declaration(*scalar_type, name, referent.clone(), initializer.as_ref()),
             Statement::LocalCharArray {
                 name,
                 length,
@@ -661,9 +801,10 @@ impl LoweringContext {
         &mut self,
         scalar_type: ScalarType,
         name: &str,
+        referent: Option<String>,
         initializer: Option<&Expr>,
     ) -> CompileResult<()> {
-        let slot = self.declare_local(name, scalar_type, None)?;
+        let slot = self.declare_local(name, scalar_type, referent)?;
         let value = initializer.map_or_else(
             || Ok(zero_expr_for(scalar_type)),
             |expr| self.lower_expr(expr),
@@ -1064,10 +1205,12 @@ impl LoweringContext {
                         scalar_type,
                     });
                 }
-                if self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray) {
-                    return Err(CompileError::new(format!(
-                        "global array requires a subscript: {name}"
-                    )));
+                if self
+                    .global_bindings
+                    .get(name)
+                    .is_some_and(GlobalBinding::is_addressable_array)
+                {
+                    return Ok(LoweredExpr::GlobalAddress { name: name.clone() });
                 }
                 if let Some(value) = self.constants.get(name) {
                     return Ok(LoweredExpr::Integer(*value));
@@ -1100,7 +1243,7 @@ impl LoweringContext {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
             }),
-            Expr::Cast { target, expr } => Ok(LoweredExpr::Cast {
+            Expr::Cast { target, expr, .. } => Ok(LoweredExpr::Cast {
                 target: *target,
                 expr: Box::new(self.lower_expr(expr)?),
             }),
@@ -1235,6 +1378,20 @@ impl LoweringContext {
                 .map(LoweredExpr::Integer)
                 .map_err(|_| CompileError::new("sizeof result does not fit i64"));
         }
+        if let Expr::Identifier(name) = expr
+            && let Some(GlobalBinding::StructArray {
+                byte_size,
+                length: Some(length),
+                ..
+            }) = self.global_bindings.get(name)
+        {
+            let size = byte_size
+                .checked_mul(*length)
+                .ok_or_else(|| CompileError::new("sizeof global array overflow"))?;
+            return i64::try_from(size)
+                .map(LoweredExpr::Integer)
+                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
+        }
         let expr = self.lower_expr(expr)?;
         let size = lowered_expr_scalar_type(&expr).map_or(4, scalar_size);
         i64::try_from(size)
@@ -1265,6 +1422,13 @@ impl LoweringContext {
             return Ok(LoweredExpr::GlobalPointerSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
+            });
+        }
+        if let Some((pointer, element_type)) = self.resolve_array_field_subscript(array)? {
+            return Ok(LoweredExpr::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                element_type,
             });
         }
 
@@ -1306,6 +1470,13 @@ impl LoweringContext {
                 index: Box::new(self.lower_expr(index)?),
             });
         }
+        if let Some((pointer, element_type)) = self.resolve_array_field_subscript(array)? {
+            return Ok(LoweredLValue::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                element_type,
+            });
+        }
 
         let pointer = self.lower_expr(array)?;
         if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
@@ -1323,6 +1494,12 @@ impl LoweringContext {
     fn lower_address_of(&self, target: &LValue) -> CompileResult<LoweredExpr> {
         match target {
             LValue::Subscript { array, index } => {
+                if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
+                    return Ok(address.pointer);
+                }
+                if let Ok(address) = self.resolve_pointer_struct_subscript_address(array, index) {
+                    return Ok(address.pointer);
+                }
                 let pointer = self.lower_expr(array)?;
                 if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
                     return Err(CompileError::new(
@@ -1337,6 +1514,9 @@ impl LoweringContext {
             }
             LValue::Identifier(name) => {
                 let Some(binding) = self.local_binding(name) else {
+                    if self.global_bindings.contains_key(name) {
+                        return Ok(LoweredExpr::GlobalAddress { name: name.clone() });
+                    }
                     return Err(CompileError::new("unsupported address-of target"));
                 };
                 match binding {
@@ -1362,7 +1542,14 @@ impl LoweringContext {
                     }),
                 }
             }
-            LValue::Member { .. } => Err(CompileError::new("unsupported address-of target")),
+            LValue::Member {
+                base,
+                field,
+                dereference,
+            } => {
+                let member = self.resolve_member_access(base, field, *dereference)?;
+                Ok(pointer_field_address(member.pointer, member.offset))
+            }
         }
     }
 
@@ -1376,6 +1563,9 @@ impl LoweringContext {
         let scalar_type = match member.field_type {
             FieldType::Scalar(scalar_type) => scalar_type,
             FieldType::Pointer { .. } => ScalarType::Pointer,
+            FieldType::Array { .. } => {
+                return Ok(pointer_field_address(member.pointer, member.offset));
+            }
             FieldType::Struct(_) => {
                 return Err(CompileError::new("struct member value is not supported"));
             }
@@ -1397,6 +1587,11 @@ impl LoweringContext {
         let scalar_type = match member.field_type {
             FieldType::Scalar(scalar_type) => scalar_type,
             FieldType::Pointer { .. } => ScalarType::Pointer,
+            FieldType::Array { .. } => {
+                return Err(CompileError::new(
+                    "assignment to array member is not supported",
+                ));
+            }
             FieldType::Struct(_) => {
                 return Err(CompileError::new(
                     "assignment to struct member is not supported",
@@ -1453,6 +1648,28 @@ impl LoweringContext {
         })
     }
 
+    fn resolve_array_field_subscript(
+        &self,
+        array: &Expr,
+    ) -> CompileResult<Option<(LoweredExpr, ScalarType)>> {
+        let Expr::Member {
+            base,
+            field,
+            dereference,
+        } = array
+        else {
+            return Ok(None);
+        };
+        let member = self.resolve_member_access(base, field, *dereference)?;
+        let FieldType::Array { element_type, .. } = member.field_type else {
+            return Ok(None);
+        };
+        Ok(Some((
+            pointer_field_address(member.pointer, member.offset),
+            element_type,
+        )))
+    }
+
     fn resolve_struct_address(&self, expr: &Expr) -> CompileResult<StructAddress> {
         if let Expr::Identifier(name) = expr
             && let Some(LocalBinding::StructObject {
@@ -1468,6 +1685,18 @@ impl LoweringContext {
                 },
                 offset: 0,
                 struct_name,
+            });
+        }
+        if let Expr::Identifier(name) = expr
+            && let Some(GlobalBinding::StructObject {
+                struct_name,
+                byte_size: _,
+            }) = self.global_bindings.get(name)
+        {
+            return Ok(StructAddress {
+                pointer: LoweredExpr::GlobalAddress { name: name.clone() },
+                offset: 0,
+                struct_name: struct_name.clone(),
             });
         }
         if let Expr::Member {
@@ -1486,7 +1715,58 @@ impl LoweringContext {
                 struct_name,
             });
         }
+        if let Expr::Subscript { array, index } = expr {
+            if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
+                return Ok(address);
+            }
+            return self.resolve_pointer_struct_subscript_address(array, index);
+        }
         Err(CompileError::new("member access requires a struct base"))
+    }
+
+    fn resolve_global_struct_subscript_address(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<StructAddress>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(GlobalBinding::StructArray {
+            struct_name,
+            byte_size,
+            ..
+        }) = self.global_bindings.get(name)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(StructAddress {
+            pointer: LoweredExpr::PointerOffset {
+                pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size: *byte_size,
+            },
+            offset: 0,
+            struct_name: struct_name.clone(),
+        }))
+    }
+
+    fn resolve_pointer_struct_subscript_address(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<StructAddress> {
+        let struct_name = self.pointer_referent_for_expr(array)?;
+        let byte_size = self.struct_layout(&struct_name)?.size;
+        Ok(StructAddress {
+            pointer: LoweredExpr::PointerOffset {
+                pointer: Box::new(self.lower_expr(array)?),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size,
+            },
+            offset: 0,
+            struct_name,
+        })
     }
 
     fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
@@ -1519,6 +1799,14 @@ impl LoweringContext {
             {
                 return Ok(referent);
             }
+        }
+        if let Expr::Cast {
+            target: ScalarType::Pointer,
+            referent: Some(referent),
+            ..
+        } = expr
+        {
+            return Ok(referent.clone());
         }
         Err(CompileError::new(
             "pointer member access requires a typed pointer",
@@ -1588,6 +1876,29 @@ impl LoweringContext {
                     source_offset,
                     ScalarType::Pointer,
                 ),
+                FieldType::Array {
+                    element_type,
+                    length,
+                } => {
+                    let element_size = scalar_size(element_type);
+                    for index in 0..length {
+                        let element_offset = index
+                            .checked_mul(element_size)
+                            .and_then(|offset| target_offset.checked_add(offset))
+                            .ok_or_else(|| CompileError::new("struct array offset overflow"))?;
+                        let source_element_offset = index
+                            .checked_mul(element_size)
+                            .and_then(|offset| source_offset.checked_add(offset))
+                            .ok_or_else(|| CompileError::new("struct array offset overflow"))?;
+                        self.push_struct_scalar_copy(
+                            target,
+                            source,
+                            element_offset,
+                            source_element_offset,
+                            element_type,
+                        );
+                    }
+                }
                 FieldType::Struct(struct_name) => {
                     self.push_struct_copy(
                         &StructAddress {
@@ -1673,9 +1984,11 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
         }
         | LoweredExpr::PointerField { scalar_type, .. } => Some(*scalar_type),
         LoweredExpr::GlobalIntSubscript { .. } => Some(ScalarType::Int),
-        LoweredExpr::LocalAddress { .. } | LoweredExpr::GlobalPointerSubscript { .. } => {
-            Some(ScalarType::Pointer)
-        }
+        LoweredExpr::LocalAddress { .. }
+        | LoweredExpr::GlobalPointerSubscript { .. }
+        | LoweredExpr::GlobalAddress { .. }
+        | LoweredExpr::PointerOffset { .. }
+        | LoweredExpr::PointerFieldAddress { .. } => Some(ScalarType::Pointer),
         LoweredExpr::PointerSubscript { element_type, .. } => Some(*element_type),
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
             Some(lowered_lvalue_scalar_type(target))
@@ -1753,6 +2066,17 @@ fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
             offset: *offset,
             scalar_type: *scalar_type,
         },
+    }
+}
+
+fn pointer_field_address(pointer: LoweredExpr, offset: usize) -> LoweredExpr {
+    if offset == 0 {
+        pointer
+    } else {
+        LoweredExpr::PointerFieldAddress {
+            pointer: Box::new(pointer),
+            offset,
+        }
     }
 }
 
@@ -1926,11 +2250,13 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         | LoweredExpr::GlobalPointerSubscript { index, .. } => {
             inline_constant_calls_in_expr(index, constants);
         }
-        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+        LoweredExpr::PointerSubscript { pointer, index, .. }
+        | LoweredExpr::PointerOffset { pointer, index, .. } => {
             inline_constant_calls_in_expr(pointer, constants);
             inline_constant_calls_in_expr(index, constants);
         }
-        LoweredExpr::PointerField { pointer, .. } => {
+        LoweredExpr::PointerField { pointer, .. }
+        | LoweredExpr::PointerFieldAddress { pointer, .. } => {
             inline_constant_calls_in_expr(pointer, constants);
         }
         LoweredExpr::Assign { value, .. } => {
@@ -1954,6 +2280,7 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
+        | LoweredExpr::GlobalAddress { .. }
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => {}
     }

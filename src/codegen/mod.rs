@@ -51,6 +51,13 @@ struct PointerSubscriptExpr<'a> {
 }
 
 #[derive(Clone, Copy)]
+struct PointerOffsetExpr<'a> {
+    pointer: &'a LoweredExpr,
+    index: &'a LoweredExpr,
+    byte_size: usize,
+}
+
+#[derive(Clone, Copy)]
 struct GlobalByteSubscriptExpr<'a> {
     name: &'a str,
     index: &'a LoweredExpr,
@@ -77,7 +84,10 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         LoweredExpr::DoubleLiteral(_) => ValueWidth::F64,
         LoweredExpr::StringLiteral(_)
         | LoweredExpr::LocalAddress { .. }
-        | LoweredExpr::GlobalPointerSubscript { .. } => ValueWidth::I64,
+        | LoweredExpr::GlobalAddress { .. }
+        | LoweredExpr::GlobalPointerSubscript { .. }
+        | LoweredExpr::PointerOffset { .. }
+        | LoweredExpr::PointerFieldAddress { .. } => ValueWidth::I64,
         LoweredExpr::Global { scalar_type, .. } | LoweredExpr::Local { scalar_type, .. } => {
             scalar_width(*scalar_type)
         }
@@ -258,6 +268,11 @@ fn emit_globals(
                 let byte_len = length
                     .checked_mul(8)
                     .ok_or_else(|| CompileError::new("global pointer-array size overflow"))?;
+                assembly.push_str(".p2align 3\n");
+                write_assembly!(assembly, "{label}:\n")?;
+                write_assembly!(assembly, "\t.zero {byte_len}\n")?;
+            }
+            LoweredGlobalInitializer::ZeroBytes(byte_len) => {
                 assembly.push_str(".p2align 3\n");
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.zero {byte_len}\n")?;
@@ -705,6 +720,37 @@ fn emit_aarch64_expr_natural(
         }
         LoweredExpr::LocalAddress { offset, .. } => {
             write_assembly!(assembly, "\tadd x0, sp, #{offset}\n")
+        }
+        LoweredExpr::GlobalAddress { name } => {
+            let label = label_name(name, labels.target);
+            write_assembly!(assembly, "\tadrp x0, {label}@PAGE\n")?;
+            write_assembly!(assembly, "\tadd x0, x0, {label}@PAGEOFF\n")
+        }
+        LoweredExpr::PointerOffset {
+            pointer,
+            index,
+            byte_size,
+        } => emit_aarch64_pointer_offset(
+            PointerOffsetExpr {
+                pointer,
+                index,
+                byte_size: *byte_size,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::PointerFieldAddress { pointer, offset } => {
+            emit_aarch64_expr_with_width(
+                pointer,
+                ValueWidth::I64,
+                temporary_base,
+                depth + 1,
+                labels,
+                assembly,
+            )?;
+            write_assembly!(assembly, "\tadd x0, x0, #{offset}\n")
         }
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
@@ -1305,6 +1351,49 @@ fn emit_aarch64_load_pointer_subscript(
         aarch64_result_register(width),
         memory_scale_shift(width)
     )
+}
+
+fn emit_aarch64_pointer_offset(
+    offset: PointerOffsetExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let base_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    emit_aarch64_expr_with_width(
+        offset.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        offset.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    if let Some(shift) = memory_scale_shift_for_byte_size(offset.byte_size) {
+        if shift == 0 {
+            assembly.push_str("\tadd x0, x16, w0, sxtw\n");
+        } else {
+            write_assembly!(assembly, "\tadd x0, x16, w0, sxtw #{shift}\n")?;
+        }
+        return Ok(());
+    }
+    assembly.push_str("\tsxtw x0, w0\n");
+    let byte_size = i64::try_from(offset.byte_size)
+        .map_err(|_| CompileError::new("pointer offset size does not fit i64"))?;
+    emit_aarch64_i32_to_register(byte_size, "x17", assembly)?;
+    assembly.push_str("\tmul x0, x0, x17\n");
+    assembly.push_str("\tadd x0, x16, x0\n");
+    Ok(())
 }
 
 fn emit_aarch64_assign(
@@ -1910,6 +1999,13 @@ fn emit_x86_64_expr_natural(
             "\tleaq {}(%rbp), %rax\n",
             x86_stack_object_offset(*offset, *byte_size)
         ),
+        LoweredExpr::GlobalAddress { name } => {
+            let label = label_name(name, target);
+            write_assembly!(assembly, "\tleaq {label}(%rip), %rax\n")
+        }
+        expr @ (LoweredExpr::PointerOffset { .. } | LoweredExpr::PointerFieldAddress { .. }) => {
+            emit_x86_64_address_expr(expr, temporary_base, depth, target, labels, assembly)
+        }
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::GlobalIntSubscript { .. }
@@ -2606,6 +2702,90 @@ fn emit_x86_64_load_pointer_subscript(
         memory_scale_bytes(width),
         x86_64_result_register(width)
     )
+}
+
+fn emit_x86_64_address_expr(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match expr {
+        LoweredExpr::PointerOffset {
+            pointer,
+            index,
+            byte_size,
+        } => emit_x86_64_pointer_offset(
+            PointerOffsetExpr {
+                pointer,
+                index,
+                byte_size: *byte_size,
+            },
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::PointerFieldAddress { pointer, offset } => {
+            emit_x86_64_expr_with_width(
+                pointer,
+                ValueWidth::I64,
+                temporary_base,
+                depth + 1,
+                target,
+                labels,
+                assembly,
+            )?;
+            write_assembly!(assembly, "\taddq ${offset}, %rax\n")
+        }
+        _ => Err(CompileError::new(
+            "internal error: expected x86-64 address expression",
+        )),
+    }
+}
+
+fn emit_x86_64_pointer_offset(
+    offset: PointerOffsetExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let base_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    emit_x86_64_expr_with_width(
+        offset.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        offset.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    if let Some(scale) = memory_scale_bytes_for_byte_size(offset.byte_size) {
+        write_assembly!(assembly, "\tleaq (%rcx,%rax,{scale}), %rax\n")?;
+        return Ok(());
+    }
+    let byte_size = i32::try_from(offset.byte_size)
+        .map_err(|_| CompileError::new("pointer offset size does not fit i32"))?;
+    write_assembly!(assembly, "\timulq ${byte_size}, %rax\n")?;
+    assembly.push_str("\taddq %rcx, %rax\n");
+    Ok(())
 }
 
 fn emit_x86_64_load_pointer_field(
@@ -3357,6 +3537,7 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
+        | LoweredExpr::GlobalAddress { .. }
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => 0,
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
@@ -3364,10 +3545,12 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_depth(index),
-        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+        LoweredExpr::PointerSubscript { pointer, index, .. }
+        | LoweredExpr::PointerOffset { pointer, index, .. } => {
             pointer_lvalue_address_depth(pointer, index)
         }
-        LoweredExpr::PointerField { pointer, .. } => 1 + expr_depth(pointer),
+        LoweredExpr::PointerFieldAddress { pointer, .. }
+        | LoweredExpr::PointerField { pointer, .. } => 1 + expr_depth(pointer),
         LoweredExpr::Assign { target, value } => assign_expr_depth(target, value),
         LoweredExpr::PostIncrement { target } => 1 + lvalue_address_depth(target),
         LoweredExpr::Binary {
@@ -3464,10 +3647,12 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_needs_preserved_temp(index),
-        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+        LoweredExpr::PointerSubscript { pointer, index, .. }
+        | LoweredExpr::PointerOffset { pointer, index, .. } => {
             expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
         }
-        LoweredExpr::PointerField { pointer, .. } => expr_needs_preserved_temp(pointer),
+        LoweredExpr::PointerFieldAddress { pointer, .. }
+        | LoweredExpr::PointerField { pointer, .. } => expr_needs_preserved_temp(pointer),
         LoweredExpr::Assign { target, value } => {
             lvalue_needs_preserved_temp(target) || expr_needs_preserved_temp(value)
         }
@@ -3477,6 +3662,7 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
+        | LoweredExpr::GlobalAddress { .. }
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => false,
     }
@@ -3523,16 +3709,19 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
+        | LoweredExpr::GlobalAddress { .. }
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => false,
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_uses_call(index),
-        LoweredExpr::PointerSubscript { pointer, index, .. } => {
+        LoweredExpr::PointerSubscript { pointer, index, .. }
+        | LoweredExpr::PointerOffset { pointer, index, .. } => {
             expr_uses_call(pointer) || expr_uses_call(index)
         }
-        LoweredExpr::PointerField { pointer, .. } => expr_uses_call(pointer),
+        LoweredExpr::PointerFieldAddress { pointer, .. }
+        | LoweredExpr::PointerField { pointer, .. } => expr_uses_call(pointer),
         LoweredExpr::Assign { target, value } => lvalue_uses_call(target) || expr_uses_call(value),
         LoweredExpr::PostIncrement { target } => lvalue_uses_call(target),
         LoweredExpr::Conditional {
@@ -3676,10 +3865,30 @@ const fn memory_scale_shift(width: ValueWidth) -> u8 {
     }
 }
 
+const fn memory_scale_shift_for_byte_size(byte_size: usize) -> Option<u8> {
+    match byte_size {
+        1 => Some(0),
+        2 => Some(1),
+        4 => Some(2),
+        8 => Some(3),
+        _ => None,
+    }
+}
+
 const fn memory_scale_bytes(width: ValueWidth) -> u8 {
     match width {
         ValueWidth::I32 => 4,
         ValueWidth::I64 | ValueWidth::F64 => 8,
+    }
+}
+
+const fn memory_scale_bytes_for_byte_size(byte_size: usize) -> Option<u8> {
+    match byte_size {
+        1 => Some(1),
+        2 => Some(2),
+        4 => Some(4),
+        8 => Some(8),
+        _ => None,
     }
 }
 

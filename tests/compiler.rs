@@ -970,7 +970,7 @@ fn compiler_accepts_fixed_point_global_initializer_slice() {
 }
 
 #[test]
-fn compiler_skips_aggregate_global_initializer_before_supported_function() {
+fn compiler_accepts_aggregate_global_initializer_before_supported_function() {
     // given
     let source = r"typedef struct {
     unsigned char *sequence;
@@ -989,13 +989,41 @@ int main(void) { return 42; }";
 
     // then
     assert!(assembly.contains("cheat_amap_seq:"));
-    assert!(!assembly.contains("cheat_amap:"));
+    assert!(assembly.contains("cheat_amap:"));
     assert!(assembly.contains("main:"));
     assert!(assembly.contains("movl $42, %eax"));
 }
 
 #[test]
-fn compiler_skips_struct_array_initializer_before_supported_function() {
+fn compiler_accepts_aggregate_global_address_slice() {
+    // given
+    let source = r"typedef struct {
+    unsigned char *sequence;
+    int offset;
+} cheatseq_t;
+static unsigned char cheat_amap_seq[] = { 0xb2, 0x26, 0xff };
+static cheatseq_t cheat_amap = { cheat_amap_seq, 0 };
+void use(cheatseq_t* value);
+int main(void) {
+    use(&cheat_amap);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("cheat_amap:"));
+    assert!(assembly.contains("\tleaq cheat_amap(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall use\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_array_initializer_before_supported_function() {
     // given
     let source = r"typedef struct {
     int x;
@@ -1019,9 +1047,39 @@ int main(void) { return 42; }";
         emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
 
     // then
-    assert!(!assembly.contains("player_arrow:"));
+    assert!(assembly.contains("player_arrow:"));
     assert!(assembly.contains("main:"));
     assert!(assembly.contains("movl $42, %eax"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_array_decay_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+} mline_t;
+mline_t player_arrow[] = {
+    { 1 },
+    { 2 }
+};
+void draw(mline_t* lines);
+int main(void) {
+    draw(player_arrow);
+    return sizeof(player_arrow);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("player_arrow:"));
+    assert!(assembly.contains("\tleaq player_arrow(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall draw\n"));
+    assert!(assembly.contains("\tmovl $8, %eax\n"));
 }
 
 #[test]
@@ -1407,7 +1465,7 @@ int main(void) {
     // then
     assert!(assembly.contains("plr:"));
     assert!(assembly.contains("\tmovq plr(%rip), %rax\n"));
-    assert!(assembly.contains("\tmovl 8(%rax), %eax\n"));
+    assert!(assembly.contains("\tmovl 20(%rax), %eax\n"));
 }
 
 #[test]
@@ -1436,6 +1494,288 @@ int main(void) {
     assert!(assembly.contains("\tmovq plr(%rip), %rax\n"));
     assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
     assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_pointer_subscript_struct_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+} vertex_t;
+typedef struct {
+    vertex_t* v1;
+} line_t;
+static line_t *lines;
+int main(void) {
+    int i = 0;
+    return lines[i].v1->x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("lines:"));
+    assert!(assembly.contains("\tmovq lines(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_extern_pointer_subscript_struct_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+} vertex_t;
+typedef struct {
+    vertex_t* v1;
+} line_t;
+extern line_t *lines;
+int main(void) {
+    int i = 0;
+    return lines[i].v1->x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("lines:\n"));
+    assert!(assembly.contains("\tmovq lines(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_array_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+    int y;
+} mpoint_t;
+static mpoint_t markpoints[4];
+int main(void) {
+    int i = 0;
+    markpoints[i].x = 1;
+    return markpoints[i].y;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("markpoints:"));
+    assert!(assembly.contains("\t.zero 32\n"));
+    assert!(assembly.contains("\tleaq markpoints(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl %eax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tmovl 4(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_object_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+    int y;
+} mpoint_t;
+static mpoint_t m_paninc;
+int main(void) {
+    m_paninc.x = 1;
+    return m_paninc.y;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("m_paninc:"));
+    assert!(assembly.contains("\t.zero 8\n"));
+    assert!(assembly.contains("\tleaq m_paninc(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl %eax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tmovl 4(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_extern_struct_array_address_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+} player_t;
+extern player_t players[4];
+int main(void) {
+    player_t* p;
+    int i = 0;
+    p = &players[i];
+    return p->x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("players:\n"));
+    assert!(assembly.contains("\tleaq players(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_extern_int_array_slice() {
+    // given
+    let source = r"extern int playeringame[MAXPLAYERS];
+int main(void) {
+    int i = 0;
+    return playeringame[i];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("playeringame:\n"));
+    assert!(assembly.contains("\tleaq playeringame(%rip), %rcx\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_sizeof_struct_typedef_slice() {
+    // given
+    let source = r"typedef struct {
+    int id;
+    int tag;
+} memblock_t;
+int main(void) {
+    return sizeof(memblock_t);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovl $8, %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_typed_pointer_cast_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int id;
+} memblock_t;
+int main(void) {
+    int* raw;
+    raw = 0;
+    return ((memblock_t*)raw)->id;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_array_field_subscript_slice() {
+    // given
+    let source = r"typedef struct {
+    int powers[4];
+} player_t;
+static player_t *plr;
+int main(void) {
+    return plr->powers[2];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq plr(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_member_address_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+    int y;
+} mpoint_t;
+typedef struct {
+    mpoint_t a;
+} mline_t;
+void rotate(int* x);
+int main(void) {
+    mline_t l;
+    rotate(&l.a.x);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tleaq -8(%rbp), %rax\n"));
+    assert!(assembly.contains("\tcall rotate\n"));
+}
+
+#[test]
+fn compiler_accepts_standard_stream_global_slice() {
+    // given
+    let source = r"void use(int* stream);
+int main(void) {
+    use(stderr);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq stderr(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall use\n"));
 }
 
 #[test]

@@ -27,7 +27,13 @@ pub struct StructField {
 pub enum FieldType {
     Scalar(ScalarType),
     Struct(String),
-    Pointer { referent: Option<String> },
+    Pointer {
+        referent: Option<String>,
+    },
+    Array {
+        element_type: ScalarType,
+        length: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,12 +51,17 @@ pub struct Global {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalInitializer {
     Extern(ScalarType),
+    ExternPointer { referent: Option<String> },
+    ExternIntArray,
     ExternPointerArray,
+    ExternStructArray { struct_name: String },
     Int(i64),
     IntArray(Vec<i32>),
     IntConstant(String),
     PointerNull { referent: Option<String> },
     PointerArray(usize),
+    StructObject { struct_name: String },
+    StructArray { struct_name: String, length: usize },
     UnsignedCharArray(Vec<u8>),
 }
 
@@ -96,6 +107,7 @@ pub enum Statement {
     Declaration {
         scalar_type: ScalarType,
         name: String,
+        referent: Option<String>,
         initializer: Option<Expr>,
     },
     LocalCharArray {
@@ -203,6 +215,7 @@ pub enum Expr {
     },
     Cast {
         target: ScalarType,
+        referent: Option<String>,
         expr: Box<Self>,
     },
     Conditional {
@@ -601,6 +614,10 @@ impl Parser<'_> {
     }
 
     fn declaration_statement(&mut self, base_type: ScalarType) -> CompileResult<Statement> {
+        let Some((_actual, type_end)) = self.declaration_type_span_at_current() else {
+            return self.expected("declaration type");
+        };
+        let base_referent = declaration_base_referent_type(&self.tokens[self.index..type_end]);
         let type_includes_char = self.consume_declaration_type(base_type)?;
         let mut declarations = Vec::new();
         loop {
@@ -610,6 +627,11 @@ impl Parser<'_> {
                 scalar_type = ScalarType::Pointer;
             }
             let name = self.expect_identifier()?;
+            let referent = if scalar_type == ScalarType::Pointer {
+                base_referent.clone()
+            } else {
+                None
+            };
             let statement = if self.check_punctuator("[") {
                 self.local_array_declaration(type_includes_char, scalar_type, name)?
             } else if self.check_punctuator("=") {
@@ -617,12 +639,14 @@ impl Parser<'_> {
                 Statement::Declaration {
                     scalar_type,
                     name,
+                    referent,
                     initializer: Some(self.expression()?),
                 }
             } else {
                 Statement::Declaration {
                     scalar_type,
                     name,
+                    referent,
                     initializer: None,
                 }
             };
@@ -894,6 +918,7 @@ impl Parser<'_> {
         Ok(Some(Statement::Declaration {
             scalar_type: ScalarType::Int,
             name,
+            referent: None,
             initializer: None,
         }))
     }
@@ -1167,10 +1192,11 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> CompileResult<Expr> {
-        if let Some((target, next_index)) = self.cast_type_at_current() {
+        if let Some((target, referent, next_index)) = self.cast_type_at_current() {
             self.index = next_index;
             return Ok(Expr::Cast {
                 target,
+                referent,
                 expr: Box::new(self.unary()?),
             });
         }
@@ -1226,7 +1252,7 @@ impl Parser<'_> {
                 .position(|token| token_is_punctuator(token, ")"))
                 .map(|offset| start + offset);
             if let Some(close) = close
-                && let Some(size) = sizeof_type(&self.tokens[start..close])
+                && let Some(size) = self.sizeof_type(&self.tokens[start..close])
             {
                 self.index = close + 1;
                 return i64::try_from(size)
@@ -1237,6 +1263,17 @@ impl Parser<'_> {
         Ok(Expr::SizeOfExpr {
             expr: Box::new(self.unary()?),
         })
+    }
+
+    fn sizeof_type(&self, tokens: &[Token]) -> Option<usize> {
+        if let Some(size) = sizeof_type(tokens) {
+            return Some(size);
+        }
+        let name = tokens.iter().rev().find_map(token_identifier)?;
+        self.known_structs
+            .iter()
+            .find(|layout| layout.name == name)
+            .map(|layout| layout.size)
     }
 
     fn postfix(&mut self) -> CompileResult<Expr> {
@@ -1288,7 +1325,7 @@ impl Parser<'_> {
         Ok(expr)
     }
 
-    fn cast_type_at_current(&self) -> Option<(ScalarType, usize)> {
+    fn cast_type_at_current(&self) -> Option<(ScalarType, Option<String>, usize)> {
         if !self.check_punctuator("(") {
             return None;
         }
@@ -1297,8 +1334,14 @@ impl Parser<'_> {
             .iter()
             .position(|token| token_is_punctuator(token, ")"))?
             + start;
-        let target = supported_cast_type(&self.tokens[start..close])?;
-        Some((target, close + 1))
+        let cast_tokens = &self.tokens[start..close];
+        let target = supported_cast_type(cast_tokens)?;
+        let referent = if target == ScalarType::Pointer {
+            pointer_referent_from_specifiers(cast_tokens)
+        } else {
+            None
+        };
+        Some((target, referent, close + 1))
     }
 
     fn primary(&mut self) -> CompileResult<Expr> {
@@ -1691,6 +1734,15 @@ fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
+    tokens
+        .iter()
+        .rev()
+        .find_map(token_identifier)
+        .filter(|name| supported_typedef_scalar(name).is_none())
+        .map(ToOwned::to_owned)
+}
+
 fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
     let mut saw_type = false;
     let mut long_count = 0usize;
@@ -1836,6 +1888,21 @@ fn parse_struct_field_declaration(
         } else {
             base_type.clone()
         };
+        let field_type = if let Some(length) = struct_field_array_length(segment) {
+            match field_type {
+                FieldType::Scalar(element_type) => FieldType::Array {
+                    element_type,
+                    length,
+                },
+                FieldType::Pointer { .. } => FieldType::Array {
+                    element_type: ScalarType::Pointer,
+                    length,
+                },
+                FieldType::Struct(_) | FieldType::Array { .. } => field_type,
+            }
+        } else {
+            field_type
+        };
         let size = field_type_size(&field_type, known_structs)?;
         let alignment = field_type_alignment(&field_type, known_structs)?;
         *max_alignment = (*max_alignment).max(alignment);
@@ -1870,6 +1937,16 @@ fn declarator_name_index(tokens: &[Token]) -> Option<usize> {
     previous_identifier_index(tokens, before)
 }
 
+fn struct_field_array_length(tokens: &[Token]) -> Option<usize> {
+    let open_bracket = top_level_punctuator_index(tokens, "[")?;
+    let close_bracket = matching_top_level_bracket(tokens, open_bracket)?;
+    match &tokens.get(open_bracket + 1)?.kind {
+        TokenKind::Integer(value) => usize::try_from(*value).ok().filter(|length| *length > 0),
+        _ => Some(1),
+    }
+    .filter(|_length| close_bracket > open_bracket)
+}
+
 fn struct_field_type(tokens: &[Token], known_structs: &[StructLayout]) -> Option<FieldType> {
     if tokens.iter().any(|token| token_is_punctuator(token, "*")) {
         return Some(FieldType::Pointer {
@@ -1892,6 +1969,12 @@ fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> Co
     match field_type {
         FieldType::Scalar(scalar_type) => Ok(scalar_size_for_layout(*scalar_type)),
         FieldType::Pointer { .. } => Ok(8),
+        FieldType::Array {
+            element_type,
+            length,
+        } => scalar_size_for_layout(*element_type)
+            .checked_mul(*length)
+            .ok_or_else(|| CompileError::new("struct array field size overflow")),
         FieldType::Struct(name) => known_structs
             .iter()
             .find(|layout| layout.name == *name)
@@ -1904,7 +1987,10 @@ fn field_type_alignment(
     field_type: &FieldType,
     known_structs: &[StructLayout],
 ) -> CompileResult<usize> {
-    field_type_size(field_type, known_structs).map(|size| size.clamp(1, 8))
+    match field_type {
+        FieldType::Array { element_type, .. } => Ok(scalar_size_for_layout(*element_type)),
+        _ => field_type_size(field_type, known_structs).map(|size| size.clamp(1, 8)),
+    }
 }
 
 const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
@@ -2021,6 +2107,15 @@ fn parse_supported_global_declaration(
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_extern_pointer_array(tokens)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_struct_array(tokens, known_structs)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_struct_object(tokens, known_structs)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_extern_int_array(tokens)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_int_array(tokens, known_structs)? {
@@ -2222,6 +2317,154 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
     }))
 }
 
+fn parse_global_struct_array(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    let Some(struct_name) = global_struct_specifier_name(&declaration[..name_index], known_structs)
+    else {
+        return Ok(None);
+    };
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated global struct-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global struct-array name"))?
+        .to_owned();
+    let assign_index = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+        .map(|offset| close_bracket + 1 + offset);
+    let initializer = if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
+        GlobalInitializer::ExternStructArray { struct_name }
+    } else {
+        let length = if let Some(assign_index) = assign_index {
+            let initializer = &declaration[assign_index + 1..];
+            aggregate_initializer_length(initializer).ok_or_else(|| {
+                CompileError::new("expected global struct-array initializer").at(
+                    declaration[assign_index].line,
+                    declaration[assign_index].column,
+                )
+            })?
+        } else {
+            parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?
+        };
+        GlobalInitializer::StructArray {
+            struct_name,
+            length,
+        }
+    };
+    Ok(Some(Global { name, initializer }))
+}
+
+fn aggregate_initializer_length(tokens: &[Token]) -> Option<usize> {
+    if !tokens
+        .first()
+        .is_some_and(|token| token_is_punctuator(token, "{"))
+    {
+        return None;
+    }
+    let close = matching_top_level_brace(tokens, 0)?;
+    let values = &tokens[1..close];
+    if values.is_empty() {
+        return Some(0);
+    }
+    let mut depth = 0usize;
+    let mut count = 1usize;
+    for token in values {
+        if token_is_punctuator(token, "{") {
+            depth += 1;
+        } else if token_is_punctuator(token, "}") {
+            depth = depth.checked_sub(1)?;
+        } else if depth == 0 && token_is_punctuator(token, ",") {
+            count += 1;
+        }
+    }
+    Some(count)
+}
+
+fn parse_global_struct_object(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let end_index = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
+    if top_level_punctuator_index(&declaration[..end_index], "[").is_some() {
+        return Ok(None);
+    }
+    if token_has_keyword(declaration, Keyword::Extern) {
+        return Ok(None);
+    }
+    if end_index != declaration.len()
+        && !declaration
+            .get(end_index + 1)
+            .is_some_and(|token| token_is_punctuator(token, "{"))
+    {
+        return Ok(None);
+    }
+    let Some(name_index) = previous_identifier_index(declaration, end_index) else {
+        return Ok(None);
+    };
+    let Some(struct_name) = global_struct_specifier_name(&declaration[..name_index], known_structs)
+    else {
+        return Ok(None);
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global struct object name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::StructObject { struct_name },
+    }))
+}
+
+fn parse_global_extern_int_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_extern_int(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated extern global int-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
+        return Ok(None);
+    }
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected extern global int-array name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::ExternIntArray,
+    }))
+}
+
 fn parse_global_int_array(
     tokens: &[Token],
     known_structs: &[StructLayout],
@@ -2276,20 +2519,20 @@ fn parse_global_extern_scalar(tokens: &[Token]) -> CompileResult<Option<Global>>
     let Some(name_index) = previous_identifier_index(declaration, declaration.len()) else {
         return Ok(None);
     };
-    let scalar_type = if global_specifiers_are_extern_pointer(&declaration[..name_index]) {
-        ScalarType::Pointer
-    } else if global_specifiers_are_extern_int(&declaration[..name_index]) {
-        ScalarType::Int
+    let specifiers = &declaration[..name_index];
+    let initializer = if global_specifiers_are_extern_pointer(specifiers) {
+        GlobalInitializer::ExternPointer {
+            referent: pointer_referent_from_specifiers(specifiers),
+        }
+    } else if global_specifiers_are_extern_int(specifiers) {
+        GlobalInitializer::Extern(ScalarType::Int)
     } else {
         return Ok(None);
     };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected extern global name"))?
         .to_owned();
-    Ok(Some(Global {
-        name,
-        initializer: GlobalInitializer::Extern(scalar_type),
-    }))
+    Ok(Some(Global { name, initializer }))
 }
 
 fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
@@ -2479,6 +2722,20 @@ fn pointer_referent_from_specifiers(tokens: &[Token]) -> Option<String> {
         .find_map(token_identifier)
         .filter(|name| supported_typedef_scalar(name).is_none())
         .map(ToOwned::to_owned)
+}
+
+fn global_struct_specifier_name(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> Option<String> {
+    if tokens.iter().any(|token| token_is_punctuator(token, "*")) {
+        return None;
+    }
+    let name = tokens.iter().rev().find_map(token_identifier)?;
+    known_structs
+        .iter()
+        .any(|layout| layout.name == name)
+        .then(|| name.to_owned())
 }
 
 fn global_specifiers_are_int(tokens: &[Token], known_structs: &[StructLayout]) -> bool {
@@ -2846,7 +3103,7 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
                 }
             }
         }
-        Expr::Cast { target, expr } => {
+        Expr::Cast { target, expr, .. } => {
             let value = eval_integer_initializer_expr(expr)?;
             match target {
                 ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer => {
