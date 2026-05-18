@@ -1,5 +1,6 @@
 use c99inrust::front_end::lexer::{Keyword, TokenKind, lex};
 use c99inrust::front_end::preprocessor::Preprocessor;
+use std::fs;
 
 #[test]
 fn lexer_handles_comments_keywords_and_integer_tokens() {
@@ -46,4 +47,66 @@ fn preprocessor_expands_object_macros_without_touching_strings() {
     assert!(unit.source.contains("return 42;"));
     assert!(unit.source.contains("\"ANSWER\""));
     assert!(unit.included_files.is_empty());
+}
+
+#[test]
+fn preprocessor_handles_doom_shaped_conditionals_and_undef() {
+    // given
+    let source = "#define LINUX 1\n#if defined(LINUX) && !defined(SNDSERV)\nint sound = 1;\n#elif defined(SNDSERV)\nint sound = 2;\n#else\nint sound = 3;\n#endif\n#undef LINUX\n#ifdef LINUX\nint after = 4;\n#else\nint after = 5;\n#endif\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-conditionals.c", source)
+        .expect("preprocessor should evaluate Doom-shaped conditionals");
+
+    // then
+    assert!(unit.source.contains("int sound = 1;"));
+    assert!(unit.source.contains("int after = 5;"));
+    assert!(!unit.source.contains("int sound = 2;"));
+    assert!(!unit.source.contains("int sound = 3;"));
+    assert!(!unit.source.contains("int after = 4;"));
+}
+
+#[test]
+fn preprocessor_expands_function_macros_and_spliced_lines() {
+    // given
+    let source = "#define MTOF(x) (FixedMul((x),scale_mtof)>>16)\n#define LONG_TEXT \"HELLO\" \\\n\" DOOM\"\nint a = MTOF(thing->x + 1);\nchar *text = LONG_TEXT;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-macros.c", source)
+        .expect("preprocessor should expand function-like macros and spliced definitions");
+
+    // then
+    assert!(
+        unit.source
+            .contains("int a = (FixedMul((thing->x + 1),scale_mtof)>>16);")
+    );
+    assert!(unit.source.contains("char *text = \"HELLO\" \" DOOM\";"));
+}
+
+#[test]
+fn preprocessor_resolves_local_includes_and_preserves_system_includes() {
+    // given
+    let root = std::env::temp_dir().join(format!("c99inrust-front-end-{}", std::process::id()));
+    fs::create_dir_all(&root).expect("fixture dir should be created");
+    let header = root.join("doomdef.h");
+    let source = root.join("d_main.c");
+    fs::write(&header, "#define TICRATE 35\n").expect("header should be written");
+    fs::write(
+        &source,
+        "#include <unistd.h>\n#include \"stdlib.h\"\n#include \"doomdef.h\"\nint tic = TICRATE;\n",
+    )
+    .expect("source should be written");
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_file(&source)
+        .expect("preprocessor should resolve local includes and preserve system includes");
+
+    // then
+    assert!(unit.source.contains("#include <unistd.h>"));
+    assert!(unit.source.contains("#include \"stdlib.h\""));
+    assert!(unit.source.contains("int tic = 35;"));
+    assert_eq!(unit.included_files, vec![header]);
 }

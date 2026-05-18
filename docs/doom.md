@@ -22,6 +22,21 @@ Expected today:
 - confirms the Makefile exists
 - reports that full Doom compilation is still a future milestone
 
+## Preprocessor Gate
+
+The current compiler can preprocess all official `linuxdoom-1.10` C/header
+files with the upstream Linux build defines:
+
+```bash
+doom=/path/to/DOOM/linuxdoom-1.10
+for file in "$doom"/*.[ch]; do
+  cargo run --quiet -- preprocess -D NORMALUNIX -D LINUX -I "$doom" "$file" >/tmp/doom.pp
+done
+```
+
+This is a frontend milestone only. It does not parse, compile, link, or run
+Doom yet.
+
 ## Playability Gate
 
 Future acceptance requires:

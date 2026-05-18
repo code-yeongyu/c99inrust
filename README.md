@@ -12,7 +12,7 @@ This repository currently ships the first verified vertical slice:
 | Surface | Status |
 | ------- | ------ |
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
-| Preprocessor | quoted includes, object-like macros, `#ifdef`, `#ifndef`, `#else`, `#endif` |
+| Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
 | Parser | `int name(void) { return <constant-expression>; }` |
 | IR | checked constant evaluation |
 | Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly |
@@ -59,9 +59,11 @@ git clone https://github.com/id-Software/DOOM /tmp/DOOM
 cargo run -- doom-audit /tmp/DOOM
 ```
 
-The next compiler milestone is a Doom-shaped frontend: typedefs, structs,
-enums, pointers, arrays, declarations, function calls, variadic declarations,
-conditional preprocessing, and the Linux SysV ABI.
+Current Doom-facing evidence: the preprocessor can run across all 124 official
+`linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX` defined. The next
+compiler milestone is parsing that preprocessed C: typedefs, structs, enums,
+pointers, arrays, declarations, function calls, variadic declarations, and the
+Linux SysV ABI.
 
 ## Development
 

@@ -26,10 +26,16 @@ The native target is detected at compile time. On this workstation it is
 
 ## Doom Milestone Gap
 
-Compiling official Doom requires more than C expression parsing:
+The preprocessor now handles the official `linuxdoom-1.10` source tree under the
+Linux build defines used by the upstream Makefile:
 
-- full conditional preprocessing
-- function-like macros and token pasting
+- `-D NORMALUNIX`
+- `-D LINUX`
+
+That proves include traversal, line splicing, conditional directives, and
+Doom-shaped macros across all 124 C/header files. Compiling official Doom still
+requires more than preprocessing:
+
 - declarations and declarators
 - typedef names
 - struct, union, and enum layout

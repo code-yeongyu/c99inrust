@@ -44,28 +44,23 @@ fn lex_command(args: &[String]) -> CompileResult<()> {
 }
 
 fn preprocess_command(args: &[String]) -> CompileResult<()> {
-    let (include_paths, input, _output, _target) = parse_common_args(args, "preprocess")?;
-    let mut preprocessor = Preprocessor::new();
-    for path in include_paths {
-        preprocessor = preprocessor.with_include_path(path);
-    }
-    let unit = preprocessor.preprocess_file(&input)?;
+    let common = parse_common_args(args, "preprocess")?;
+    let unit = preprocessor_from(&common).preprocess_file(&common.input)?;
     print!("{}", unit.source);
     Ok(())
 }
 
 fn compile_command(args: &[String]) -> CompileResult<()> {
-    let (include_paths, input, output, target) = parse_common_args(args, "compile")?;
-    let output = output.unwrap_or_else(|| PathBuf::from("a.s"));
-    let mut preprocessor = Preprocessor::new();
-    for path in include_paths {
-        preprocessor = preprocessor.with_include_path(path);
-    }
-    let unit = preprocessor.preprocess_file(&input)?;
+    let common = parse_common_args(args, "compile")?;
+    let output = common
+        .output
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("a.s"));
+    let unit = preprocessor_from(&common).preprocess_file(&common.input)?;
     let tokens = lex(&unit.source)?;
     let program = parse(&tokens)?;
     let lowered = lower(&program)?;
-    let assembly = emit_assembly(&lowered, target)?;
+    let assembly = emit_assembly(&lowered, common.target)?;
     fs::write(&output, assembly)
         .map_err(|error| CompileError::new(format!("failed to write assembly: {error}")))?;
     Ok(())
@@ -112,11 +107,29 @@ fn one_path(args: &[String], usage_text: &str) -> CompileResult<PathBuf> {
     Ok(PathBuf::from(&args[0]))
 }
 
-fn parse_common_args(
-    args: &[String],
-    command: &str,
-) -> CompileResult<(Vec<PathBuf>, PathBuf, Option<PathBuf>, Target)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CommonArgs {
+    include_paths: Vec<PathBuf>,
+    defines: Vec<(String, String)>,
+    input: PathBuf,
+    output: Option<PathBuf>,
+    target: Target,
+}
+
+fn preprocessor_from(common: &CommonArgs) -> Preprocessor {
+    let mut preprocessor = Preprocessor::new();
+    for path in &common.include_paths {
+        preprocessor = preprocessor.with_include_path(path);
+    }
+    for (name, value) in &common.defines {
+        preprocessor = preprocessor.with_define(name, value);
+    }
+    preprocessor
+}
+
+fn parse_common_args(args: &[String], command: &str) -> CompileResult<CommonArgs> {
     let mut include_paths = Vec::new();
+    let mut defines = Vec::new();
     let mut input = None;
     let mut output = None;
     let mut target = Target::native();
@@ -129,6 +142,17 @@ fn parse_common_args(
                 };
                 include_paths.push(PathBuf::from(path));
                 index += 2;
+            }
+            "-D" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Err(CompileError::new("-D requires a macro name"));
+                };
+                defines.push(parse_define_arg(value)?);
+                index += 2;
+            }
+            value if value.starts_with("-D") => {
+                defines.push(parse_define_arg(&value[2..])?);
+                index += 1;
             }
             "-o" => {
                 let Some(path) = args.get(index + 1) else {
@@ -166,15 +190,36 @@ fn parse_common_args(
             "usage: c99inrust {command} [opts] <input.c>"
         )));
     };
-    Ok((include_paths, input, output, target))
+    Ok(CommonArgs {
+        include_paths,
+        defines,
+        input,
+        output,
+        target,
+    })
+}
+
+fn parse_define_arg(value: &str) -> CompileResult<(String, String)> {
+    if value.is_empty() {
+        return Err(CompileError::new("-D requires a macro name"));
+    }
+    let (name, replacement) = value
+        .split_once('=')
+        .map_or((value, "1"), |(name, replacement)| (name, replacement));
+    if name.is_empty() {
+        return Err(CompileError::new("-D requires a macro name"));
+    }
+    Ok((name.to_string(), replacement.to_string()))
 }
 
 fn usage() -> CompileResult<()> {
     println!("c99inrust");
     println!("usage:");
     println!("  c99inrust lex <input.c>");
-    println!("  c99inrust preprocess [-I include] <input.c>");
-    println!("  c99inrust compile [-S] [--target native] [-I include] <input.c> -o <out.s>");
+    println!("  c99inrust preprocess [-D NAME[=VALUE]] [-I include] <input.c>");
+    println!(
+        "  c99inrust compile [-S] [--target native] [-D NAME[=VALUE]] [-I include] <input.c> -o <out.s>"
+    );
     println!("  c99inrust doom-audit <official-doom-checkout>");
     Ok(())
 }
