@@ -106,23 +106,30 @@ Global int arrays such as `int columnofs[MAXWIDTH]` are emitted as zero-filled
 integer storage and support int element loads/stores.
 Global int arrays with integer initializer lists are emitted as `.long` data,
 covering Doom tables such as `fuzzoffset`.
+Extern global pointer arrays such as `extern byte* screens[5]` and
+`extern char *sprnames[NUMSPRITES]` are accepted as bindings without emitting
+storage.
+Local pointers to typedef'd structs such as `patch_t* patch` are accepted in
+function bodies that have already seen the struct typedef.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but ten of the 62 C files still fail before object generation. `doomdef.c`,
+but eleven of the 62 C files still fail before object generation. `doomdef.c`,
 `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
-`m_random.c`, `m_swap.c`, and `r_sky.c` currently reach assembly generation.
+`m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently reach assembly
+generation.
 The current `am_map.c` blocker is the local static aggregate declaration
 `static event_t st_notify = { ... }` in `AM_initVariables`, not the earlier
 `AM_getIslope` member expressions.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
-The current `r_draw.c` blocker has moved past `(unsigned)dc_x`, the first
-`do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, and the
-local char-array string initializers in `R_FillBackScreen`, and the
-`unsigned ofs` parameter in `R_VideoErase`, and the global arrays `ylookup` and
-`columnofs`, and the `lighttable_t* dc_colormap` global. It is now the global
-pointer array `screens`.
+The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
+`do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
+char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`
+parameter in `R_VideoErase`, global arrays `ylookup` and `columnofs`, the
+`lighttable_t* dc_colormap` global, `fuzzoffset`, `screens`, `sprnames`, and
+the local `patch_t* patch` declaration. `r_draw.c` now reaches assembly
+generation.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 

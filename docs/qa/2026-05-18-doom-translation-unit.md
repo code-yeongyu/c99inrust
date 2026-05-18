@@ -2253,3 +2253,68 @@ FAIL r_draw.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Extern Pointer Array And Struct Pointer Local Slice
+
+`compile -S` now accepts extern global pointer arrays without emitting storage.
+This covers both literal and symbolic Doom bounds:
+
+```c
+extern byte* screens[5];
+extern char *sprnames[NUMSPRITES];
+```
+
+Function-body parsing also accepts local pointers to typedef'd structs whose
+typedef has already been parsed, covering the next focused `r_draw.c` blocker:
+
+```c
+patch_t* patch;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_extern_global_pointer_array_slice
+compiler_accepts_extern_global_pointer_array_symbolic_length
+extern_global_pointer_array_slice_matches_host_c_compiler_exit_code
+compiler_accepts_local_struct_pointer_declaration_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+```
+
+Focused `r_draw.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779121990`, then that session was closed with `exit`
+without `tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779121990.txt
+ok=11
+fail=51
+```
+
+Representative moved blocker:
+
+```text
+FAIL r_draw.c
+  before this slice:
+    error: unknown local or global: screens
+  after this slice:
+    OK r_draw.c
+```
+
+Next visible blockers include symbolic/sized non-pointer arrays, local static
+aggregate declarations, function-pointer arrays, and several unsupported
+expression forms.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
