@@ -1,7 +1,7 @@
 use c99inrust::codegen::{Target, emit_assembly};
 use c99inrust::front_end::lexer::lex;
 use c99inrust::ir::lower;
-use c99inrust::parser::parse;
+use c99inrust::parser::{parse, parse_supported_translation_unit};
 
 #[test]
 fn compiler_emits_native_assembly_for_constant_return_program() {
@@ -289,4 +289,21 @@ fn compiler_folds_calls_to_integer_constant_functions() {
     assert!(assembly.contains(".globl _main"));
     assert!(assembly.contains("movz w0, #1"));
     assert!(!assembly.contains("\tbl _tick"));
+}
+
+#[test]
+fn compiler_skips_top_level_declarations_before_supported_functions() {
+    // given
+    let source = "static const char rcsid[] = \"doom\"; int main(void) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _main"));
+    assert!(assembly.contains("movz w0, #42"));
 }

@@ -167,6 +167,50 @@ pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslat
     parser.translation_unit()
 }
 
+/// Parses supported executable functions from a full translation unit.
+///
+/// # Errors
+///
+/// Returns an error when the translation unit contains a function definition
+/// outside the supported executable subset.
+pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Program> {
+    let mut parser = SurfaceParser { tokens, index: 0 };
+    let external_items = parser.external_token_groups()?;
+    let mut functions = Vec::new();
+    for item_tokens in &external_items {
+        let Some(name) = function_definition_name(item_tokens) else {
+            continue;
+        };
+        if !function_definition_has_supported_signature(item_tokens) {
+            let Some(token) = item_tokens.first() else {
+                return Err(CompileError::new(format!(
+                    "unsupported function definition: {name}"
+                )));
+            };
+            return Err(
+                CompileError::new(format!("unsupported function definition: {name}"))
+                    .at(token.line, token.column),
+            );
+        }
+        let mut function_parser = Parser {
+            tokens: item_tokens,
+            index: 0,
+        };
+        functions.push(function_parser.function()?);
+        if !function_parser.check_end() {
+            return Err(CompileError::new(format!(
+                "trailing tokens after function definition: {name}"
+            )));
+        }
+    }
+    if functions.is_empty() {
+        return Err(CompileError::new(
+            "translation unit has no supported function definitions",
+        ));
+    }
+    Ok(Program { functions })
+}
+
 struct Parser<'a> {
     tokens: &'a [Token],
     index: usize,
@@ -533,6 +577,17 @@ struct SurfaceParser<'a> {
 
 impl SurfaceParser<'_> {
     fn translation_unit(&mut self) -> CompileResult<SurfaceTranslationUnit> {
+        let external_items = self.external_token_groups()?;
+        let mut items = Vec::new();
+        for external_tokens in external_items {
+            if let Some(item) = classify_external_item(&external_tokens) {
+                items.push(item);
+            }
+        }
+        Ok(SurfaceTranslationUnit { items })
+    }
+
+    fn external_token_groups(&mut self) -> CompileResult<Vec<Vec<Token>>> {
         let mut items = Vec::new();
         while !self.check_end() {
             if self.check_punctuator("#") {
@@ -544,11 +599,9 @@ impl SurfaceParser<'_> {
                 continue;
             }
             let external_tokens = self.collect_external_item()?;
-            if let Some(item) = classify_external_item(&external_tokens) {
-                items.push(item);
-            }
+            items.push(external_tokens);
         }
-        Ok(SurfaceTranslationUnit { items })
+        Ok(items)
     }
 
     fn collect_external_item(&mut self) -> CompileResult<Vec<Token>> {
@@ -661,6 +714,46 @@ fn classify_external_item(tokens: &[Token]) -> Option<ExternalItem> {
         return Some(ExternalItem::Prototype { name });
     }
     declaration_name(tokens).map(|name| ExternalItem::Declaration { name })
+}
+
+fn function_definition_name(tokens: &[Token]) -> Option<String> {
+    if last_token_is_punctuator(tokens, "}") {
+        return normal_function_name(tokens);
+    }
+    None
+}
+
+fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
+    matches!(
+        tokens,
+        [
+            Token {
+                kind: TokenKind::Keyword(Keyword::Int),
+                ..
+            },
+            Token {
+                kind: TokenKind::Identifier(_),
+                ..
+            },
+            Token {
+                kind: TokenKind::Punctuator(open),
+                ..
+            },
+            Token {
+                kind: TokenKind::Keyword(Keyword::Void),
+                ..
+            },
+            Token {
+                kind: TokenKind::Punctuator(close),
+                ..
+            },
+            Token {
+                kind: TokenKind::Punctuator(body),
+                ..
+            },
+            ..
+        ] if open == "(" && close == ")" && body == "{"
+    )
 }
 
 fn typedef_name(tokens: &[Token]) -> Option<String> {

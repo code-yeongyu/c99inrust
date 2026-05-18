@@ -8,7 +8,7 @@ use c99inrust::diagnostics::{CompileError, CompileResult};
 use c99inrust::front_end::lexer::lex;
 use c99inrust::front_end::preprocessor::Preprocessor;
 use c99inrust::ir::lower;
-use c99inrust::parser::{parse, parse_translation_unit};
+use c99inrust::parser::{parse_supported_translation_unit, parse_translation_unit};
 
 fn main() -> ExitCode {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -105,7 +105,7 @@ fn build_command(args: &[String]) -> CompileResult<()> {
 fn compile_to_assembly(common: &CommonArgs) -> CompileResult<String> {
     let unit = preprocessor_from(common).preprocess_file(&common.input)?;
     let tokens = lex(&unit.source)?;
-    let program = parse(&tokens)?;
+    let program = parse_supported_translation_unit(&tokens)?;
     let lowered = lower(&program)?;
     emit_assembly(&lowered, common.target)
 }
