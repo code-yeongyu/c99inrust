@@ -177,6 +177,25 @@ fn compiler_accepts_address_of_subscript_slice() {
 }
 
 #[test]
+fn compiler_accepts_unsigned_cast_slice() {
+    // given
+    let source =
+        "int main(void) { int x = 7; return ((unsigned)x >= 0 && (unsigned char)x == x) ? 0 : 1; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tcmpl %ecx, %eax\n"));
+    assert!(assembly.contains("\tsetge %al\n"));
+    assert!(assembly.contains("\tsete %al\n"));
+}
+
+#[test]
 fn compiler_marks_linux_assembly_stack_non_executable() {
     // given
     let source = "int main(void) { return 0; }";

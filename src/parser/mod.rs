@@ -2482,7 +2482,6 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
     let mut saw_double = false;
     let mut saw_named_type = false;
     let mut saw_pointer = false;
-    let mut saw_unsigned = false;
     let mut long_count = 0usize;
     for token in tokens {
         match &token.kind {
@@ -2493,16 +2492,14 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
                 saw_type = true;
                 saw_double = true;
             }
-            TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Void) => {
+            TokenKind::Keyword(
+                Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Unsigned | Keyword::Void,
+            ) => {
                 saw_type = true;
             }
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
                 long_count += 1;
-            }
-            TokenKind::Keyword(Keyword::Unsigned) => {
-                saw_type = true;
-                saw_unsigned = true;
             }
             TokenKind::Identifier(name) => {
                 if let Some(scalar_type) = supported_typedef_scalar(name) {
@@ -2523,7 +2520,7 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
             | TokenKind::Keyword(_) => return None,
         }
     }
-    if !saw_type || saw_unsigned {
+    if !saw_type {
         return None;
     }
     if saw_pointer {
