@@ -1419,6 +1419,9 @@ fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
         {
             eval_integer_initializer_expression(inner)
         }
+        [first, ..] if matches!(first.kind, TokenKind::Integer(_)) => {
+            eval_integer_initializer_expression(tokens)
+        }
         [first, ..] => Err(CompileError::new("unsupported global integer initializer")
             .at(first.line, first.column)),
         [] => Err(CompileError::new("expected global integer initializer")),

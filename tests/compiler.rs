@@ -473,6 +473,23 @@ boolean modifiedgame;"#;
 }
 
 #[test]
+fn compiler_accepts_unparenthesized_global_integer_initializer_slice() {
+    // given
+    let source = "static int finit_height = 200 - 32;";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("finit_height:"));
+    assert!(assembly.contains("\t.long 168\n"));
+}
+
+#[test]
 fn compiler_emits_void_functions_with_value_less_return() {
     // given
     let source = "void tick(void) { return; } int main(void) { return 42; }";
