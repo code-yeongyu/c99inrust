@@ -186,6 +186,9 @@ initializer values, and unsized enum-typed global arrays with aggregate
 initializers. This moves `NUMSFX`, `NUMAMMO`, `NUMCARDS`, `sfx_pldeth`,
 `mus_e3m4`, and `dirtype_t opposite[]` blockers to later parser/lowering
 gaps, although the total scan count remains unchanged.
+Enum typedef names introduced by `typedef enum { ... } name;` are also tracked
+as scalar local declaration types, moving local arrays such as
+`dirtype_t d[3]` and several `p_*` enum-parameter blockers to later failures.
 
 The current Doom compile scan reaches actual supported function bodies, but 41
 of the 62 C files still fail before object generation. `am_map.c`,
@@ -219,6 +222,10 @@ as `short openings[320*64]` and pointer-returning signatures such as
 The former enum-constant blockers in `i_sound.c`, `p_inter.c`, `m_menu.c`,
 `p_enemy.c`, `s_sound.c`, `sounds.c`, and `st_stuff.c` now reach later
 unsupported expression, struct, pointer, or old-style declaration forms.
+The former local enum typedef blocker in `p_enemy.c` moved past
+`dirtype_t d[3]`; `p_ceilng.c`, `p_doors.c`, `p_floor.c`, and `p_plats.c`
+now report unsupported function parameters rather than enum typedef parse
+punctuation errors.
 Many remaining files are blocked by old-style function definitions,
 function-pointer declarations, typed-pointer gaps, and unsupported expression
 forms.

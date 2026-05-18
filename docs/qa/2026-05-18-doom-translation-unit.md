@@ -3313,3 +3313,76 @@ FAIL st_stuff.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Enum Typedef Local Slice
+
+The parser now records typedef names introduced by top-level enum typedefs and
+uses them as scalar local declaration types while parsing supported function
+bodies. This moves local declarations such as `dirtype_t d[3]` past the
+previous parse error.
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_array_of_enum_typedef_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_enemy.c \
+  -o /tmp/c99inrust-p_enemy.s
+```
+
+Focused `p_enemy.c` still fails, but now fails after the enum typedef local
+array blocker.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779139236`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779139236.txt
+ok=21
+fail=41
+```
+
+Representative moved blockers:
+
+```text
+FAIL p_enemy.c
+  before this slice:
+    error: 7052:15: expected punctuator ;
+  after this slice:
+    error: 7262:39: expected punctuator )
+
+FAIL p_ceilng.c
+  before this slice:
+    error: 6350:14: expected punctuator ;
+  after this slice:
+    error: unsupported function parameter
+
+FAIL p_doors.c
+  before this slice:
+    error: 6581:14: expected punctuator ;
+  after this slice:
+    error: unsupported function parameter
+
+FAIL p_floor.c
+  before this slice:
+    error: 6499:14: expected punctuator ;
+  after this slice:
+    error: unsupported function parameter
+
+FAIL p_plats.c
+  before this slice:
+    error: 6680:14: expected punctuator ;
+  after this slice:
+    error: unsupported function parameter
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
