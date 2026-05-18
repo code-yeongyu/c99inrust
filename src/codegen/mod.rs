@@ -106,36 +106,9 @@ fn emit_aarch64_function(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let label = label_name(&function.name, target);
-    let temporary_count = function
-        .instructions
-        .iter()
-        .map(instruction_depth)
-        .max()
-        .unwrap_or(0);
-    let local_bytes = function.local_count * 4;
-    let temporary_base = local_bytes;
-    let call_frame_bytes = if function_uses_call(function) { 8 } else { 0 };
-    let preserved_temp_bytes = if function_uses_aarch64_preserved_temp(function) {
-        8
-    } else {
-        0
-    };
-    let stack_bytes = align_to(
-        local_bytes + (temporary_count * 4) + call_frame_bytes + preserved_temp_bytes,
-        16,
-    );
-    let link_register_offset = if call_frame_bytes > 0 {
-        Some(stack_bytes - 8)
-    } else {
-        None
-    };
-    let preserved_temp_offset = if preserved_temp_bytes > 0 {
-        Some(stack_bytes - call_frame_bytes - 8)
-    } else {
-        None
-    };
+    let frame = Aarch64Frame::new(function);
     let mut labels = LabelAllocator::new(function, target);
-    let shared_epilogue = if should_share_aarch64_epilogue(function, stack_bytes) {
+    let shared_epilogue = if should_share_aarch64_epilogue(function, frame.stack_bytes) {
         Some(labels.fresh())
     } else {
         None
@@ -144,15 +117,22 @@ fn emit_aarch64_function(
     assembly.push_str(".p2align 2\n");
     write_assembly!(assembly, "{label}:\n")?;
     emit_aarch64_prologue(
-        preserved_temp_offset,
-        link_register_offset,
-        stack_bytes,
+        frame.preserved_temp_offset,
+        frame.link_register_offset,
+        frame.stack_bytes,
         assembly,
     )?;
+    emit_aarch64_parameter_stores(function.parameter_count, assembly)?;
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal { slot, value } => {
-                emit_aarch64_store_local(*slot, value, temporary_base, &mut labels, assembly)?;
+                emit_aarch64_store_local(
+                    *slot,
+                    value,
+                    frame.temporary_base,
+                    &mut labels,
+                    assembly,
+                )?;
                 write_assembly!(assembly, "\tstr w0, [sp, #{}]\n", local_offset(*slot))?;
             }
             Instruction::JumpIfZero { condition, label } => {
@@ -160,7 +140,7 @@ fn emit_aarch64_function(
                 emit_aarch64_jump_if_zero(
                     condition,
                     &target_label,
-                    temporary_base,
+                    frame.temporary_base,
                     &mut labels,
                     assembly,
                 )?;
@@ -183,12 +163,12 @@ fn emit_aarch64_function(
                 emit_aarch64_return(
                     expr.as_ref(),
                     Aarch64Epilogue {
-                        preserved_temp_offset,
-                        link_register_offset,
-                        stack_bytes,
+                        preserved_temp_offset: frame.preserved_temp_offset,
+                        link_register_offset: frame.link_register_offset,
+                        stack_bytes: frame.stack_bytes,
                         shared_label: shared_epilogue.as_deref(),
                     },
-                    temporary_base,
+                    frame.temporary_base,
                     &mut labels,
                     assembly,
                 )?;
@@ -198,13 +178,50 @@ fn emit_aarch64_function(
     if let Some(label) = shared_epilogue {
         write_assembly!(assembly, "{label}:\n")?;
         emit_aarch64_epilogue(
-            preserved_temp_offset,
-            link_register_offset,
-            stack_bytes,
+            frame.preserved_temp_offset,
+            frame.link_register_offset,
+            frame.stack_bytes,
             assembly,
         )?;
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct Aarch64Frame {
+    temporary_base: usize,
+    stack_bytes: usize,
+    link_register_offset: Option<usize>,
+    preserved_temp_offset: Option<usize>,
+}
+
+impl Aarch64Frame {
+    fn new(function: &LoweredFunction) -> Self {
+        let temporary_count = function
+            .instructions
+            .iter()
+            .map(instruction_depth)
+            .max()
+            .unwrap_or(0);
+        let local_bytes = function.local_count * 4;
+        let call_frame_bytes = if function_uses_call(function) { 8 } else { 0 };
+        let preserved_temp_bytes = if function_uses_aarch64_preserved_temp(function) {
+            8
+        } else {
+            0
+        };
+        let stack_bytes = align_to(
+            local_bytes + (temporary_count * 4) + call_frame_bytes + preserved_temp_bytes,
+            16,
+        );
+        Self {
+            temporary_base: local_bytes,
+            stack_bytes,
+            link_register_offset: (call_frame_bytes > 0).then(|| stack_bytes - 8),
+            preserved_temp_offset: (preserved_temp_bytes > 0)
+                .then(|| stack_bytes - call_frame_bytes - 8),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -260,6 +277,7 @@ fn emit_x86_64_function(
     if stack_bytes > 0 {
         write_assembly!(assembly, "\tsubq ${stack_bytes}, %rsp\n")?;
     }
+    emit_x86_64_parameter_stores(function.parameter_count, assembly)?;
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal { slot, value } => {
@@ -297,6 +315,42 @@ fn emit_x86_64_function(
                 assembly.push_str("\tret\n");
             }
         }
+    }
+    Ok(())
+}
+
+fn emit_aarch64_parameter_stores(
+    parameter_count: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const REGISTERS: [&str; 8] = ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"];
+    let Some(registers) = REGISTERS.get(..parameter_count) else {
+        return Err(CompileError::new("too many function parameters"));
+    };
+    for (slot, register) in registers.iter().enumerate() {
+        write_assembly!(
+            assembly,
+            "\tstr {register}, [sp, #{}]\n",
+            local_offset(slot)
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_x86_64_parameter_stores(
+    parameter_count: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const REGISTERS: [&str; 6] = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
+    let Some(registers) = REGISTERS.get(..parameter_count) else {
+        return Err(CompileError::new("too many function parameters"));
+    };
+    for (slot, register) in registers.iter().enumerate() {
+        write_assembly!(
+            assembly,
+            "\tmovl {register}, {}(%rbp)\n",
+            x86_local_offset(slot)
+        )?;
     }
     Ok(())
 }

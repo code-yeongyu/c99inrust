@@ -10,6 +10,7 @@ pub struct Program {
 pub struct Function {
     pub name: String,
     pub return_type: ReturnType,
+    pub parameters: Vec<String>,
     pub statements: Vec<Statement>,
 }
 
@@ -234,7 +235,7 @@ impl Parser<'_> {
 
     fn function(&mut self) -> CompileResult<Function> {
         let (return_type, name) = self.function_signature()?;
-        self.skip_parameter_list()?;
+        let parameters = self.parameter_list()?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
         while !self.check_punctuator("}") {
@@ -244,6 +245,7 @@ impl Parser<'_> {
         Ok(Function {
             name,
             return_type,
+            parameters,
             statements,
         })
     }
@@ -265,7 +267,9 @@ impl Parser<'_> {
         Ok((return_type, name))
     }
 
-    fn skip_parameter_list(&mut self) -> CompileResult<()> {
+    fn parameter_list(&mut self) -> CompileResult<Vec<String>> {
+        let mut parameters = Vec::new();
+        let mut parameter_start = self.index;
         let mut depth = 0usize;
         while !self.check_end() {
             if self.check_punctuator("(") {
@@ -275,16 +279,40 @@ impl Parser<'_> {
             }
             if self.check_punctuator(")") {
                 if depth == 0 {
+                    self.push_parameter(&mut parameters, parameter_start, self.index)?;
                     self.advance();
-                    return Ok(());
+                    return Ok(parameters);
                 }
                 depth -= 1;
                 self.advance();
                 continue;
             }
+            if depth == 0 && self.check_punctuator(",") {
+                self.push_parameter(&mut parameters, parameter_start, self.index)?;
+                self.advance();
+                parameter_start = self.index;
+                continue;
+            }
             self.advance();
         }
         Err(CompileError::new("unterminated function parameter list"))
+    }
+
+    fn push_parameter(
+        &self,
+        parameters: &mut Vec<String>,
+        start: usize,
+        end: usize,
+    ) -> CompileResult<()> {
+        let tokens = &self.tokens[start..end];
+        if parameter_is_void(tokens) {
+            return Ok(());
+        }
+        let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
+            return Err(CompileError::new("unsupported function parameter"));
+        };
+        parameters.push(name.to_owned());
+        Ok(())
     }
 
     fn statement(&mut self) -> CompileResult<Statement> {
@@ -924,6 +952,20 @@ fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
         (false, true) => Some(ReturnType::Int),
         (true, true) | (false, false) => None,
     }
+}
+
+fn parameter_is_void(tokens: &[Token]) -> bool {
+    let mut saw_void = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Void) => saw_void = true,
+            TokenKind::Keyword(
+                Keyword::Const | Keyword::Register | Keyword::Restrict | Keyword::Volatile,
+            ) => {}
+            _ => return false,
+        }
+    }
+    saw_void
 }
 
 fn array_declarator_name(tokens: &[Token]) -> Option<String> {

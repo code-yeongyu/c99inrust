@@ -12,6 +12,7 @@ pub struct LoweredProgram {
 pub struct LoweredFunction {
     pub name: String,
     pub return_type: ReturnType,
+    pub parameter_count: usize,
     pub local_count: usize,
     pub instructions: Vec<Instruction>,
 }
@@ -117,6 +118,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 /// undeclared locals, duplicate locals in a scope, or a missing `int` return.
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     let mut context = LoweringContext::new(function.return_type);
+    for parameter in &function.parameters {
+        context.declare_local(parameter)?;
+    }
     for statement in &function.statements {
         context.lower_statement(statement)?;
     }
@@ -132,6 +136,7 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     Ok(LoweredFunction {
         name: function.name.clone(),
         return_type: function.return_type,
+        parameter_count: function.parameters.len(),
         local_count: context.local_count,
         instructions: context.instructions,
     })
