@@ -3146,3 +3146,85 @@ unsupported expression forms.
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After r_plane Pointer Return Slice
+
+`compile -S` now accepts the focused `r_plane.c` translation unit. This slice
+lets global array bounds use integer initializer expressions such as `320*64`
+and accepts pointer-returning function signatures such as:
+
+```c
+visplane_t* R_FindPlane(...);
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_global_short_array_expression_length_slice
+compiler_accepts_pointer_return_signatures
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_plane.c \
+  -o /tmp/c99inrust-r_plane.s
+```
+
+Focused `r_plane.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779137932`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779137932.txt
+ok=21
+fail=41
+```
+
+Translation units currently reaching assembly:
+
+```text
+am_map.c
+d_items.c
+d_main.c
+d_net.c
+doomdef.c
+doomstat.c
+dstrings.c
+f_finale.c
+i_main.c
+m_argv.c
+m_bbox.c
+m_cheat.c
+m_fixed.c
+m_random.c
+m_swap.c
+r_draw.c
+r_plane.c
+r_segs.c
+r_sky.c
+st_lib.c
+tables.c
+```
+
+Representative moved blocker:
+
+```text
+FAIL r_plane.c
+  before this slice:
+    error: 5666:1: unsupported function definition: R_FindPlane
+  after this slice:
+    OK r_plane.c
+```
+
+Next visible blockers include function-pointer arrays in `f_wipe.c`,
+enum-sized arrays in several modules, unsupported function parameters,
+function-pointer assignments, and old-style function definitions.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

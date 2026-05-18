@@ -178,14 +178,16 @@ access.
 The Doom-era `<values.h>` builtin now also supplies `MAXSHORT` and related
 short/char limits, and global `short` arrays are accepted through the current
 integer-array compile path, moving `r_segs.c` to assembly generation.
-Pointer returns remain unsupported.
+Global array bounds now accept integer initializer expressions such as
+`320*64`, and pointer-returning function signatures lower return values through
+the current scalar backend, moving `r_plane.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 42
+The current Doom compile scan reaches actual supported function bodies, but 41
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
-`m_random.c`, `m_swap.c`, `r_draw.c`, `r_segs.c`, `r_sky.c`, `st_lib.c`, and
-`tables.c` currently reach assembly generation.
+`m_random.c`, `m_swap.c`, `r_draw.c`, `r_plane.c`, `r_segs.c`, `r_sky.c`,
+`st_lib.c`, and `tables.c` currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -206,6 +208,9 @@ pointer data, `hu_font[c]->width`, `column_t*` casts, and `column->topdelta` /
 `column->length` member access.
 The former `r_segs.c` blockers moved past `MAXSHORT` and extern/global short
 array declarations such as `ceilingclip[SCREENWIDTH]`.
+The former `r_plane.c` blockers moved past expression-sized global arrays such
+as `short openings[320*64]` and pointer-returning signatures such as
+`visplane_t* R_FindPlane(...)`.
 Many remaining files are blocked by enum-sized arrays, old-style function
 definitions, function-pointer declarations, and unsupported expression forms.
 The current `f_wipe.c` blocker is the local static function-pointer array
