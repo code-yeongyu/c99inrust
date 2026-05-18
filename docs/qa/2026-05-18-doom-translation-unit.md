@@ -1378,3 +1378,84 @@ static int (*wipes[])(int, int, int) =
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Unsigned Cast Slice
+
+`compile -S` now accepts the unsigned cast syntax used by Doom's draw and cheat
+code paths:
+
+```c
+(unsigned)dc_x >= SCREENWIDTH
+cheat_xlate_table[(unsigned char)key]
+```
+
+This slice is intentionally syntactic and narrow. The parser maps supported
+unsigned integer casts onto the current integer scalar ABI, so positive-value
+oracle slices match host C, but full unsigned conversion and wraparound
+semantics are still future work.
+
+Regression coverage added:
+
+```text
+compiler_accepts_unsigned_cast_slice
+unsigned_cast_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+error: 134:5: expected expression
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+error: 5741:5: expected expression
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779111884`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779111884.txt
+ok=9
+fail=53
+```
+
+Representative moved blockers:
+
+```text
+FAIL m_cheat.c
+  before unsigned cast slice: 113:22: expected expression
+  after unsigned cast slice: 134:5: expected expression
+
+FAIL r_draw.c
+  before unsigned cast slice: 5723:10: expected expression
+  after unsigned cast slice: 5741:5: expected expression
+```
+
+The next `m_cheat.c` blocker is a mixed local pointer/scalar declaration:
+
+```c
+unsigned char *p, c;
+```
+
+The next `r_draw.c` blocker is a `do` loop:
+
+```c
+do
+{
+    *dest = dc_colormap[dc_source[(frac>>16)&127]];
+    dest += 320;
+    frac += fracstep;
+} while (count--);
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

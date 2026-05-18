@@ -78,7 +78,10 @@ Compound scalar assignments such as `m_x += m_w/2` and `m_x -= m_w/2` are also
 parsed and lowered through the existing assignment path. Local pointer
 declarators, pointer casts, unary pointer dereference, pointer post-decrement
 conditions, `sizeof(type)`, and address-of-subscript expressions are accepted
-for the `f_wipe.c` pointer-walk slice.
+for the `f_wipe.c` pointer-walk slice. Unsigned integer casts such as
+`(unsigned)x` and `(unsigned char)x` are now accepted through the current
+integer ABI for Doom-shaped positive-value expression slices; full unsigned
+conversion and wraparound semantics remain future work.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -90,6 +93,10 @@ The current `am_map.c` blocker is the local static aggregate declaration
 `AM_getIslope` member expressions.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
+The current `m_cheat.c` blocker has moved past `(unsigned char)key` and is now
+the mixed local pointer/scalar declaration `unsigned char *p, c;`.
+The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and is now a
+`do { ... } while (...)` loop in `R_DrawColumn`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
