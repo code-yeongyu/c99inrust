@@ -285,7 +285,11 @@ pub enum ExternalItem {
 /// Returns an error when the token stream does not match the currently
 /// supported C subset.
 pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
-    let mut parser = Parser { tokens, index: 0 };
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        known_structs: &[],
+    };
     parser.program()
 }
 
@@ -348,6 +352,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         let mut function_parser = Parser {
             tokens: item_tokens,
             index: 0,
+            known_structs: &structs,
         };
         functions.push(function_parser.function()?);
         if !function_parser.check_end() {
@@ -372,6 +377,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
 struct Parser<'a> {
     tokens: &'a [Token],
     index: usize,
+    known_structs: &'a [StructLayout],
 }
 
 impl Parser<'_> {
@@ -1035,6 +1041,7 @@ impl Parser<'_> {
         let mut index = self.index;
         let mut saw_type = false;
         let mut saw_double = false;
+        let mut saw_struct_pointer = false;
         let mut long_count = 0usize;
         while let Some(token) = self.tokens.get(index) {
             match &token.kind {
@@ -1061,8 +1068,15 @@ impl Parser<'_> {
                     if saw_type {
                         break;
                     }
-                    let scalar_type = supported_typedef_scalar(name)?;
-                    if scalar_type != ScalarType::Int {
+                    if let Some(scalar_type) = supported_typedef_scalar(name) {
+                        if scalar_type != ScalarType::Int {
+                            return None;
+                        }
+                    } else if self.known_structs.iter().any(|layout| layout.name == *name)
+                        && self.struct_pointer_declarator_follows(index + 1)
+                    {
+                        saw_struct_pointer = true;
+                    } else {
                         return None;
                     }
                     saw_type = true;
@@ -1074,13 +1088,28 @@ impl Parser<'_> {
         if !saw_type {
             return None;
         }
-        if saw_double && long_count == 0 {
+        if saw_struct_pointer {
+            Some((ScalarType::Pointer, index))
+        } else if saw_double && long_count == 0 {
             Some((ScalarType::Double, index))
         } else if long_count == 0 {
             Some((ScalarType::Int, index))
         } else {
             Some((ScalarType::LongLong, index))
         }
+    }
+
+    fn struct_pointer_declarator_follows(&self, mut index: usize) -> bool {
+        while let Some(token) = self.tokens.get(index) {
+            match &token.kind {
+                TokenKind::Keyword(Keyword::Const | Keyword::Restrict | Keyword::Volatile) => {
+                    index += 1;
+                }
+                TokenKind::Punctuator(value) if value == "*" => return true,
+                _ => return false,
+            }
+        }
+        false
     }
 
     fn current_identifier_starts_assignment(&self) -> bool {
@@ -2112,7 +2141,11 @@ fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
     if tokens.is_empty() {
         return Err(CompileError::new("expected global integer initializer"));
     }
-    let mut parser = Parser { tokens, index: 0 };
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        known_structs: &[],
+    };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
         return Err(CompileError::new("unsupported global integer initializer")

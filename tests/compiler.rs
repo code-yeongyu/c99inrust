@@ -1471,6 +1471,30 @@ int main(void) { return 0; }";
 }
 
 #[test]
+fn compiler_accepts_local_struct_pointer_declaration_slice() {
+    // given
+    let source = r"typedef struct {
+    int width;
+} patch_t;
+int main(void) {
+    patch_t* patch;
+    patch = 0;
+    return patch ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tcmpq $0, %rax\n"));
+}
+
+#[test]
 fn compiler_accepts_pointer_member_post_increment_value_slice() {
     // given
     let source = r"typedef struct {
