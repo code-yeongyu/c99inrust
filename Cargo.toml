@@ -20,6 +20,7 @@ path = "src/bin/c99inrust.rs"
 [dependencies]
 
 [lints.rust]
+warnings = "deny"
 unsafe_code = "forbid"
 unused_must_use = "deny"
 

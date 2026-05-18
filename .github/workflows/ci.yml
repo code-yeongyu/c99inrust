@@ -26,8 +26,6 @@ jobs:
       - name: Format
         run: rustup run stable cargo fmt --all -- --check
       - name: Clippy
-        env:
-          RUSTFLAGS: -Dwarnings
         run: rustup run stable cargo clippy --all-targets --all-features
       - name: Test
         run: rustup run stable cargo test --all-targets --all-features
