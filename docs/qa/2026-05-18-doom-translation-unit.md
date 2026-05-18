@@ -2030,3 +2030,59 @@ FAIL tables.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Global Pointer Array Slice
+
+`compile -S` now accepts zero-initialized global pointer arrays and supports
+loading and storing individual pointer elements. This covers the previous
+focused `r_draw.c` blocker:
+
+```c
+byte* ylookup[MAXHEIGHT];
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_global_pointer_array_slice
+global_pointer_array_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+```
+
+Focused `r_draw.c` compile now reaches the next global array:
+
+```text
+error: unknown local or global: columnofs
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779118857`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779118857.txt
+ok=10
+fail=52
+```
+
+Representative moved blocker:
+
+```text
+FAIL r_draw.c
+  before global pointer array slice:
+    error: unknown local or global: ylookup
+  after global pointer array slice:
+    error: unknown local or global: columnofs
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
