@@ -490,6 +490,23 @@ fn compiler_accepts_unparenthesized_global_integer_initializer_slice() {
 }
 
 #[test]
+fn compiler_accepts_fixed_point_global_initializer_slice() {
+    // given
+    let source = "typedef int fixed_t; static fixed_t scale_mtof = (.2*(1<<16));";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("scale_mtof:"));
+    assert!(assembly.contains("\t.long 13107\n"));
+}
+
+#[test]
 fn compiler_emits_void_functions_with_value_less_return() {
     // given
     let source = "void tick(void) { return; } int main(void) { return 42; }";
