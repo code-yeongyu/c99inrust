@@ -569,6 +569,72 @@ FAIL z_zone.c
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
 
+## Compile Scan After i_main Extern Globals
+
+`compile -S` now accepts the Doom `i_main.c` entry translation unit. The
+preprocessed file gets `myargc` and `myargv` from `m_argv.h` as external
+declarations:
+
+```text
+extern  int     myargc;
+extern  char**  myargv;
+```
+
+The compiler records those declarations as scalar global bindings for lowering
+and codegen, but does not emit storage for them in `i_main.c`; the definitions
+remain the job of `m_argv.c`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_i_main_global_pointer_slice
+compiler_accepts_i_main_extern_global_slice
+i_main_global_pointer_slice_matches_host_c_compiler_exit_code
+```
+
+Manual single-file QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/c99inrust-doom-src/linuxdoom-1.10 /tmp/c99inrust-doom-src/linuxdoom-1.10/i_main.c -o /tmp/c99inrust-i-main.s
+observed=_main
+observed=str w0, [x16, _myargc@PAGEOFF]
+observed=str x0, [x16, _myargv@PAGEOFF]
+observed=bl _D_DoomMain
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779102851
+scan=/tmp/c99inrust-doom-scan-1779102851.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779102851.txt
+ok=6
+fail=56
+OK i_main.c
+OK m_bbox.c
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+FAIL m_argv.c
+  error: 45:26: expected punctuator =
+FAIL p_inter.c
+  error: unsupported function parameter
+FAIL z_zone.c
+  error: 753:9: expected punctuator ;
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
+
 ## Compile Scan After m_random Globals and Subscripts
 
 The compiler now captures the Doom `m_random.c` global random table and mutable
