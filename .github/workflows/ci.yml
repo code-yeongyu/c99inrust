@@ -2,13 +2,17 @@ name: ci
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
   rust:
-    runs-on: macos-latest
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
