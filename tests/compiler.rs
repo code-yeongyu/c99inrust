@@ -2991,6 +2991,41 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_doom_named_inner_union_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int health;
+} mobj_t;
+typedef struct {
+    int flags;
+} line_t;
+typedef struct {
+    int frac;
+    int isaline;
+    union {
+        mobj_t* thing;
+        line_t* line;
+    } d;
+} intercept_t;
+int main(void) {
+    intercept_t* in;
+    in = 0;
+    return in->d.line->flags;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq 8("));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_tagged_struct_pointer_referent_slice() {
     // given
     let source = r"typedef struct line_s {

@@ -449,9 +449,12 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         if let Some(function) = pointer_return_function(item_tokens) {
             pointer_return_functions.push(function);
         }
-        if let Some(layout) =
+        if let Some(layouts) =
             parse_struct_typedef(item_tokens, &structs, &constants, &pointer_typedefs)?
         {
+            let Some(layout) = layouts.last() else {
+                continue;
+            };
             if let Some(tag_name) = aggregate_tag_name(item_tokens)
                 && tag_name != layout.name
             {
@@ -461,7 +464,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
                     size: layout.size,
                 });
             }
-            structs.push(layout);
+            structs.extend(layouts);
             continue;
         }
         let enum_constants = parse_enum_constants(item_tokens, &constants)?;
@@ -2143,34 +2146,41 @@ fn parse_struct_typedef(
     known_structs: &[StructLayout],
     constants: &[Constant],
     pointer_typedefs: &[String],
-) -> CompileResult<Option<StructLayout>> {
+) -> CompileResult<Option<Vec<StructLayout>>> {
     if !token_has_keyword(tokens, Keyword::Typedef) {
         return Ok(None);
     }
-    let is_union = token_has_keyword(tokens, Keyword::Union);
-    if !token_has_keyword(tokens, Keyword::Struct) && !is_union {
-        return Ok(parse_struct_alias_typedef(tokens, known_structs));
+    if !token_has_keyword(tokens, Keyword::Struct) && !token_has_keyword(tokens, Keyword::Union) {
+        return Ok(parse_struct_alias_typedef(tokens, known_structs).map(|layout| vec![layout]));
     }
     let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
         return Ok(None);
     };
+    let is_union = tokens[..open_brace]
+        .iter()
+        .any(|token| token_is_keyword(token, Keyword::Union));
     let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
         return Ok(None);
     };
     let Some(name) = last_top_level_identifier(tokens) else {
         return Ok(None);
     };
-    let Some((fields, size)) = parse_struct_fields(
-        &tokens[open_brace + 1..close_brace],
-        known_structs,
+    let mut available_structs = known_structs.to_vec();
+    let mut layouts = Vec::new();
+    let mut context = StructParseContext {
+        parent_name: &name,
+        available_structs: &mut available_structs,
         constants,
         pointer_typedefs,
-        is_union,
-    )?
+        nested_layouts: &mut layouts,
+    };
+    let Some((fields, size)) =
+        parse_struct_fields(&tokens[open_brace + 1..close_brace], is_union, &mut context)?
     else {
         return Ok(None);
     };
-    Ok(Some(StructLayout { name, fields, size }))
+    layouts.push(StructLayout { name, fields, size });
+    Ok(Some(layouts))
 }
 
 fn parse_struct_alias_typedef(
@@ -2207,27 +2217,36 @@ fn aggregate_tag_name(tokens: &[Token]) -> Option<String> {
 
 fn parse_struct_fields(
     tokens: &[Token],
-    known_structs: &[StructLayout],
-    constants: &[Constant],
-    pointer_typedefs: &[String],
     is_union: bool,
+    context: &mut StructParseContext<'_>,
 ) -> CompileResult<Option<(Vec<StructField>, usize)>> {
     let mut fields = Vec::new();
     let mut offset = 0usize;
     let mut max_alignment = 1usize;
     let mut start = 0usize;
-    for index in 0..tokens.len() {
-        if !token_is_punctuator(&tokens[index], ";") {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        if paren_depth != 0
+            || bracket_depth != 0
+            || brace_depth != 0
+            || !token_is_punctuator(token, ";")
+        {
+            update_depths(
+                token,
+                &mut paren_depth,
+                &mut bracket_depth,
+                &mut brace_depth,
+            );
             continue;
         }
         let declaration = &tokens[start..index];
         if !declaration.is_empty()
             && !parse_struct_field_declaration(
                 declaration,
-                known_structs,
-                constants,
-                pointer_typedefs,
                 is_union,
+                context,
                 &mut StructFieldOutput {
                     fields: &mut fields,
                     offset: &mut offset,
@@ -2238,6 +2257,12 @@ fn parse_struct_fields(
             return Ok(None);
         }
         start = index + 1;
+        update_depths(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
     }
     if start < tokens.len() {
         return Ok(None);
@@ -2252,14 +2277,23 @@ struct StructFieldOutput<'a> {
     max_alignment: &'a mut usize,
 }
 
+struct StructParseContext<'a> {
+    parent_name: &'a str,
+    available_structs: &'a mut Vec<StructLayout>,
+    constants: &'a [Constant],
+    pointer_typedefs: &'a [String],
+    nested_layouts: &'a mut Vec<StructLayout>,
+}
+
 fn parse_struct_field_declaration(
     tokens: &[Token],
-    known_structs: &[StructLayout],
-    constants: &[Constant],
-    pointer_typedefs: &[String],
     is_union: bool,
+    context: &mut StructParseContext<'_>,
     output: &mut StructFieldOutput<'_>,
 ) -> CompileResult<bool> {
+    if parse_nested_aggregate_field_declaration(tokens, is_union, context, output)? {
+        return Ok(true);
+    }
     let ranges = top_level_comma_ranges(tokens);
     let Some((first_start, first_end)) = ranges.first().copied() else {
         return Ok(false);
@@ -2269,8 +2303,11 @@ fn parse_struct_field_declaration(
         return Ok(false);
     };
     let base_specifiers = &first[..first_name_index];
-    let Some(base_type) = struct_field_type(base_specifiers, known_structs, pointer_typedefs)
-    else {
+    let Some(base_type) = struct_field_type(
+        base_specifiers,
+        context.available_structs.as_slice(),
+        context.pointer_typedefs,
+    ) else {
         return Ok(false);
     };
     for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
@@ -2293,7 +2330,8 @@ fn parse_struct_field_declaration(
         } else {
             base_type.clone()
         };
-        let field_type = if let Some(length) = struct_field_array_length(segment, constants) {
+        let field_type = if let Some(length) = struct_field_array_length(segment, context.constants)
+        {
             match field_type {
                 FieldType::Scalar(element_type) => FieldType::Array {
                     element_type,
@@ -2312,39 +2350,132 @@ fn parse_struct_field_declaration(
         } else {
             field_type
         };
-        let size = field_type_size(&field_type, known_structs)?;
-        let alignment = field_type_alignment(&field_type, known_structs)?;
-        *output.max_alignment = (*output.max_alignment).max(alignment);
-        if is_union {
-            output.fields.push(StructField {
-                name: name.to_owned(),
-                field_type,
-                offset: 0,
-            });
-            *output.offset = (*output.offset).max(size);
-            continue;
-        }
-        *output.offset = align_struct_offset(*output.offset, alignment)?;
+        push_struct_field(
+            name,
+            field_type,
+            is_union,
+            context.available_structs.as_slice(),
+            output,
+        )?;
+    }
+    Ok(true)
+}
+
+fn parse_nested_aggregate_field_declaration(
+    tokens: &[Token],
+    is_parent_union: bool,
+    context: &mut StructParseContext<'_>,
+    output: &mut StructFieldOutput<'_>,
+) -> CompileResult<bool> {
+    let Some(first) = tokens.first() else {
+        return Ok(false);
+    };
+    let is_union = if token_is_keyword(first, Keyword::Union) {
+        true
+    } else if token_is_keyword(first, Keyword::Struct) {
+        false
+    } else {
+        return Ok(false);
+    };
+    let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
+        return Ok(false);
+    };
+    let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
+        return Ok(false);
+    };
+    let Some(name) = tokens.get(close_brace + 1).and_then(token_identifier) else {
+        return Ok(false);
+    };
+    if tokens.get(close_brace + 2).is_some() {
+        return Ok(false);
+    }
+    let struct_name = format!("{}.{}", context.parent_name, name);
+    let nested_fields = {
+        let mut nested_context = StructParseContext {
+            parent_name: &struct_name,
+            available_structs: &mut *context.available_structs,
+            constants: context.constants,
+            pointer_typedefs: context.pointer_typedefs,
+            nested_layouts: &mut *context.nested_layouts,
+        };
+        parse_struct_fields(
+            &tokens[open_brace + 1..close_brace],
+            is_union,
+            &mut nested_context,
+        )?
+    };
+    let Some((fields, size)) = nested_fields else {
+        return Ok(false);
+    };
+    let layout = StructLayout {
+        name: struct_name.clone(),
+        fields,
+        size,
+    };
+    context.available_structs.push(layout.clone());
+    context.nested_layouts.push(layout);
+    push_struct_field(
+        name,
+        FieldType::Struct(struct_name),
+        is_parent_union,
+        context.available_structs.as_slice(),
+        output,
+    )?;
+    Ok(true)
+}
+
+fn push_struct_field(
+    name: &str,
+    field_type: FieldType,
+    is_union: bool,
+    known_structs: &[StructLayout],
+    output: &mut StructFieldOutput<'_>,
+) -> CompileResult<()> {
+    let size = field_type_size(&field_type, known_structs)?;
+    let alignment = field_type_alignment(&field_type, known_structs)?;
+    *output.max_alignment = (*output.max_alignment).max(alignment);
+    if is_union {
         output.fields.push(StructField {
             name: name.to_owned(),
             field_type,
-            offset: *output.offset,
+            offset: 0,
         });
-        *output.offset = (*output.offset)
-            .checked_add(size)
-            .ok_or_else(|| CompileError::new("struct size overflow"))?;
+        *output.offset = (*output.offset).max(size);
+        return Ok(());
     }
-    Ok(true)
+    *output.offset = align_struct_offset(*output.offset, alignment)?;
+    output.fields.push(StructField {
+        name: name.to_owned(),
+        field_type,
+        offset: *output.offset,
+    });
+    *output.offset = (*output.offset)
+        .checked_add(size)
+        .ok_or_else(|| CompileError::new("struct size overflow"))?;
+    Ok(())
 }
 
 fn top_level_comma_ranges(tokens: &[Token]) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let mut start = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
     for (index, token) in tokens.iter().enumerate() {
-        if token_is_punctuator(token, ",") {
+        if paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+            && token_is_punctuator(token, ",")
+        {
             ranges.push((start, index));
             start = index + 1;
         }
+        update_depths(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
     }
     ranges.push((start, tokens.len()));
     ranges
