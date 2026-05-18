@@ -34,6 +34,25 @@ fn lexer_handles_comments_keywords_and_integer_tokens() {
 }
 
 #[test]
+fn lexer_accepts_integer_literal_suffixes() {
+    // given
+    let source = "int magic = 0x12345678l; int count = 42UL;\n";
+
+    // when
+    let tokens = lex(source).expect("lexer should tokenize suffixed integer literals");
+
+    // then
+    let integers = tokens
+        .into_iter()
+        .filter_map(|token| match token.kind {
+            TokenKind::Integer(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(integers, vec![305_419_896, 42]);
+}
+
+#[test]
 fn preprocessor_expands_object_macros_without_touching_strings() {
     // given
     let source = "#define ANSWER 42\nint main(void) { return ANSWER; }\nchar *s = \"ANSWER\";\n";

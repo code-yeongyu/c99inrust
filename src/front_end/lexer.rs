@@ -244,6 +244,7 @@ impl Lexer {
             if value.is_empty() {
                 return Err(CompileError::new("expected hexadecimal digits").at(line, column));
             }
+            self.consume_integer_suffix();
             let parsed = i64::from_str_radix(&value, 16)
                 .map_err(|_| CompileError::new("integer literal is too large").at(line, column))?;
             return Ok(TokenKind::Integer(parsed));
@@ -257,10 +258,20 @@ impl Lexer {
             }
             self.advance();
         }
+        self.consume_integer_suffix();
         let parsed = value
             .parse::<i64>()
             .map_err(|_| CompileError::new("integer literal is too large").at(line, column))?;
         Ok(TokenKind::Integer(parsed))
+    }
+
+    fn consume_integer_suffix(&mut self) {
+        while self
+            .current()
+            .is_some_and(|current| matches!(current, 'u' | 'U' | 'l' | 'L'))
+        {
+            self.advance();
+        }
     }
 
     fn string_literal(&mut self) -> CompileResult<String> {

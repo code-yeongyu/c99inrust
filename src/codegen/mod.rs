@@ -2128,8 +2128,7 @@ fn emit_x86_64_unary_expr(
 }
 
 fn emit_x86_64_integer(value: i64, assembly: &mut String) -> CompileResult<()> {
-    let value =
-        i32::try_from(value).map_err(|_| CompileError::new("integer literal does not fit i32"))?;
+    let value = i32_immediate(value)?;
     write_assembly!(assembly, "\tmovl ${value}, %eax\n")
 }
 
@@ -3476,8 +3475,7 @@ fn emit_aarch64_i32_to_register(
     register: &str,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let value =
-        i32::try_from(value).map_err(|_| CompileError::new("integer literal does not fit i32"))?;
+    let value = i32_immediate(value)?;
     let bits = u32::from_ne_bytes(value.to_ne_bytes());
     let low = bits & 0xffff;
     let high = (bits >> 16) & 0xffff;
@@ -3486,6 +3484,15 @@ fn emit_aarch64_i32_to_register(
         write_assembly!(assembly, "\tmovk {register}, #{high}, lsl #16\n")?;
     }
     Ok(())
+}
+
+fn i32_immediate(value: i64) -> CompileResult<i32> {
+    if let Ok(value) = i32::try_from(value) {
+        return Ok(value);
+    }
+    let value =
+        u32::try_from(value).map_err(|_| CompileError::new("integer literal does not fit i32"))?;
+    Ok(i32::from_ne_bytes(value.to_ne_bytes()))
 }
 
 const fn aarch64_zero_branch_for_comparison(op: BinaryOp) -> Option<&'static str> {

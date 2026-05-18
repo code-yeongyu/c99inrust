@@ -307,6 +307,24 @@ fn compiler_accepts_unsigned_cast_slice() {
 }
 
 #[test]
+fn compiler_accepts_unsigned_32_bit_mask_literals_slice() {
+    // given
+    let source = "int main(void) { return (0x80000000 & 0x0fffffff) == 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovl $-2147483648, %eax\n"));
+    assert!(assembly.contains("\tmovl $268435455, %eax\n"));
+    assert!(assembly.contains("\tandl %ecx, %eax\n"));
+}
+
+#[test]
 fn compiler_marks_linux_assembly_stack_non_executable() {
     // given
     let source = "int main(void) { return 0; }";
@@ -1304,6 +1322,113 @@ fn compiler_accepts_mixed_pointer_scalar_local_declaration_slice() {
     assert!(assembly.contains("\tmovq %rax, -"));
     assert!(assembly.contains("\tmovl %eax, -"));
     assert!(assembly.contains("\tmovl $7, %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_plain_unsigned_local_declaration_slice() {
+    // given
+    let source = "unsigned NetbufferChecksum(void) { unsigned c; c = 0x1234567; return c; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("NetbufferChecksum:"));
+    assert!(assembly.contains("\tmovl $19088743, %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_goto_label_slice() {
+    // given
+    let source = r"int main(void) {
+    int value;
+    value = 1;
+    goto done;
+    value = 2;
+done:
+    return value;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tjmp .Lmain_"));
+    assert!(assembly.contains("\n.Lmain_"));
+}
+
+#[test]
+fn compiler_accepts_struct_array_field_subscript_address_slice() {
+    // given
+    let source = r"typedef struct {
+    int forwardmove;
+} ticcmd_t;
+typedef struct {
+    ticcmd_t cmds[4];
+} doomdata_t;
+int main(void) {
+    doomdata_t packet;
+    ticcmd_t source;
+    ticcmd_t* dest;
+    int index;
+    index = 2;
+    source.forwardmove = 7;
+    packet.cmds[index] = source;
+    dest = &packet.cmds[index];
+    return dest->forwardmove;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl $7, %eax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_object_assignment_from_pointer_slice() {
+    // given
+    let source = r"typedef struct {
+    int forwardmove;
+} ticcmd_t;
+typedef struct {
+    int checksum;
+    ticcmd_t cmds[4];
+} doomdata_t;
+doomdata_t* netbuffer;
+doomdata_t reboundstore;
+int main(void) {
+    reboundstore = *netbuffer;
+    *netbuffer = reboundstore;
+    return reboundstore.checksum;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("reboundstore:"));
+    assert!(assembly.contains("\tmovq netbuffer(%rip), %rax\n"));
+    assert!(assembly.contains("\tleaq reboundstore(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
 }
 
 #[test]

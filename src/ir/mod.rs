@@ -721,6 +721,7 @@ struct LoweringContext {
     next_local_offset: usize,
     instructions: Vec<Instruction>,
     next_label: usize,
+    named_labels: HashMap<String, usize>,
     break_labels: Vec<usize>,
     continue_labels: Vec<usize>,
     has_return: bool,
@@ -743,6 +744,7 @@ impl LoweringContext {
             next_local_offset: 0,
             instructions: Vec::new(),
             next_label: 0,
+            named_labels: HashMap::new(),
             break_labels: Vec::new(),
             continue_labels: Vec::new(),
             has_return: false,
@@ -821,6 +823,14 @@ impl LoweringContext {
             Statement::Expression(expr) => self.lower_expression_statement(expr),
             Statement::Break => self.lower_break(),
             Statement::Continue => self.lower_continue(),
+            Statement::Label(label) => {
+                self.lower_label(label);
+                Ok(())
+            }
+            Statement::Goto(label) => {
+                self.lower_goto(label);
+                Ok(())
+            }
             Statement::Return(expr) => self.lower_return(expr.as_ref()),
         }
     }
@@ -852,6 +862,16 @@ impl LoweringContext {
         };
         self.instructions.push(Instruction::Jump { label: *label });
         Ok(())
+    }
+
+    fn lower_label(&mut self, name: &str) {
+        let label = self.named_label(name);
+        self.instructions.push(Instruction::Label { label });
+    }
+
+    fn lower_goto(&mut self, name: &str) {
+        let label = self.named_label(name);
+        self.instructions.push(Instruction::Jump { label });
     }
 
     fn lower_return(&mut self, expr: Option<&Expr>) -> CompileResult<()> {
@@ -1282,6 +1302,15 @@ impl LoweringContext {
         label
     }
 
+    fn named_label(&mut self, name: &str) -> usize {
+        if let Some(label) = self.named_labels.get(name) {
+            return *label;
+        }
+        let label = self.fresh_label();
+        self.named_labels.insert(name.to_owned(), label);
+        label
+    }
+
     fn local_binding(&self, name: &str) -> Option<LocalBinding> {
         self.scopes
             .iter()
@@ -1518,22 +1547,31 @@ impl LoweringContext {
     ) -> CompileResult<Option<StructAddress>> {
         match target {
             LValue::Identifier(name) => {
-                let Some(LocalBinding::StructObject {
+                if let Some(LocalBinding::StructObject {
                     slot,
                     struct_name,
                     byte_size,
                 }) = self.local_binding(name)
-                else {
-                    return Ok(None);
-                };
-                Ok(Some(StructAddress {
-                    pointer: LoweredExpr::LocalAddress {
-                        offset: self.local_offset(slot)?,
-                        byte_size,
-                    },
-                    offset: 0,
-                    struct_name,
-                }))
+                {
+                    return Ok(Some(StructAddress {
+                        pointer: LoweredExpr::LocalAddress {
+                            offset: self.local_offset(slot)?,
+                            byte_size,
+                        },
+                        offset: 0,
+                        struct_name,
+                    }));
+                }
+                if let Some(GlobalBinding::StructObject { struct_name, .. }) =
+                    self.global_bindings.get(name)
+                {
+                    return Ok(Some(StructAddress {
+                        pointer: LoweredExpr::GlobalAddress { name: name.clone() },
+                        offset: 0,
+                        struct_name: struct_name.clone(),
+                    }));
+                }
+                Ok(None)
             }
             LValue::Member {
                 base,
@@ -1550,7 +1588,17 @@ impl LoweringContext {
                     struct_name,
                 }))
             }
-            LValue::Subscript { .. } => Ok(None),
+            LValue::Subscript { array, index } => {
+                if let Some(address) =
+                    self.resolve_struct_array_field_subscript_address(array, index)?
+                {
+                    return Ok(Some(address));
+                }
+                if let Ok(address) = self.resolve_pointer_struct_subscript_address(array, index) {
+                    return Ok(Some(address));
+                }
+                Ok(None)
+            }
         }
     }
 
@@ -1748,6 +1796,11 @@ impl LoweringContext {
                 if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
                     return Ok(address.pointer);
                 }
+                if let Some(address) =
+                    self.resolve_struct_array_field_subscript_address(array, index)?
+                {
+                    return Ok(address.pointer);
+                }
                 if let Ok(address) = self.resolve_pointer_struct_subscript_address(array, index) {
                     return Ok(address.pointer);
                 }
@@ -1826,7 +1879,7 @@ impl LoweringContext {
         let scalar_type = match member.field_type {
             FieldType::Scalar(scalar_type) => scalar_type,
             FieldType::Pointer { .. } => ScalarType::Pointer,
-            FieldType::Array { .. } => {
+            FieldType::Array { .. } | FieldType::StructArray { .. } => {
                 return Ok(pointer_field_address(member.pointer, member.offset));
             }
             FieldType::Struct(_) => {
@@ -1850,7 +1903,7 @@ impl LoweringContext {
         let scalar_type = match member.field_type {
             FieldType::Scalar(scalar_type) => scalar_type,
             FieldType::Pointer { .. } => ScalarType::Pointer,
-            FieldType::Array { .. } => {
+            FieldType::Array { .. } | FieldType::StructArray { .. } => {
                 return Err(CompileError::new(
                     "assignment to array member is not supported",
                 ));
@@ -1932,6 +1985,35 @@ impl LoweringContext {
             element_type,
             scalar_size(element_type),
         )))
+    }
+
+    fn resolve_struct_array_field_subscript_address(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<StructAddress>> {
+        let Expr::Member {
+            base,
+            field,
+            dereference,
+        } = array
+        else {
+            return Ok(None);
+        };
+        let member = self.resolve_member_access(base, field, *dereference)?;
+        let FieldType::StructArray { struct_name, .. } = member.field_type else {
+            return Ok(None);
+        };
+        let byte_size = self.struct_layout(&struct_name)?.size;
+        Ok(Some(StructAddress {
+            pointer: LoweredExpr::PointerOffset {
+                pointer: Box::new(pointer_field_address(member.pointer, member.offset)),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size,
+            },
+            offset: 0,
+            struct_name,
+        }))
     }
 
     fn resolve_local_pointer_array(&self, array: &Expr) -> CompileResult<Option<LoweredExpr>> {
@@ -2018,8 +2100,21 @@ impl LoweringContext {
                 struct_name,
             });
         }
+        if let Expr::Dereference { pointer } = expr {
+            let struct_name = self.pointer_referent_for_expr(pointer)?;
+            return Ok(StructAddress {
+                pointer: self.lower_expr(pointer)?,
+                offset: 0,
+                struct_name,
+            });
+        }
         if let Expr::Subscript { array, index } = expr {
             if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
+                return Ok(address);
+            }
+            if let Some(address) =
+                self.resolve_struct_array_field_subscript_address(array, index)?
+            {
                 return Ok(address);
             }
             return self.resolve_pointer_struct_subscript_address(array, index);
@@ -2233,6 +2328,34 @@ impl LoweringContext {
                             struct_name,
                         },
                     )?;
+                }
+                FieldType::StructArray {
+                    struct_name,
+                    length,
+                } => {
+                    let element_size = self.struct_layout(&struct_name)?.size;
+                    for index in 0..length {
+                        let element_offset = index
+                            .checked_mul(element_size)
+                            .and_then(|offset| target_offset.checked_add(offset))
+                            .ok_or_else(|| CompileError::new("struct array offset overflow"))?;
+                        let source_element_offset = index
+                            .checked_mul(element_size)
+                            .and_then(|offset| source_offset.checked_add(offset))
+                            .ok_or_else(|| CompileError::new("struct array offset overflow"))?;
+                        self.push_struct_copy(
+                            &StructAddress {
+                                pointer: target.pointer.clone(),
+                                offset: element_offset,
+                                struct_name: struct_name.clone(),
+                            },
+                            &StructAddress {
+                                pointer: source.pointer.clone(),
+                                offset: source_element_offset,
+                                struct_name: struct_name.clone(),
+                            },
+                        )?;
+                    }
                 }
             }
         }

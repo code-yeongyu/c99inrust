@@ -34,6 +34,10 @@ pub enum FieldType {
         element_type: ScalarType,
         length: usize,
     },
+    StructArray {
+        struct_name: String,
+        length: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +157,8 @@ pub enum Statement {
     DeclarationList(Vec<Self>),
     ExpressionList(Vec<Self>),
     ExternGlobal(Global),
+    Label(String),
+    Goto(String),
     Assignment {
         target: LValue,
         value: Expr,
@@ -612,11 +618,40 @@ impl Parser<'_> {
             self.expect_punctuator(";")?;
             return Ok(Statement::Return(expr));
         }
+        if self.check_keyword(Keyword::Goto) {
+            self.advance();
+            let label = self.expect_identifier()?;
+            self.expect_punctuator(";")?;
+            return Ok(Statement::Goto(label));
+        }
+        if let Some(label) = self.label_statement() {
+            return Ok(label);
+        }
         if self.current_identifier_starts_assignment() {
             self.assignment_statement(true)
         } else {
             self.expression_statement(true)
         }
+    }
+
+    fn label_statement(&mut self) -> Option<Statement> {
+        let Some(Token {
+            kind: TokenKind::Identifier(name),
+            ..
+        }) = self.tokens.get(self.index)
+        else {
+            return None;
+        };
+        if !self
+            .tokens
+            .get(self.index + 1)
+            .is_some_and(|token| token_is_punctuator(token, ":"))
+        {
+            return None;
+        }
+        let label = name.clone();
+        self.index += 2;
+        Some(Statement::Label(label))
     }
 
     fn assignment_statement(&mut self, expect_semicolon: bool) -> CompileResult<Statement> {
@@ -1591,16 +1626,14 @@ impl Parser<'_> {
         while let Some(token) = self.tokens.get(index) {
             match &token.kind {
                 TokenKind::Keyword(
-                    Keyword::Const
-                    | Keyword::Restrict
-                    | Keyword::Signed
-                    | Keyword::Unsigned
-                    | Keyword::Volatile,
+                    Keyword::Const | Keyword::Restrict | Keyword::Signed | Keyword::Volatile,
                 ) => {}
                 TokenKind::Keyword(Keyword::Register | Keyword::Static) => {
                     saw_storage_class = true;
                 }
-                TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short) => {
+                TokenKind::Keyword(
+                    Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Unsigned,
+                ) => {
                     saw_type = true;
                 }
                 TokenKind::Keyword(Keyword::Double) => {
@@ -2057,7 +2090,11 @@ fn parse_struct_field_declaration(
                     element_type: ScalarType::Pointer,
                     length,
                 },
-                FieldType::Struct(_) | FieldType::Array { .. } => field_type,
+                FieldType::Struct(struct_name) => FieldType::StructArray {
+                    struct_name,
+                    length,
+                },
+                FieldType::Array { .. } | FieldType::StructArray { .. } => field_type,
             }
         } else {
             field_type
@@ -2134,6 +2171,16 @@ fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> Co
         } => scalar_size_for_layout(*element_type)
             .checked_mul(*length)
             .ok_or_else(|| CompileError::new("struct array field size overflow")),
+        FieldType::StructArray {
+            struct_name,
+            length,
+        } => known_structs
+            .iter()
+            .find(|layout| layout.name == *struct_name)
+            .map(|layout| layout.size)
+            .ok_or_else(|| CompileError::new(format!("unknown struct field type: {struct_name}")))?
+            .checked_mul(*length)
+            .ok_or_else(|| CompileError::new("struct array field size overflow")),
         FieldType::Struct(name) => known_structs
             .iter()
             .find(|layout| layout.name == *name)
@@ -2148,6 +2195,11 @@ fn field_type_alignment(
 ) -> CompileResult<usize> {
     match field_type {
         FieldType::Array { element_type, .. } => Ok(scalar_size_for_layout(*element_type)),
+        FieldType::StructArray { struct_name, .. } => known_structs
+            .iter()
+            .find(|layout| layout.name == *struct_name)
+            .map(|layout| layout.size.clamp(1, 8))
+            .ok_or_else(|| CompileError::new(format!("unknown struct field type: {struct_name}"))),
         _ => field_type_size(field_type, known_structs).map(|size| size.clamp(1, 8)),
     }
 }
