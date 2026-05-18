@@ -42,8 +42,12 @@ check, lower, compile, link, or run Doom yet.
 
 `compile -S` now accepts full translation units enough to skip top-level
 declarations and prototypes before attempting supported function definitions.
-The current Doom compile scan reaches actual function signatures and bodies, but
-all 62 C files still fail before object generation. Evidence is recorded in
+It also accepts `int` and `void` function return types, skips parameter-list
+tokens for unsupported parameter binding, and emits terminal returns for `void`
+functions that can fall through.
+
+The current Doom compile scan reaches actual supported function bodies, but all
+62 C files still fail before object generation. Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
 ## Playability Gate
