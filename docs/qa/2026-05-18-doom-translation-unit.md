@@ -2790,3 +2790,87 @@ FAIL am_map.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After d_main Declaration Slice
+
+`compile -S` now accepts the focused `d_main.c` translation unit. This slice
+adds the Doom declaration and expression forms reached by `d_main.c`, including
+enum typedef scalars, opaque `FILE*` locals, local pointer arrays,
+comma-expression `for` initializers/posts, block-scope extern arrays, local
+`char name[23][8]` matrices with row decay, global plain `char` arrays, byte
+loads/stores through `char*` pointer arithmetic and nested `char**` subscripts,
+and the libc macro constants `R_OK`, `SEEK_SET`, `SEEK_CUR`, `SEEK_END`, and
+`NULL`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doom_enum_typedef_scalar_slice
+compiler_accepts_local_pointer_array_slice
+compiler_accepts_for_comma_expression_slice
+compiler_accepts_block_extern_int_array_slice
+compiler_accepts_local_char_matrix_row_decay_slice
+compiler_accepts_pointer_to_pointer_subscript_address_slice
+compiler_accepts_nested_extern_struct_array_address_slice
+compiler_accepts_global_char_array_decay_slice
+compiler_accepts_opaque_file_pointer_local_slice
+compiler_emits_byte_access_for_char_pointer_dereference_slice
+compiler_emits_byte_access_for_char_pointer_nested_subscript_slice
+preprocessor_provides_doom_unistd_access_constant
+preprocessor_provides_doom_stdio_seek_constants
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/d_main.c \
+  -o /tmp/c99inrust-d_main.s
+```
+
+Focused `d_main.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779134022`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779134022.txt
+ok=15
+fail=47
+```
+
+Translation units currently reaching assembly:
+
+```text
+am_map.c
+d_items.c
+d_main.c
+doomdef.c
+doomstat.c
+i_main.c
+m_argv.c
+m_bbox.c
+m_cheat.c
+m_fixed.c
+m_random.c
+m_swap.c
+r_draw.c
+r_sky.c
+st_lib.c
+```
+
+Representative moved blocker:
+
+```text
+FAIL d_main.c
+  before this slice:
+    error: 7678:26: expected punctuator ;
+  after this slice:
+    OK d_main.c
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
