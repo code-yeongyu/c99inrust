@@ -24,12 +24,15 @@ pub enum ReturnType {
 pub enum ScalarType {
     Int,
     LongLong,
+    Double,
+    Pointer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Block(Vec<Self>),
     Declaration {
+        scalar_type: ScalarType,
         name: String,
         initializer: Option<Expr>,
     },
@@ -52,6 +55,7 @@ pub enum Statement {
         post: Option<Box<Self>>,
         body: Box<Self>,
     },
+    Expression(Expr),
     Return(Option<Expr>),
 }
 
@@ -63,6 +67,8 @@ pub enum Expr {
     },
     Identifier(String),
     Integer(i64),
+    DoubleLiteral(String),
+    StringLiteral(String),
     Unary {
         op: UnaryOp,
         expr: Box<Self>,
@@ -335,8 +341,8 @@ impl Parser<'_> {
         if self.check_punctuator("{") {
             return Ok(Statement::Block(self.block_items()?));
         }
-        if self.check_keyword(Keyword::Int) {
-            return self.declaration_statement();
+        if let Some(scalar_type) = self.declaration_type_at_current() {
+            return self.declaration_statement(scalar_type);
         }
         if self.check_keyword(Keyword::If) {
             return self.if_statement();
@@ -357,7 +363,13 @@ impl Parser<'_> {
             self.expect_punctuator(";")?;
             return Ok(Statement::Return(expr));
         }
-        self.assignment_statement(true)
+        if self.current_identifier_starts_assignment() {
+            self.assignment_statement(true)
+        } else {
+            let expr = self.expression()?;
+            self.expect_punctuator(";")?;
+            Ok(Statement::Expression(expr))
+        }
     }
 
     fn assignment_statement(&mut self, expect_semicolon: bool) -> CompileResult<Statement> {
@@ -370,8 +382,8 @@ impl Parser<'_> {
         Ok(Statement::Assignment { name, value })
     }
 
-    fn declaration_statement(&mut self) -> CompileResult<Statement> {
-        self.expect_keyword(Keyword::Int)?;
+    fn declaration_statement(&mut self, scalar_type: ScalarType) -> CompileResult<Statement> {
+        self.consume_declaration_type(scalar_type)?;
         let name = self.expect_identifier()?;
         let initializer = if self.check_punctuator("=") {
             self.advance();
@@ -380,7 +392,11 @@ impl Parser<'_> {
             None
         };
         self.expect_punctuator(";")?;
-        Ok(Statement::Declaration { name, initializer })
+        Ok(Statement::Declaration {
+            scalar_type,
+            name,
+            initializer,
+        })
     }
 
     fn if_statement(&mut self) -> CompileResult<Statement> {
@@ -417,8 +433,8 @@ impl Parser<'_> {
         let initializer = if self.check_punctuator(";") {
             self.advance();
             None
-        } else if self.check_keyword(Keyword::Int) {
-            Some(Box::new(self.declaration_statement()?))
+        } else if let Some(scalar_type) = self.declaration_type_at_current() {
+            Some(Box::new(self.declaration_statement(scalar_type)?))
         } else {
             Some(Box::new(self.assignment_statement(true)?))
         };
@@ -609,7 +625,17 @@ impl Parser<'_> {
                 TokenKind::Integer(value) => {
                     let value = *value;
                     self.advance();
+                    if self.check_punctuator(".") {
+                        self.advance();
+                        let fractional = self.expect_integer()?;
+                        return Ok(Expr::DoubleLiteral(format!("{value}.{fractional}")));
+                    }
                     Ok(Expr::Integer(value))
+                }
+                TokenKind::StringLiteral(value) => {
+                    let value = value.clone();
+                    self.advance();
+                    Ok(Expr::StringLiteral(value))
                 }
                 TokenKind::Identifier(value) => {
                     let value = value.clone();
@@ -652,6 +678,36 @@ impl Parser<'_> {
         }
     }
 
+    fn declaration_type_at_current(&self) -> Option<ScalarType> {
+        match self.peek().map(|token| &token.kind) {
+            Some(TokenKind::Keyword(Keyword::Int)) => Some(ScalarType::Int),
+            Some(TokenKind::Keyword(Keyword::Double)) => Some(ScalarType::Double),
+            Some(TokenKind::Identifier(name)) => supported_typedef_scalar(name),
+            _ => None,
+        }
+    }
+
+    fn consume_declaration_type(&mut self, expected: ScalarType) -> CompileResult<()> {
+        let Some(actual) = self.declaration_type_at_current() else {
+            return self.expected("declaration type");
+        };
+        if actual != expected {
+            return Err(CompileError::new("unexpected declaration type"));
+        }
+        self.advance();
+        Ok(())
+    }
+
+    fn current_identifier_starts_assignment(&self) -> bool {
+        matches!(
+            self.peek().map(|token| &token.kind),
+            Some(TokenKind::Identifier(_))
+        ) && self
+            .tokens
+            .get(self.index + 1)
+            .is_some_and(|token| token_is_punctuator(token, "="))
+    }
+
     fn expect_keyword(&mut self, expected: Keyword) -> CompileResult<()> {
         if self.check_keyword(expected) {
             self.advance();
@@ -671,6 +727,19 @@ impl Parser<'_> {
             return Ok(value);
         }
         self.expected("identifier")
+    }
+
+    fn expect_integer(&mut self) -> CompileResult<i64> {
+        if let Some(Token {
+            kind: TokenKind::Integer(value),
+            ..
+        }) = self.peek()
+        {
+            let value = *value;
+            self.advance();
+            return Ok(value);
+        }
+        self.expected("integer")
     }
 
     fn expect_punctuator(&mut self, expected: &str) -> CompileResult<()> {
@@ -1029,6 +1098,7 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
         return None;
     }
     let mut saw_type = false;
+    let mut saw_double = false;
     let mut saw_unsigned = false;
     let mut long_count = 0usize;
     for token in tokens {
@@ -1036,6 +1106,10 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
             TokenKind::Keyword(
                 Keyword::Const | Keyword::Restrict | Keyword::Signed | Keyword::Volatile,
             ) => {}
+            TokenKind::Keyword(Keyword::Double) => {
+                saw_type = true;
+                saw_double = true;
+            }
             TokenKind::Keyword(Keyword::Int) => saw_type = true,
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
@@ -1045,8 +1119,14 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
                 saw_type = true;
                 saw_unsigned = true;
             }
-            TokenKind::Identifier(_)
-            | TokenKind::Integer(_)
+            TokenKind::Identifier(name) => {
+                let scalar_type = supported_typedef_scalar(name)?;
+                if scalar_type != ScalarType::Int {
+                    return None;
+                }
+                saw_type = true;
+            }
+            TokenKind::Integer(_)
             | TokenKind::StringLiteral(_)
             | TokenKind::CharLiteral(_)
             | TokenKind::Punctuator(_)
@@ -1057,10 +1137,19 @@ fn supported_cast_type(tokens: &[Token]) -> Option<ScalarType> {
     if !saw_type || saw_unsigned {
         return None;
     }
-    if long_count == 0 {
+    if saw_double && long_count == 0 {
+        Some(ScalarType::Double)
+    } else if long_count == 0 {
         Some(ScalarType::Int)
     } else {
         Some(ScalarType::LongLong)
+    }
+}
+
+fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
+    match name {
+        "boolean" | "byte" | "fixed_t" => Some(ScalarType::Int),
+        _ => None,
     }
 }
 

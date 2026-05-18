@@ -531,6 +531,47 @@ fn compiler_emits_signed_long_long_cast_intermediates() {
 }
 
 #[test]
+fn compiler_accepts_fixeddiv2_double_slice() {
+    // given
+    let source = r#"typedef int fixed_t;
+void I_Error(char *message) { return; }
+fixed_t FixedDiv2(fixed_t a, fixed_t b) {
+    double c;
+    c = ((double)a) / ((double)b) * (1<<16);
+    if (c >= 2147483648.0 || c < -2147483648.0)
+        I_Error("FixedDiv: divide by zero");
+    return (fixed_t)c;
+}
+int main(void) { return FixedDiv2(3, 2) == 98304 ? 0 : 1; }"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("FixedDiv2"));
+    assert!(assembly.contains("I_Error"));
+    assert!(assembly.contains(
+        ".byte 70,105,120,101,100,68,105,118,58,32,100,105,118,105,100,101,32,98,121,32,122,101,114,111,0"
+    ));
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("\tfdiv d0, d0, d1\n"));
+            assert!(assembly.contains("\tfmul d0, d0, d1\n"));
+            assert!(assembly.contains("\tfcmp d0, d1\n"));
+        }
+        Target::X86_64AppleDarwin | Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("\tdivsd %xmm1, %xmm0\n"));
+            assert!(assembly.contains("\tmulsd %xmm1, %xmm0\n"));
+            assert!(assembly.contains("\tucomisd %xmm1, %xmm0\n"));
+        }
+    }
+}
+
+#[test]
 fn compiler_accepts_typedef_return_signatures() {
     // given
     let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return 42; } int main(void) { return 0; }";

@@ -15,14 +15,22 @@ pub struct LoweredFunction {
     pub name: String,
     pub return_type: ReturnType,
     pub parameter_count: usize,
-    pub local_count: usize,
+    pub local_slots: Vec<LocalSlot>,
     pub instructions: Vec<Instruction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalSlot {
+    pub offset: usize,
+    pub scalar_type: ScalarType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
     StoreLocal {
         slot: usize,
+        offset: usize,
+        scalar_type: ScalarType,
         value: LoweredExpr,
     },
     JumpIfZero {
@@ -35,6 +43,7 @@ pub enum Instruction {
     Label {
         label: usize,
     },
+    Eval(LoweredExpr),
     Return(Option<LoweredExpr>),
 }
 
@@ -45,7 +54,12 @@ pub enum LoweredExpr {
         args: Vec<Self>,
     },
     Integer(i64),
-    Local(usize),
+    DoubleLiteral(String),
+    StringLiteral(String),
+    Local {
+        offset: usize,
+        scalar_type: ScalarType,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Self>,
@@ -97,6 +111,12 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
             "identifier {name} is not a constant expression"
         ))),
         Expr::Integer(value) => Ok(*value),
+        Expr::DoubleLiteral(_) => Err(CompileError::new(
+            "double literal is not an integer constant expression",
+        )),
+        Expr::StringLiteral(_) => Err(CompileError::new(
+            "string literal is not an integer constant expression",
+        )),
         Expr::Unary { op, expr } => {
             let value = const_eval(expr)?;
             match op {
@@ -146,7 +166,7 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     let mut context = LoweringContext::new(function.return_type);
     for parameter in &function.parameters {
-        context.declare_local(parameter)?;
+        context.declare_local(parameter, ScalarType::Int)?;
     }
     for statement in &function.statements {
         context.lower_statement(statement)?;
@@ -164,15 +184,22 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
         name: function.name.clone(),
         return_type: function.return_type,
         parameter_count: function.parameters.len(),
-        local_count: context.local_count,
+        local_slots: context.local_slots,
         instructions: context.instructions,
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LocalBinding {
+    slot: usize,
+    scalar_type: ScalarType,
+}
+
 struct LoweringContext {
     return_type: ReturnType,
-    scopes: Vec<HashMap<String, usize>>,
-    local_count: usize,
+    scopes: Vec<HashMap<String, LocalBinding>>,
+    local_slots: Vec<LocalSlot>,
+    next_local_offset: usize,
     instructions: Vec<Instruction>,
     next_label: usize,
     has_return: bool,
@@ -183,7 +210,8 @@ impl LoweringContext {
         Self {
             return_type,
             scopes: vec![HashMap::new()],
-            local_count: 0,
+            local_slots: Vec::new(),
+            next_local_offset: 0,
             instructions: Vec::new(),
             next_label: 0,
             has_return: false,
@@ -193,24 +221,37 @@ impl LoweringContext {
     fn lower_statement(&mut self, statement: &Statement) -> CompileResult<()> {
         match statement {
             Statement::Block(statements) => self.lower_block(statements),
-            Statement::Declaration { name, initializer } => {
-                let slot = self.declare_local(name)?;
-                let value = initializer
-                    .as_ref()
-                    .map_or(Ok(LoweredExpr::Integer(0)), |expr| self.lower_expr(expr))?;
-                self.instructions
-                    .push(Instruction::StoreLocal { slot, value });
+            Statement::Declaration {
+                scalar_type,
+                name,
+                initializer,
+            } => {
+                let slot = self.declare_local(name, *scalar_type)?;
+                let value = initializer.as_ref().map_or_else(
+                    || Ok(zero_expr_for(*scalar_type)),
+                    |expr| self.lower_expr(expr),
+                )?;
+                self.instructions.push(Instruction::StoreLocal {
+                    slot,
+                    offset: self.local_offset(slot)?,
+                    scalar_type: *scalar_type,
+                    value,
+                });
                 Ok(())
             }
             Statement::Assignment { name, value } => {
-                let Some(slot) = self.local_slot(name) else {
+                let Some(binding) = self.local_binding(name) else {
                     return Err(CompileError::new(format!(
                         "assignment to undeclared local: {name}"
                     )));
                 };
                 let value = self.lower_expr(value)?;
-                self.instructions
-                    .push(Instruction::StoreLocal { slot, value });
+                self.instructions.push(Instruction::StoreLocal {
+                    slot: binding.slot,
+                    offset: self.local_offset(binding.slot)?,
+                    scalar_type: binding.scalar_type,
+                    value,
+                });
                 Ok(())
             }
             Statement::If {
@@ -230,6 +271,11 @@ impl LoweringContext {
                 post.as_deref(),
                 body,
             ),
+            Statement::Expression(expr) => {
+                let expr = self.lower_expr(expr)?;
+                self.instructions.push(Instruction::Eval(expr));
+                Ok(())
+            }
             Statement::Return(expr) => {
                 match (self.return_type, expr) {
                     (ReturnType::Int, Some(expr)) => {
@@ -345,7 +391,7 @@ impl LoweringContext {
         self.pop_scope()
     }
 
-    fn declare_local(&mut self, name: &str) -> CompileResult<usize> {
+    fn declare_local(&mut self, name: &str, scalar_type: ScalarType) -> CompileResult<usize> {
         let Some(scope) = self.scopes.last_mut() else {
             return Err(CompileError::new("internal error: no local scope"));
         };
@@ -354,9 +400,14 @@ impl LoweringContext {
                 "duplicate local declaration: {name}"
             )));
         }
-        let slot = self.local_count;
-        self.local_count += 1;
-        scope.insert(name.to_string(), slot);
+        let slot = self.local_slots.len();
+        let offset = align_to(self.next_local_offset, scalar_size(scalar_type));
+        self.next_local_offset = offset + scalar_size(scalar_type);
+        self.local_slots.push(LocalSlot {
+            offset,
+            scalar_type,
+        });
+        scope.insert(name.to_string(), LocalBinding { slot, scalar_type });
         Ok(slot)
     }
 
@@ -373,11 +424,18 @@ impl LoweringContext {
         label
     }
 
-    fn local_slot(&self, name: &str) -> Option<usize> {
+    fn local_binding(&self, name: &str) -> Option<LocalBinding> {
         self.scopes
             .iter()
             .rev()
             .find_map(|scope| scope.get(name).copied())
+    }
+
+    fn local_offset(&self, slot: usize) -> CompileResult<usize> {
+        self.local_slots
+            .get(slot)
+            .map(|local_slot| local_slot.offset)
+            .ok_or_else(|| CompileError::new("internal error: missing local slot"))
     }
 
     fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
@@ -390,12 +448,17 @@ impl LoweringContext {
                     .collect::<CompileResult<Vec<_>>>()?,
             }),
             Expr::Identifier(name) => {
-                let Some(slot) = self.local_slot(name) else {
+                let Some(binding) = self.local_binding(name) else {
                     return Err(CompileError::new(format!("unknown local: {name}")));
                 };
-                Ok(LoweredExpr::Local(slot))
+                Ok(LoweredExpr::Local {
+                    offset: self.local_offset(binding.slot)?,
+                    scalar_type: binding.scalar_type,
+                })
             }
             Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
+            Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
+            Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
             Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
@@ -428,6 +491,32 @@ fn cast_const_value(target: ScalarType, value: i64) -> CompileResult<i64> {
             .map(i64::from)
             .map_err(|_| CompileError::new("integer cast result does not fit i32")),
         ScalarType::LongLong => Ok(value),
+        ScalarType::Double | ScalarType::Pointer => Err(CompileError::new(
+            "non-integer cast is not an integer constant expression",
+        )),
+    }
+}
+
+fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
+    match scalar_type {
+        ScalarType::Double => LoweredExpr::DoubleLiteral("0.0".to_string()),
+        ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer => LoweredExpr::Integer(0),
+    }
+}
+
+const fn scalar_size(scalar_type: ScalarType) -> usize {
+    match scalar_type {
+        ScalarType::Int => 4,
+        ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+    }
+}
+
+const fn align_to(value: usize, alignment: usize) -> usize {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        value
+    } else {
+        value + (alignment - remainder)
     }
 }
 
@@ -481,7 +570,7 @@ fn eval_binary(op: BinaryOp, left: i64, right: i64) -> CompileResult<i64> {
 fn constant_return_functions(functions: &[LoweredFunction]) -> HashMap<String, i64> {
     let mut constants = HashMap::new();
     for function in functions {
-        if function.local_count == 0
+        if function.local_slots.is_empty()
             && function.return_type == ReturnType::Int
             && let [Instruction::Return(Some(LoweredExpr::Integer(value)))] =
                 function.instructions.as_slice()
@@ -509,6 +598,7 @@ fn inline_constant_calls_in_instruction(
         | Instruction::JumpIfZero {
             condition: value, ..
         }
+        | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => inline_constant_calls_in_expr(value, constants),
         Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => {}
     }
@@ -543,7 +633,10 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
             inline_constant_calls_in_expr(left, constants);
             inline_constant_calls_in_expr(right, constants);
         }
-        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => {}
+        LoweredExpr::Integer(_)
+        | LoweredExpr::DoubleLiteral(_)
+        | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Local { .. } => {}
     }
 }
 

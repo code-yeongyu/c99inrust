@@ -21,6 +21,7 @@ pub enum Target {
 enum ValueWidth {
     I32,
     I64,
+    F64,
 }
 
 const TEMPORARY_BYTES: usize = 8;
@@ -42,23 +43,28 @@ struct ConditionalExpr<'a> {
 const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
     match scalar_type {
         ScalarType::Int => ValueWidth::I32,
-        ScalarType::LongLong => ValueWidth::I64,
+        ScalarType::LongLong | ScalarType::Pointer => ValueWidth::I64,
+        ScalarType::Double => ValueWidth::F64,
     }
 }
 
 fn expr_width(expr: &LoweredExpr) -> ValueWidth {
     match expr {
         LoweredExpr::Cast { target, .. } => scalar_width(*target),
+        LoweredExpr::DoubleLiteral(_) => ValueWidth::F64,
+        LoweredExpr::StringLiteral(_) => ValueWidth::I64,
+        LoweredExpr::Local { scalar_type, .. } => scalar_width(*scalar_type),
+        LoweredExpr::Unary { op, expr } => match op {
+            UnaryOp::LogicalNot => ValueWidth::I32,
+            UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot => expr_width(expr),
+        },
         LoweredExpr::Conditional {
             then_expr,
             else_expr,
             ..
         } => expr_width(then_expr).max(expr_width(else_expr)),
         LoweredExpr::Binary { op, left, right } => binary_result_width(*op, left, right),
-        LoweredExpr::Call { .. }
-        | LoweredExpr::Integer(_)
-        | LoweredExpr::Local(_)
-        | LoweredExpr::Unary { .. } => ValueWidth::I32,
+        LoweredExpr::Call { .. } | LoweredExpr::Integer(_) => ValueWidth::I32,
     }
 }
 
@@ -197,18 +203,25 @@ fn emit_aarch64_function(
         frame.stack_bytes,
         assembly,
     )?;
-    emit_aarch64_parameter_stores(function.parameter_count, assembly)?;
+    emit_aarch64_parameter_stores(function, assembly)?;
     for instruction in &function.instructions {
         match instruction {
-            Instruction::StoreLocal { slot, value } => {
+            Instruction::StoreLocal {
+                slot,
+                offset,
+                scalar_type,
+                value,
+            } => {
                 emit_aarch64_store_local(
                     *slot,
+                    *offset,
+                    *scalar_type,
                     value,
                     frame.temporary_base,
                     &mut labels,
                     assembly,
                 )?;
-                write_assembly!(assembly, "\tstr w0, [sp, #{}]\n", local_offset(*slot))?;
+                emit_aarch64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
             }
             Instruction::JumpIfZero { condition, label } => {
                 let target_label = branch_label(&function.name, *label, target);
@@ -233,6 +246,9 @@ fn emit_aarch64_function(
                     "{}:\n",
                     branch_label(&function.name, *label, target)
                 )?;
+            }
+            Instruction::Eval(expr) => {
+                emit_aarch64_expr(expr, frame.temporary_base, 0, &mut labels, assembly)?;
             }
             Instruction::Return(expr) => {
                 emit_aarch64_return(
@@ -278,7 +294,7 @@ impl Aarch64Frame {
             .map(instruction_depth)
             .max()
             .unwrap_or(0);
-        let local_bytes = function.local_count * 4;
+        let local_bytes = local_stack_bytes(function);
         let temporary_base = align_to(local_bytes, TEMPORARY_BYTES);
         let call_frame_bytes = if function_uses_call(function) { 8 } else { 0 };
         let preserved_temp_bytes = if function_uses_aarch64_preserved_temp(function) {
@@ -345,7 +361,7 @@ fn emit_x86_64_function(
         .map(instruction_depth)
         .max()
         .unwrap_or(0);
-    let local_bytes = function.local_count * 4;
+    let local_bytes = local_stack_bytes(function);
     let temporary_base = align_to(local_bytes, TEMPORARY_BYTES);
     let stack_bytes = align_to(temporary_base + (temporary_count * TEMPORARY_BYTES), 16);
     let mut labels = LabelAllocator::new(function, target);
@@ -356,12 +372,17 @@ fn emit_x86_64_function(
     if stack_bytes > 0 {
         write_assembly!(assembly, "\tsubq ${stack_bytes}, %rsp\n")?;
     }
-    emit_x86_64_parameter_stores(function.parameter_count, assembly)?;
+    emit_x86_64_parameter_stores(function, assembly)?;
     for instruction in &function.instructions {
         match instruction {
-            Instruction::StoreLocal { slot, value } => {
+            Instruction::StoreLocal {
+                slot: _,
+                offset,
+                scalar_type,
+                value,
+            } => {
                 emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
-                write_assembly!(assembly, "\tmovl %eax, {}(%rbp)\n", x86_local_offset(*slot))?;
+                emit_x86_64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
             }
             Instruction::JumpIfZero { condition, label } => {
                 emit_x86_64_expr(condition, temporary_base, 0, target, &mut labels, assembly)?;
@@ -386,6 +407,9 @@ fn emit_x86_64_function(
                     branch_label(&function.name, *label, target)
                 )?;
             }
+            Instruction::Eval(expr) => {
+                emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
+            }
             Instruction::Return(expr) => {
                 if let Some(expr) = expr {
                     emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
@@ -399,36 +423,36 @@ fn emit_x86_64_function(
 }
 
 fn emit_aarch64_parameter_stores(
-    parameter_count: usize,
+    function: &LoweredFunction,
     assembly: &mut String,
 ) -> CompileResult<()> {
     const REGISTERS: [&str; 8] = ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7"];
-    let Some(registers) = REGISTERS.get(..parameter_count) else {
+    let Some(registers) = REGISTERS.get(..function.parameter_count) else {
         return Err(CompileError::new("too many function parameters"));
     };
     for (slot, register) in registers.iter().enumerate() {
         write_assembly!(
             assembly,
             "\tstr {register}, [sp, #{}]\n",
-            local_offset(slot)
+            local_offset(function, slot)?
         )?;
     }
     Ok(())
 }
 
 fn emit_x86_64_parameter_stores(
-    parameter_count: usize,
+    function: &LoweredFunction,
     assembly: &mut String,
 ) -> CompileResult<()> {
     const REGISTERS: [&str; 6] = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
-    let Some(registers) = REGISTERS.get(..parameter_count) else {
+    let Some(registers) = REGISTERS.get(..function.parameter_count) else {
         return Err(CompileError::new("too many function parameters"));
     };
     for (slot, register) in registers.iter().enumerate() {
         write_assembly!(
             assembly,
             "\tmovl {register}, {}(%rbp)\n",
-            x86_local_offset(slot)
+            x86_stack_offset(local_offset(function, slot)?, ValueWidth::I32)
         )?;
     }
     Ok(())
@@ -477,18 +501,35 @@ fn emit_aarch64_expr_natural(
             emit_aarch64_call(callee, args, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::Integer(value) => emit_aarch64_i32_to_register(*value, "w0", assembly),
-        LoweredExpr::Local(slot) => {
-            write_assembly!(assembly, "\tldr w0, [sp, #{}]\n", local_offset(*slot))?;
-            Ok(())
+        LoweredExpr::DoubleLiteral(value) => {
+            emit_aarch64_load_double_literal(value, labels, assembly)
         }
+        LoweredExpr::StringLiteral(value) => {
+            emit_aarch64_load_string_address(value, labels, assembly)
+        }
+        LoweredExpr::Local {
+            offset,
+            scalar_type,
+        } => emit_aarch64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
         LoweredExpr::Unary { op, expr } => {
             emit_aarch64_expr(expr, temporary_base, depth, labels, assembly)?;
+            let width = expr_width(expr);
             match op {
                 UnaryOp::Plus => {}
-                UnaryOp::Minus => assembly.push_str("\tneg w0, w0\n"),
-                UnaryOp::BitNot => assembly.push_str("\tmvn w0, w0\n"),
+                UnaryOp::Minus => match width {
+                    ValueWidth::I32 => assembly.push_str("\tneg w0, w0\n"),
+                    ValueWidth::I64 => assembly.push_str("\tneg x0, x0\n"),
+                    ValueWidth::F64 => assembly.push_str("\tfneg d0, d0\n"),
+                },
+                UnaryOp::BitNot => match width {
+                    ValueWidth::I32 => assembly.push_str("\tmvn w0, w0\n"),
+                    ValueWidth::I64 => assembly.push_str("\tmvn x0, x0\n"),
+                    ValueWidth::F64 => {
+                        return Err(CompileError::new("unsupported double bitwise operator"));
+                    }
+                },
                 UnaryOp::LogicalNot => {
-                    assembly.push_str("\tcmp w0, #0\n");
+                    emit_aarch64_compare_result_to_zero(width, assembly)?;
                     assembly.push_str("\tcset w0, eq\n");
                 }
             }
@@ -603,8 +644,13 @@ fn emit_aarch64_width_adjustment(
     target_width: ValueWidth,
     assembly: &mut String,
 ) {
-    if actual_width == ValueWidth::I32 && target_width == ValueWidth::I64 {
-        assembly.push_str("\tsxtw x0, w0\n");
+    match (actual_width, target_width) {
+        (ValueWidth::I32, ValueWidth::I64) => assembly.push_str("\tsxtw x0, w0\n"),
+        (ValueWidth::I32, ValueWidth::F64) => assembly.push_str("\tscvtf d0, w0\n"),
+        (ValueWidth::I64, ValueWidth::F64) => assembly.push_str("\tscvtf d0, x0\n"),
+        (ValueWidth::F64, ValueWidth::I32) => assembly.push_str("\tfcvtzs w0, d0\n"),
+        (ValueWidth::F64, ValueWidth::I64) => assembly.push_str("\tfcvtzs x0, d0\n"),
+        _ => {}
     }
 }
 
@@ -623,19 +669,13 @@ fn emit_aarch64_call(
     let arg_depth = depth + args.len();
     for (index, arg) in args.iter().enumerate() {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
-        emit_aarch64_expr_with_width(
-            arg,
-            ValueWidth::I32,
-            temporary_base,
-            arg_depth,
-            labels,
-            assembly,
-        )?;
-        emit_aarch64_store_temporary(ValueWidth::I32, offset, assembly)?;
+        let width = expr_width(arg);
+        emit_aarch64_expr_with_width(arg, width, temporary_base, arg_depth, labels, assembly)?;
+        emit_aarch64_store_temporary(width, offset, assembly)?;
     }
-    for (index, register) in registers.iter().enumerate() {
+    for (index, (arg, register)) in args.iter().zip(registers.iter()).enumerate() {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
-        emit_aarch64_load_temporary_to_register(ValueWidth::I32, offset, register, assembly)?;
+        emit_aarch64_load_temporary_to_register(expr_width(arg), offset, register, assembly)?;
     }
     write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))
 }
@@ -680,6 +720,9 @@ fn emit_aarch64_move_result_to_register(
     width: ValueWidth,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if width == ValueWidth::F64 {
+        return write_assembly!(assembly, "\tfmov d{register}, d0\n");
+    }
     let prefix = aarch64_register_prefix(width);
     write_assembly!(assembly, "\tmov {prefix}{register}, {prefix}0\n")
 }
@@ -689,11 +732,23 @@ fn emit_aarch64_move_register_to_result(
     width: ValueWidth,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if width == ValueWidth::F64 {
+        return write_assembly!(assembly, "\tfmov d0, d{register}\n");
+    }
     let prefix = aarch64_register_prefix(width);
     write_assembly!(assembly, "\tmov {prefix}0, {prefix}{register}\n")
 }
 
 fn emit_aarch64_store_temporary(
+    width: ValueWidth,
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let register = aarch64_result_register(width);
+    write_assembly!(assembly, "\tstr {register}, [sp, #{offset}]\n")
+}
+
+fn emit_aarch64_store_result(
     width: ValueWidth,
     offset: usize,
     assembly: &mut String,
@@ -725,8 +780,16 @@ fn emit_aarch64_compare_result_to_zero(
     width: ValueWidth,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let register = aarch64_result_register(width);
-    write_assembly!(assembly, "\tcmp {register}, #0\n")
+    match width {
+        ValueWidth::I32 | ValueWidth::I64 => {
+            let register = aarch64_result_register(width);
+            write_assembly!(assembly, "\tcmp {register}, #0\n")
+        }
+        ValueWidth::F64 => {
+            assembly.push_str("\tfcmp d0, #0.0\n");
+            Ok(())
+        }
+    }
 }
 
 fn emit_aarch64_binary_op(
@@ -737,8 +800,10 @@ fn emit_aarch64_binary_op(
     match (op, width) {
         (BinaryOp::Mul, ValueWidth::I32) => assembly.push_str("\tmul w0, w0, w1\n"),
         (BinaryOp::Mul, ValueWidth::I64) => assembly.push_str("\tmul x0, x0, x1\n"),
+        (BinaryOp::Mul, ValueWidth::F64) => assembly.push_str("\tfmul d0, d0, d1\n"),
         (BinaryOp::Div, ValueWidth::I32) => assembly.push_str("\tsdiv w0, w0, w1\n"),
         (BinaryOp::Div, ValueWidth::I64) => assembly.push_str("\tsdiv x0, x0, x1\n"),
+        (BinaryOp::Div, ValueWidth::F64) => assembly.push_str("\tfdiv d0, d0, d1\n"),
         (BinaryOp::Mod, ValueWidth::I32) => {
             assembly.push_str("\tsdiv w2, w0, w1\n");
             assembly.push_str("\tmsub w0, w2, w1, w0\n");
@@ -749,8 +814,10 @@ fn emit_aarch64_binary_op(
         }
         (BinaryOp::Add, ValueWidth::I32) => assembly.push_str("\tadd w0, w0, w1\n"),
         (BinaryOp::Add, ValueWidth::I64) => assembly.push_str("\tadd x0, x0, x1\n"),
+        (BinaryOp::Add, ValueWidth::F64) => assembly.push_str("\tfadd d0, d0, d1\n"),
         (BinaryOp::Sub, ValueWidth::I32) => assembly.push_str("\tsub w0, w0, w1\n"),
         (BinaryOp::Sub, ValueWidth::I64) => assembly.push_str("\tsub x0, x0, x1\n"),
+        (BinaryOp::Sub, ValueWidth::F64) => assembly.push_str("\tfsub d0, d0, d1\n"),
         (BinaryOp::ShiftLeft, ValueWidth::I32) => assembly.push_str("\tlsl w0, w0, w1\n"),
         (BinaryOp::ShiftLeft, ValueWidth::I64) => assembly.push_str("\tlsl x0, x0, x1\n"),
         (BinaryOp::ShiftRight, ValueWidth::I32) => assembly.push_str("\tasr w0, w0, w1\n"),
@@ -767,15 +834,47 @@ fn emit_aarch64_binary_op(
         (BinaryOp::BitXor, ValueWidth::I64) => assembly.push_str("\teor x0, x0, x1\n"),
         (BinaryOp::BitOr, ValueWidth::I32) => assembly.push_str("\torr w0, w0, w1\n"),
         (BinaryOp::BitOr, ValueWidth::I64) => assembly.push_str("\torr x0, x0, x1\n"),
+        (
+            BinaryOp::Mod
+            | BinaryOp::ShiftLeft
+            | BinaryOp::ShiftRight
+            | BinaryOp::BitAnd
+            | BinaryOp::BitXor
+            | BinaryOp::BitOr,
+            ValueWidth::F64,
+        ) => return Err(CompileError::new("unsupported double operator")),
         (BinaryOp::LogicalAnd | BinaryOp::LogicalOr, _) => {}
     }
     Ok(())
+}
+
+fn emit_aarch64_load_double_literal(
+    value: &str,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = labels.fresh();
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tldr d0, [x16, {label}@PAGEOFF]\n")?;
+    emit_double_literal_data(&label, double_literal_bits(value)?, labels.target, assembly)
+}
+
+fn emit_aarch64_load_string_address(
+    value: &str,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = labels.fresh();
+    write_assembly!(assembly, "\tadrp x0, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tadd x0, x0, {label}@PAGEOFF\n")?;
+    emit_string_literal_data(&label, value, labels.target, assembly)
 }
 
 const fn aarch64_register_prefix(width: ValueWidth) -> &'static str {
     match width {
         ValueWidth::I32 => "w",
         ValueWidth::I64 => "x",
+        ValueWidth::F64 => "d",
     }
 }
 
@@ -783,23 +882,34 @@ const fn aarch64_result_register(width: ValueWidth) -> &'static str {
     match width {
         ValueWidth::I32 => "w0",
         ValueWidth::I64 => "x0",
+        ValueWidth::F64 => "d0",
     }
 }
 
 fn emit_aarch64_store_local(
-    slot: usize,
+    _slot: usize,
+    offset: usize,
+    scalar_type: ScalarType,
     value: &LoweredExpr,
     temporary_base: usize,
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if scalar_type != ScalarType::Int {
+        return emit_aarch64_expr(value, temporary_base, 0, labels, assembly);
+    }
     if let LoweredExpr::Binary { op, left, right } = value
-        && let (LoweredExpr::Local(local_slot), LoweredExpr::Integer(value)) =
-            (left.as_ref(), right.as_ref())
-        && *local_slot == slot
+        && let (
+            LoweredExpr::Local {
+                offset: local_offset,
+                ..
+            },
+            LoweredExpr::Integer(value),
+        ) = (left.as_ref(), right.as_ref())
+        && *local_offset == offset
         && let Some((instruction, immediate)) = aarch64_update_immediate(*op, *value)
     {
-        write_assembly!(assembly, "\tldr w0, [sp, #{}]\n", local_offset(slot))?;
+        write_assembly!(assembly, "\tldr w0, [sp, #{offset}]\n")?;
         write_assembly!(assembly, "\t{instruction} w0, w0, #{immediate}\n")?;
         return Ok(());
     }
@@ -875,8 +985,7 @@ fn emit_aarch64_compare(
     emit_aarch64_expr_with_width(right, width, temporary_base, 1, labels, assembly)?;
     emit_aarch64_move_result_to_register("1", width, assembly)?;
     emit_aarch64_load_temporary(width, temporary_base, assembly)?;
-    let prefix = aarch64_register_prefix(width);
-    write_assembly!(assembly, "\tcmp {prefix}0, {prefix}1\n")?;
+    emit_aarch64_compare_result_to_rhs(width, assembly)?;
     Ok(())
 }
 
@@ -938,18 +1047,35 @@ fn emit_x86_64_expr_natural(
             write_assembly!(assembly, "\tmovl ${value}, %eax\n")?;
             Ok(())
         }
-        LoweredExpr::Local(slot) => {
-            write_assembly!(assembly, "\tmovl {}(%rbp), %eax\n", x86_local_offset(*slot))?;
-            Ok(())
+        LoweredExpr::DoubleLiteral(value) => {
+            emit_x86_64_load_double_literal(value, target, labels, assembly)
         }
+        LoweredExpr::StringLiteral(value) => {
+            emit_x86_64_load_string_address(value, target, labels, assembly)
+        }
+        LoweredExpr::Local {
+            offset,
+            scalar_type,
+        } => emit_x86_64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
         LoweredExpr::Unary { op, expr } => {
             emit_x86_64_expr(expr, temporary_base, depth, target, labels, assembly)?;
+            let width = expr_width(expr);
             match op {
                 UnaryOp::Plus => {}
-                UnaryOp::Minus => assembly.push_str("\tnegl %eax\n"),
-                UnaryOp::BitNot => assembly.push_str("\tnotl %eax\n"),
+                UnaryOp::Minus => match width {
+                    ValueWidth::I32 => assembly.push_str("\tnegl %eax\n"),
+                    ValueWidth::I64 => assembly.push_str("\tnegq %rax\n"),
+                    ValueWidth::F64 => emit_x86_64_negate_f64(target, labels, assembly)?,
+                },
+                UnaryOp::BitNot => match width {
+                    ValueWidth::I32 => assembly.push_str("\tnotl %eax\n"),
+                    ValueWidth::I64 => assembly.push_str("\tnotq %rax\n"),
+                    ValueWidth::F64 => {
+                        return Err(CompileError::new("unsupported double bitwise operator"));
+                    }
+                },
                 UnaryOp::LogicalNot => {
-                    assembly.push_str("\tcmpl $0, %eax\n");
+                    emit_x86_64_compare_result_to_zero(width, assembly);
                     assembly.push_str("\tsete %al\n");
                     assembly.push_str("\tmovzbl %al, %eax\n");
                 }
@@ -1062,8 +1188,13 @@ fn emit_x86_64_width_adjustment(
     target_width: ValueWidth,
     assembly: &mut String,
 ) {
-    if actual_width == ValueWidth::I32 && target_width == ValueWidth::I64 {
-        assembly.push_str("\tcltq\n");
+    match (actual_width, target_width) {
+        (ValueWidth::I32, ValueWidth::I64) => assembly.push_str("\tcltq\n"),
+        (ValueWidth::I32, ValueWidth::F64) => assembly.push_str("\tcvtsi2sdl %eax, %xmm0\n"),
+        (ValueWidth::I64, ValueWidth::F64) => assembly.push_str("\tcvtsi2sdq %rax, %xmm0\n"),
+        (ValueWidth::F64, ValueWidth::I32) => assembly.push_str("\tcvttsd2sil %xmm0, %eax\n"),
+        (ValueWidth::F64, ValueWidth::I64) => assembly.push_str("\tcvttsd2siq %xmm0, %rax\n"),
+        _ => {}
     }
 }
 
@@ -1076,27 +1207,30 @@ fn emit_x86_64_call(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    const REGISTERS: [&str; 6] = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
-    let Some(registers) = REGISTERS.get(..args.len()) else {
+    const MAX_REGISTER_ARGS: usize = 6;
+    if args.len() > MAX_REGISTER_ARGS {
         return Err(CompileError::new("too many function call arguments"));
-    };
+    }
     let arg_depth = depth + args.len();
     for (index, arg) in args.iter().enumerate() {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        let width = expr_width(arg);
         emit_x86_64_expr_with_width(
             arg,
-            ValueWidth::I32,
+            width,
             temporary_base,
             arg_depth,
             target,
             labels,
             assembly,
         )?;
-        emit_x86_64_store_temporary(ValueWidth::I32, offset, assembly)?;
+        emit_x86_64_store_temporary(width, offset, assembly)?;
     }
-    for (index, register) in registers.iter().enumerate() {
+    for (index, arg) in args.iter().enumerate() {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
-        emit_x86_64_load_temporary_to_register(ValueWidth::I32, offset, register, assembly)?;
+        let width = expr_width(arg);
+        let register = x86_64_argument_register(index, width)?;
+        emit_x86_64_load_temporary_to_register(width, offset, register, assembly)?;
     }
     write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))
 }
@@ -1160,6 +1294,20 @@ fn emit_x86_64_store_temporary(
     )
 }
 
+fn emit_x86_64_store_result(
+    width: ValueWidth,
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let suffix = x86_64_instruction_suffix(width);
+    let register = x86_64_result_register(width);
+    write_assembly!(
+        assembly,
+        "\tmov{suffix} {register}, {}(%rbp)\n",
+        x86_stack_offset(offset, width)
+    )
+}
+
 fn emit_x86_64_load_temporary(
     width: ValueWidth,
     offset: usize,
@@ -1192,6 +1340,7 @@ fn emit_x86_64_move_result_to_rhs(width: ValueWidth, assembly: &mut String) {
     match width {
         ValueWidth::I32 => assembly.push_str("\tmovl %eax, %ecx\n"),
         ValueWidth::I64 => assembly.push_str("\tmovq %rax, %rcx\n"),
+        ValueWidth::F64 => assembly.push_str("\tmovsd %xmm0, %xmm1\n"),
     }
 }
 
@@ -1199,6 +1348,10 @@ fn emit_x86_64_compare_result_to_zero(width: ValueWidth, assembly: &mut String) 
     match width {
         ValueWidth::I32 => assembly.push_str("\tcmpl $0, %eax\n"),
         ValueWidth::I64 => assembly.push_str("\tcmpq $0, %rax\n"),
+        ValueWidth::F64 => {
+            assembly.push_str("\txorpd %xmm1, %xmm1\n");
+            assembly.push_str("\tucomisd %xmm1, %xmm0\n");
+        }
     }
 }
 
@@ -1210,6 +1363,7 @@ fn emit_x86_64_binary_op(
     match (op, width) {
         (BinaryOp::Mul, ValueWidth::I32) => assembly.push_str("\timull %ecx, %eax\n"),
         (BinaryOp::Mul, ValueWidth::I64) => assembly.push_str("\timulq %rcx, %rax\n"),
+        (BinaryOp::Mul, ValueWidth::F64) => assembly.push_str("\tmulsd %xmm1, %xmm0\n"),
         (BinaryOp::Div, ValueWidth::I32) => {
             assembly.push_str("\tcltd\n");
             assembly.push_str("\tidivl %ecx\n");
@@ -1218,6 +1372,7 @@ fn emit_x86_64_binary_op(
             assembly.push_str("\tcqto\n");
             assembly.push_str("\tidivq %rcx\n");
         }
+        (BinaryOp::Div, ValueWidth::F64) => assembly.push_str("\tdivsd %xmm1, %xmm0\n"),
         (BinaryOp::Mod, ValueWidth::I32) => {
             assembly.push_str("\tcltd\n");
             assembly.push_str("\tidivl %ecx\n");
@@ -1230,8 +1385,10 @@ fn emit_x86_64_binary_op(
         }
         (BinaryOp::Add, ValueWidth::I32) => assembly.push_str("\taddl %ecx, %eax\n"),
         (BinaryOp::Add, ValueWidth::I64) => assembly.push_str("\taddq %rcx, %rax\n"),
+        (BinaryOp::Add, ValueWidth::F64) => assembly.push_str("\taddsd %xmm1, %xmm0\n"),
         (BinaryOp::Sub, ValueWidth::I32) => assembly.push_str("\tsubl %ecx, %eax\n"),
         (BinaryOp::Sub, ValueWidth::I64) => assembly.push_str("\tsubq %rcx, %rax\n"),
+        (BinaryOp::Sub, ValueWidth::F64) => assembly.push_str("\tsubsd %xmm1, %xmm0\n"),
         (BinaryOp::ShiftLeft, ValueWidth::I32) => assembly.push_str("\tsall %cl, %eax\n"),
         (BinaryOp::ShiftLeft, ValueWidth::I64) => assembly.push_str("\tsalq %cl, %rax\n"),
         (BinaryOp::ShiftRight, ValueWidth::I32) => assembly.push_str("\tsarl %cl, %eax\n"),
@@ -1248,15 +1405,74 @@ fn emit_x86_64_binary_op(
         (BinaryOp::BitXor, ValueWidth::I64) => assembly.push_str("\txorq %rcx, %rax\n"),
         (BinaryOp::BitOr, ValueWidth::I32) => assembly.push_str("\torl %ecx, %eax\n"),
         (BinaryOp::BitOr, ValueWidth::I64) => assembly.push_str("\torq %rcx, %rax\n"),
+        (
+            BinaryOp::Mod
+            | BinaryOp::ShiftLeft
+            | BinaryOp::ShiftRight
+            | BinaryOp::BitAnd
+            | BinaryOp::BitXor
+            | BinaryOp::BitOr,
+            ValueWidth::F64,
+        ) => return Err(CompileError::new("unsupported double operator")),
         (BinaryOp::LogicalAnd | BinaryOp::LogicalOr, _) => {}
     }
     Ok(())
+}
+
+fn emit_x86_64_load_double_literal(
+    value: &str,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = labels.fresh();
+    write_assembly!(assembly, "\tmovsd {label}(%rip), %xmm0\n")?;
+    emit_double_literal_data(&label, double_literal_bits(value)?, target, assembly)
+}
+
+fn emit_x86_64_load_string_address(
+    value: &str,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = labels.fresh();
+    write_assembly!(assembly, "\tleaq {label}(%rip), %rax\n")?;
+    emit_string_literal_data(&label, value, target, assembly)
+}
+
+fn emit_x86_64_negate_f64(
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = labels.fresh();
+    write_assembly!(assembly, "\txorpd {label}(%rip), %xmm0\n")?;
+    emit_double_literal_data(&label, 0x8000_0000_0000_0000, target, assembly)
+}
+
+fn x86_64_argument_register(index: usize, width: ValueWidth) -> CompileResult<&'static str> {
+    const I32_REGISTERS: [&str; 6] = ["%edi", "%esi", "%edx", "%ecx", "%r8d", "%r9d"];
+    const I64_REGISTERS: [&str; 6] = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+    const F64_REGISTERS: [&str; 8] = [
+        "%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7",
+    ];
+    let registers = match width {
+        ValueWidth::I32 => I32_REGISTERS.as_slice(),
+        ValueWidth::I64 => I64_REGISTERS.as_slice(),
+        ValueWidth::F64 => F64_REGISTERS.as_slice(),
+    };
+    registers
+        .get(index)
+        .copied()
+        .ok_or_else(|| CompileError::new("too many function call arguments"))
 }
 
 const fn x86_64_instruction_suffix(width: ValueWidth) -> &'static str {
     match width {
         ValueWidth::I32 => "l",
         ValueWidth::I64 => "q",
+        ValueWidth::F64 => "sd",
     }
 }
 
@@ -1264,6 +1480,7 @@ const fn x86_64_result_register(width: ValueWidth) -> &'static str {
     match width {
         ValueWidth::I32 => "%eax",
         ValueWidth::I64 => "%rax",
+        ValueWidth::F64 => "%xmm0",
     }
 }
 
@@ -1370,8 +1587,7 @@ fn emit_aarch64_comparison(
     width: ValueWidth,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let prefix = aarch64_register_prefix(width);
-    write_assembly!(assembly, "\tcmp {prefix}0, {prefix}1\n")?;
+    emit_aarch64_compare_result_to_rhs(width, assembly)?;
     write_assembly!(assembly, "\tcset w0, {condition}\n")
 }
 
@@ -1383,10 +1599,41 @@ fn emit_x86_64_comparison(
     match width {
         ValueWidth::I32 => assembly.push_str("\tcmpl %ecx, %eax\n"),
         ValueWidth::I64 => assembly.push_str("\tcmpq %rcx, %rax\n"),
+        ValueWidth::F64 => {
+            let condition = match instruction {
+                "setl" => "setb",
+                "setle" => "setbe",
+                "setg" => "seta",
+                "setge" => "setae",
+                "sete" => "sete",
+                "setne" => "setne",
+                _ => return Err(CompileError::new("unsupported comparison operator")),
+            };
+            assembly.push_str("\tucomisd %xmm1, %xmm0\n");
+            write_assembly!(assembly, "\t{condition} %al\n")?;
+            assembly.push_str("\tmovzbl %al, %eax\n");
+            return Ok(());
+        }
     }
     write_assembly!(assembly, "\t{instruction} %al\n")?;
     assembly.push_str("\tmovzbl %al, %eax\n");
     Ok(())
+}
+
+fn emit_aarch64_compare_result_to_rhs(
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match width {
+        ValueWidth::I32 | ValueWidth::I64 => {
+            let prefix = aarch64_register_prefix(width);
+            write_assembly!(assembly, "\tcmp {prefix}0, {prefix}1\n")
+        }
+        ValueWidth::F64 => {
+            assembly.push_str("\tfcmp d0, d1\n");
+            Ok(())
+        }
+    }
 }
 
 fn emit_aarch64_i32_to_register(
@@ -1443,9 +1690,9 @@ const fn aarch64_update_immediate(op: BinaryOp, value: i64) -> Option<(&'static 
 
 fn instruction_depth(instruction: &Instruction) -> usize {
     match instruction {
-        Instruction::StoreLocal { value, .. } | Instruction::Return(Some(value)) => {
-            expr_depth(value)
-        }
+        Instruction::StoreLocal { value, .. }
+        | Instruction::Eval(value)
+        | Instruction::Return(Some(value)) => expr_depth(value),
         Instruction::JumpIfZero { condition, .. } => expr_depth(condition),
         Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => 0,
     }
@@ -1473,7 +1720,7 @@ fn should_share_aarch64_epilogue(function: &LoweredFunction, stack_bytes: usize)
 
 const fn instruction_label(instruction: &Instruction) -> Option<usize> {
     match instruction {
-        Instruction::StoreLocal { .. } | Instruction::Return(_) => None,
+        Instruction::StoreLocal { .. } | Instruction::Eval(_) | Instruction::Return(_) => None,
         Instruction::JumpIfZero { label, .. }
         | Instruction::Jump { label }
         | Instruction::Label { label } => Some(*label),
@@ -1482,7 +1729,10 @@ const fn instruction_label(instruction: &Instruction) -> Option<usize> {
 
 fn expr_depth(expr: &LoweredExpr) -> usize {
     match expr {
-        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => 0,
+        LoweredExpr::Integer(_)
+        | LoweredExpr::DoubleLiteral(_)
+        | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Local { .. } => 0,
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::Binary {
@@ -1518,6 +1768,7 @@ fn instruction_needs_preserved_temp(instruction: &Instruction) -> bool {
         | Instruction::JumpIfZero {
             condition: value, ..
         }
+        | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_needs_preserved_temp(value),
         Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => false,
     }
@@ -1548,7 +1799,10 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
             expr_needs_preserved_temp(expr)
         }
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
-        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
+        LoweredExpr::Integer(_)
+        | LoweredExpr::DoubleLiteral(_)
+        | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Local { .. } => false,
     }
 }
 
@@ -1562,6 +1816,7 @@ fn instruction_uses_call(instruction: &Instruction) -> bool {
         | Instruction::JumpIfZero {
             condition: value, ..
         }
+        | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_uses_call(value),
         Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => false,
     }
@@ -1570,7 +1825,10 @@ fn instruction_uses_call(instruction: &Instruction) -> bool {
 fn expr_uses_call(expr: &LoweredExpr) -> bool {
     match expr {
         LoweredExpr::Call { .. } => true,
-        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
+        LoweredExpr::Integer(_)
+        | LoweredExpr::DoubleLiteral(_)
+        | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Local { .. } => false,
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
         LoweredExpr::Conditional {
             condition,
@@ -1581,16 +1839,83 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
     }
 }
 
-const fn local_offset(slot: usize) -> usize {
-    slot * 4
-}
-
-fn x86_local_offset(slot: usize) -> String {
-    format!("-{}", (slot + 1) * 4)
+fn local_offset(function: &LoweredFunction, slot: usize) -> CompileResult<usize> {
+    function
+        .local_slots
+        .get(slot)
+        .map(|local_slot| local_slot.offset)
+        .ok_or_else(|| CompileError::new("internal error: missing local slot"))
 }
 
 fn x86_stack_offset(byte_offset: usize, width: ValueWidth) -> String {
     format!("-{}", byte_offset + width_bytes(width))
+}
+
+fn local_stack_bytes(function: &LoweredFunction) -> usize {
+    function
+        .local_slots
+        .iter()
+        .map(|local_slot| local_slot.offset + width_bytes(scalar_width(local_slot.scalar_type)))
+        .max()
+        .unwrap_or(0)
+}
+
+fn double_literal_bits(value: &str) -> CompileResult<u64> {
+    value
+        .parse::<f64>()
+        .map(f64::to_bits)
+        .map_err(|_| CompileError::new(format!("invalid double literal: {value}")))
+}
+
+fn emit_double_literal_data(
+    label: &str,
+    bits: u64,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match target {
+        Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => {
+            assembly.push_str("\t.section __TEXT,__literal8,8byte_literals\n");
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assembly.push_str("\t.section .rodata.cst8,\"aM\",@progbits,8\n");
+        }
+    }
+    assembly.push_str("\t.p2align 3\n");
+    write_assembly!(assembly, "{label}:\n")?;
+    write_assembly!(assembly, "\t.quad 0x{bits:016x}\n")?;
+    assembly.push_str(".text\n");
+    Ok(())
+}
+
+fn emit_string_literal_data(
+    label: &str,
+    value: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match target {
+        Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => {
+            assembly.push_str("\t.section __TEXT,__cstring,cstring_literals\n");
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assembly.push_str("\t.section .rodata\n");
+        }
+    }
+    write_assembly!(assembly, "{label}:\n")?;
+    assembly.push_str("\t.byte ");
+    let mut first = true;
+    for byte in value.as_bytes().iter().copied().chain([0]) {
+        if first {
+            first = false;
+        } else {
+            assembly.push(',');
+        }
+        write_assembly!(assembly, "{byte}")?;
+    }
+    assembly.push('\n');
+    assembly.push_str(".text\n");
+    Ok(())
 }
 
 const fn align_to(value: usize, alignment: usize) -> usize {
@@ -1613,7 +1938,7 @@ fn call_arg_depth(args: &[LoweredExpr]) -> usize {
 const fn width_bytes(width: ValueWidth) -> usize {
     match width {
         ValueWidth::I32 => 4,
-        ValueWidth::I64 => 8,
+        ValueWidth::I64 | ValueWidth::F64 => 8,
     }
 }
 
