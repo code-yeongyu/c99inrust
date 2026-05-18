@@ -1301,6 +1301,64 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `d_items.c` Struct Array Declaration Merge
+
+This slice moved `d_items.c` from the conflicting `weaponinfo` declaration
+blocker to assembly generation.
+
+New covered Doom shape:
+
+```c
+extern weaponinfo_t weaponinfo[NUMWEAPONS];
+weaponinfo_t weaponinfo[NUMWEAPONS] = { ... };
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_extern_struct_array_before_definition_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/d_items.c \
+  -o /tmp/c99inrust-d_items.s
+```
+
+Focused `d_items.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779131186`. The session exited naturally; no
+`tmux kill-server` was used:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779131186.txt
+ok=13
+fail=49
+OK d_items.c
+```
+
+Representative moved blocker:
+
+```text
+FAIL d_items.c
+  before this slice:
+    error: conflicting global declaration: weaponinfo
+  after this slice:
+    OK d_items.c
+```
+
+Next visible blockers include `d_main.c` unsupported declaration parsing,
+enum-sized arrays, old-style function definitions, function-pointer
+declarations, and unsupported expression forms.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `am_map.c` Struct Address Sweep
 
 This slice moved `am_map.c` from the typed pointer-subscript member blocker to

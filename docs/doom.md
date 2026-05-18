@@ -152,13 +152,17 @@ retain their referent, typed pointer casts such as `(memblock_t*)p` carry their
 pointee for `->` access, `sizeof(struct_typedef)` reports known layout size,
 standard streams `stdin`/`stdout`/`stderr` are available as extern pointer
 bindings, and `&nested.struct.member` lowers to a field address.
+Extern declarations of known struct arrays can be merged with a later
+definition that discovers the initializer length, covering
+`extern weaponinfo_t weaponinfo[NUMWEAPONS]` followed by the `d_items.c`
+definition.
 Pointer returns remain unsupported.
 
-The current Doom compile scan reaches actual supported function bodies, but all
-but fifty of the 62 C files still fail before object generation. `am_map.c`,
-`doomdef.c`, `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`,
-`m_fixed.c`, `m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently
-reach assembly generation.
+The current Doom compile scan reaches actual supported function bodies, but 49
+of the 62 C files still fail before object generation. `am_map.c`,
+`d_items.c`, `doomdef.c`, `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`,
+`m_cheat.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c`
+currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -168,10 +172,11 @@ player_t *plr`, typed pointer-subscript member access such as `lines[i].v1->x`,
 `markpoints[i].x`, `m_paninc.x`, `sizeof(memblock_t)`, `(memblock_t*)` member
 access, `stderr`, `plr->powers[pw_allmap]`, `&l.a.x`, and initialized vector
 tables such as `cheat_player_arrow`.
-The current broad scan now shows `d_items.c` blocked on a conflicting
-`weaponinfo` declaration, while many other files are blocked by enum-sized
-arrays, old-style function definitions, function-pointer declarations, and
-unsupported expression forms.
+The former `d_items.c` blocker moved past the conflicting `weaponinfo`
+extern/definition pair. The current broad scan now shows `d_main.c` blocked on
+an unsupported declaration shape, while many other files are blocked by
+enum-sized arrays, old-style function definitions, function-pointer
+declarations, and unsupported expression forms.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
