@@ -154,6 +154,17 @@ impl LoweringContext {
                 else_branch,
             } => self.lower_if(condition, then_branch, else_branch.as_deref()),
             Statement::While { condition, body } => self.lower_while(condition, body),
+            Statement::For {
+                initializer,
+                condition,
+                post,
+                body,
+            } => self.lower_for(
+                initializer.as_deref(),
+                condition.as_ref(),
+                post.as_deref(),
+                body,
+            ),
             Statement::Return(expr) => {
                 let value = self.lower_expr(expr)?;
                 self.instructions.push(Instruction::Return(value));
@@ -215,6 +226,39 @@ impl LoweringContext {
         self.instructions
             .push(Instruction::Label { label: end_label });
         Ok(())
+    }
+
+    fn lower_for(
+        &mut self,
+        initializer: Option<&Statement>,
+        condition: Option<&Expr>,
+        post: Option<&Statement>,
+        body: &Statement,
+    ) -> CompileResult<()> {
+        self.scopes.push(HashMap::new());
+        if let Some(statement) = initializer {
+            self.lower_statement(statement)?;
+        }
+        let start_label = self.fresh_label();
+        let end_label = self.fresh_label();
+        self.instructions
+            .push(Instruction::Label { label: start_label });
+        if let Some(expr) = condition {
+            let condition = self.lower_expr(expr)?;
+            self.instructions.push(Instruction::JumpIfZero {
+                condition,
+                label: end_label,
+            });
+        }
+        self.lower_branch(body)?;
+        if let Some(statement) = post {
+            self.lower_statement(statement)?;
+        }
+        self.instructions
+            .push(Instruction::Jump { label: start_label });
+        self.instructions
+            .push(Instruction::Label { label: end_label });
+        self.pop_scope()
     }
 
     fn lower_branch(&mut self, statement: &Statement) -> CompileResult<()> {

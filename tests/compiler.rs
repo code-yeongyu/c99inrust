@@ -182,3 +182,38 @@ fn compiler_emits_short_circuit_logical_branches() {
         }
     }
 }
+
+#[test]
+fn compiler_emits_for_loop_back_edges() {
+    // given
+    let source = "int main(void) { int total = 0; for (int i = 0; i < 5; i = i + 1) { total = total + i; } return total; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("cset w0, lt"));
+            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("b Lmain_"));
+            assert!(assembly.contains("str w0, [sp, #4]"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains("setl %al"));
+            assert!(assembly.contains("je Lmain_"));
+            assert!(assembly.contains("jmp Lmain_"));
+            assert!(assembly.contains("movl %eax, -8(%rbp)"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("setl %al"));
+            assert!(assembly.contains("je .Lmain_"));
+            assert!(assembly.contains("jmp .Lmain_"));
+            assert!(assembly.contains("movl %eax, -8(%rbp)"));
+        }
+    }
+}

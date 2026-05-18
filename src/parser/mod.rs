@@ -32,6 +32,12 @@ pub enum Statement {
         condition: Expr,
         body: Box<Statement>,
     },
+    For {
+        initializer: Option<Box<Statement>>,
+        condition: Option<Expr>,
+        post: Option<Box<Statement>>,
+        body: Box<Statement>,
+    },
     Return(Expr),
 }
 
@@ -190,16 +196,25 @@ impl Parser<'_> {
         if self.check_keyword(Keyword::While) {
             return self.while_statement();
         }
+        if self.check_keyword(Keyword::For) {
+            return self.for_statement();
+        }
         if self.check_keyword(Keyword::Return) {
             self.advance();
             let expr = self.expression()?;
             self.expect_punctuator(";")?;
             return Ok(Statement::Return(expr));
         }
+        self.assignment_statement(true)
+    }
+
+    fn assignment_statement(&mut self, expect_semicolon: bool) -> CompileResult<Statement> {
         let name = self.expect_identifier()?;
         self.expect_punctuator("=")?;
         let value = self.expression()?;
-        self.expect_punctuator(";")?;
+        if expect_semicolon {
+            self.expect_punctuator(";")?;
+        }
         Ok(Statement::Assignment { name, value })
     }
 
@@ -242,6 +257,38 @@ impl Parser<'_> {
         self.expect_punctuator(")")?;
         let body = Box::new(self.statement()?);
         Ok(Statement::While { condition, body })
+    }
+
+    fn for_statement(&mut self) -> CompileResult<Statement> {
+        self.expect_keyword(Keyword::For)?;
+        self.expect_punctuator("(")?;
+        let initializer = if self.check_punctuator(";") {
+            self.advance();
+            None
+        } else if self.check_keyword(Keyword::Int) {
+            Some(Box::new(self.declaration_statement()?))
+        } else {
+            Some(Box::new(self.assignment_statement(true)?))
+        };
+        let condition = if self.check_punctuator(";") {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.expect_punctuator(";")?;
+        let post = if self.check_punctuator(")") {
+            None
+        } else {
+            Some(Box::new(self.assignment_statement(false)?))
+        };
+        self.expect_punctuator(")")?;
+        let body = Box::new(self.statement()?);
+        Ok(Statement::For {
+            initializer,
+            condition,
+            post,
+            body,
+        })
     }
 
     fn block_items(&mut self) -> CompileResult<Vec<Statement>> {
