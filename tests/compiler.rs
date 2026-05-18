@@ -177,6 +177,25 @@ fn compiler_emits_post_increment_value_slice() {
 }
 
 #[test]
+fn compiler_accepts_prefix_increment_condition_slice() {
+    // given
+    let source =
+        "int fuzzpos; int main(void) { fuzzpos = 49; if (++fuzzpos == 50) return 0; return 1; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("fuzzpos"));
+    assert!(assembly.contains("\taddl %ecx, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_pointer_post_increment_dereference_slice() {
     // given
     let source = "void skip(int *p) { while (*(p++) != 1); } int main(void) { return 0; }";

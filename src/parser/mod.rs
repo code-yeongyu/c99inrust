@@ -802,6 +802,14 @@ impl Parser<'_> {
         if self.check_keyword(Keyword::Sizeof) {
             return self.sizeof_expr();
         }
+        if self.check_punctuator("++") {
+            self.advance();
+            return prefix_update_expr(self.unary()?, BinaryOp::Add);
+        }
+        if self.check_punctuator("--") {
+            self.advance();
+            return prefix_update_expr(self.unary()?, BinaryOp::Sub);
+        }
         if self.check_punctuator("&") {
             self.advance();
             let target = lvalue_from_expr(self.unary()?)?;
@@ -1185,6 +1193,18 @@ fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
         }),
         _ => Err(CompileError::new("unsupported assignment target")),
     }
+}
+
+fn prefix_update_expr(expr: Expr, op: BinaryOp) -> CompileResult<Expr> {
+    let target = lvalue_from_expr(expr.clone())?;
+    Ok(Expr::Assignment {
+        target,
+        value: Box::new(Expr::Binary {
+            op,
+            left: Box::new(expr),
+            right: Box::new(Expr::Integer(1)),
+        }),
+    })
 }
 
 fn statement_from_expression(expr: Expr) -> Statement {
