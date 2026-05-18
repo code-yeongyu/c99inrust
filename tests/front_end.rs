@@ -86,6 +86,20 @@ fn preprocessor_expands_function_macros_and_spliced_lines() {
 }
 
 #[test]
+fn preprocessor_expands_file_and_line_builtins_after_macros() {
+    // given
+    let source = "#define LOC __FILE__, __LINE__\nint here[] = { LOC };\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom/map.c", source)
+        .expect("preprocessor should expand file and line builtins");
+
+    // then
+    assert!(unit.source.contains("int here[] = { \"doom/map.c\", 2 };"));
+}
+
+#[test]
 fn preprocessor_provides_doom_values_h_integer_limits() {
     // given
     let source = "#include <values.h>\nint lo = MININT;\nint hi = MAXINT;\n";

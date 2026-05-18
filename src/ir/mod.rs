@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
     BinaryOp, Constant, Expr, FieldType, Function, Global, GlobalInitializer, LValue, Program,
-    ReturnType, ScalarType, Statement, StructLayout, UnaryOp,
+    ReturnType, ScalarType, Statement, StructLayout, SwitchCase, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +40,7 @@ pub struct LoweredFunction {
 pub struct LocalSlot {
     pub offset: usize,
     pub scalar_type: ScalarType,
+    pub byte_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +50,10 @@ pub enum Instruction {
         offset: usize,
         scalar_type: ScalarType,
         value: LoweredExpr,
+    },
+    InitLocalBytes {
+        offset: usize,
+        values: Vec<u8>,
     },
     StoreGlobal {
         name: String,
@@ -114,6 +119,10 @@ pub enum LoweredExpr {
     Local {
         offset: usize,
         scalar_type: ScalarType,
+    },
+    LocalAddress {
+        offset: usize,
+        byte_size: usize,
     },
     Unary {
         op: UnaryOp,
@@ -437,10 +446,16 @@ fn lower_function_with_globals(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct LocalBinding {
-    slot: usize,
-    scalar_type: ScalarType,
-    referent: Option<String>,
+enum LocalBinding {
+    Scalar {
+        slot: usize,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    },
+    CharArray {
+        slot: usize,
+        length: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -494,6 +509,7 @@ struct LoweringContext {
     next_local_offset: usize,
     instructions: Vec<Instruction>,
     next_label: usize,
+    break_labels: Vec<usize>,
     has_return: bool,
 }
 
@@ -514,6 +530,7 @@ impl LoweringContext {
             next_local_offset: 0,
             instructions: Vec::new(),
             next_label: 0,
+            break_labels: Vec::new(),
             has_return: false,
         }
     }
@@ -526,20 +543,12 @@ impl LoweringContext {
                 scalar_type,
                 name,
                 initializer,
-            } => {
-                let slot = self.declare_local(name, *scalar_type, None)?;
-                let value = initializer.as_ref().map_or_else(
-                    || Ok(zero_expr_for(*scalar_type)),
-                    |expr| self.lower_expr(expr),
-                )?;
-                self.instructions.push(Instruction::StoreLocal {
-                    slot,
-                    offset: self.local_offset(slot)?,
-                    scalar_type: *scalar_type,
-                    value,
-                });
-                Ok(())
-            }
+            } => self.lower_declaration(*scalar_type, name, initializer.as_ref()),
+            Statement::LocalCharArray {
+                name,
+                length,
+                initializer,
+            } => self.lower_local_char_array(name, *length, initializer.as_deref()),
             Statement::DeclarationList(declarations) => {
                 for declaration in declarations {
                     self.lower_statement(declaration)?;
@@ -570,12 +579,24 @@ impl LoweringContext {
                 post.as_deref(),
                 body,
             ),
+            Statement::Switch {
+                condition,
+                cases,
+                default,
+            } => self.lower_switch(condition, cases, default),
             Statement::Expression(Expr::PostIncrement { target }) => {
                 self.lower_post_increment_statement(target)
             }
             Statement::Expression(expr) => {
                 let expr = self.lower_expr(expr)?;
                 self.instructions.push(Instruction::Eval(expr));
+                Ok(())
+            }
+            Statement::Break => {
+                let Some(label) = self.break_labels.last() else {
+                    return Err(CompileError::new("break statement outside loop"));
+                };
+                self.instructions.push(Instruction::Jump { label: *label });
                 Ok(())
             }
             Statement::Return(expr) => {
@@ -598,6 +619,42 @@ impl LoweringContext {
                 Ok(())
             }
         }
+    }
+
+    fn lower_declaration(
+        &mut self,
+        scalar_type: ScalarType,
+        name: &str,
+        initializer: Option<&Expr>,
+    ) -> CompileResult<()> {
+        let slot = self.declare_local(name, scalar_type, None)?;
+        let value = initializer.map_or_else(
+            || Ok(zero_expr_for(scalar_type)),
+            |expr| self.lower_expr(expr),
+        )?;
+        self.instructions.push(Instruction::StoreLocal {
+            slot,
+            offset: self.local_offset(slot)?,
+            scalar_type,
+            value,
+        });
+        Ok(())
+    }
+
+    fn lower_local_char_array(
+        &mut self,
+        name: &str,
+        length: usize,
+        initializer: Option<&str>,
+    ) -> CompileResult<()> {
+        let slot = self.declare_char_array(name, length)?;
+        if let Some(value) = initializer {
+            self.instructions.push(Instruction::InitLocalBytes {
+                offset: self.local_offset(slot)?,
+                values: local_char_array_initializer_values(value, length)?,
+            });
+        }
+        Ok(())
     }
 
     fn lower_block(&mut self, statements: &[Statement]) -> CompileResult<()> {
@@ -646,7 +703,10 @@ impl LoweringContext {
             condition,
             label: end_label,
         });
-        self.lower_branch(body)?;
+        self.break_labels.push(end_label);
+        let result = self.lower_branch(body);
+        self.break_labels.pop();
+        result?;
         self.instructions
             .push(Instruction::Jump { label: start_label });
         self.instructions
@@ -659,7 +719,10 @@ impl LoweringContext {
         let end_label = self.fresh_label();
         self.instructions
             .push(Instruction::Label { label: start_label });
-        self.lower_branch(body)?;
+        self.break_labels.push(end_label);
+        let result = self.lower_branch(body);
+        self.break_labels.pop();
+        result?;
         let condition = self.lower_expr(condition)?;
         self.instructions.push(Instruction::JumpIfZero {
             condition,
@@ -694,12 +757,63 @@ impl LoweringContext {
                 label: end_label,
             });
         }
-        self.lower_branch(body)?;
+        self.break_labels.push(end_label);
+        let result = self.lower_branch(body);
+        self.break_labels.pop();
+        result?;
         if let Some(statement) = post {
             self.lower_statement(statement)?;
         }
         self.instructions
             .push(Instruction::Jump { label: start_label });
+        self.instructions
+            .push(Instruction::Label { label: end_label });
+        self.pop_scope()
+    }
+
+    fn lower_switch(
+        &mut self,
+        condition: &Expr,
+        cases: &[SwitchCase],
+        default: &[Statement],
+    ) -> CompileResult<()> {
+        self.scopes.push(HashMap::new());
+        let end_label = self.fresh_label();
+        let default_label = (!default.is_empty()).then(|| self.fresh_label());
+        let case_labels = (0..cases.len())
+            .map(|_| self.fresh_label())
+            .collect::<Vec<_>>();
+        for (case, label) in cases.iter().zip(case_labels.iter().copied()) {
+            let next_label = self.fresh_label();
+            self.instructions.push(Instruction::JumpIfZero {
+                condition: LoweredExpr::Binary {
+                    op: BinaryOp::Equal,
+                    left: Box::new(self.lower_expr(condition)?),
+                    right: Box::new(self.lower_expr(&case.value)?),
+                },
+                label: next_label,
+            });
+            self.instructions.push(Instruction::Jump { label });
+            self.instructions
+                .push(Instruction::Label { label: next_label });
+        }
+        self.instructions.push(Instruction::Jump {
+            label: default_label.unwrap_or(end_label),
+        });
+        self.break_labels.push(end_label);
+        for (case, label) in cases.iter().zip(case_labels.iter().copied()) {
+            self.instructions.push(Instruction::Label { label });
+            for statement in &case.statements {
+                self.lower_statement(statement)?;
+            }
+        }
+        if let Some(label) = default_label {
+            self.instructions.push(Instruction::Label { label });
+            for statement in default {
+                self.lower_statement(statement)?;
+            }
+        }
+        self.break_labels.pop();
         self.instructions
             .push(Instruction::Label { label: end_label });
         self.pop_scope()
@@ -717,7 +831,41 @@ impl LoweringContext {
         scalar_type: ScalarType,
         referent: Option<String>,
     ) -> CompileResult<usize> {
-        let Some(scope) = self.scopes.last_mut() else {
+        self.declare_slot(
+            name,
+            scalar_type,
+            scalar_size(scalar_type),
+            scalar_size(scalar_type),
+            LocalBinding::Scalar {
+                slot: self.local_slots.len(),
+                scalar_type,
+                referent,
+            },
+        )
+    }
+
+    fn declare_char_array(&mut self, name: &str, length: usize) -> CompileResult<usize> {
+        self.declare_slot(
+            name,
+            ScalarType::Int,
+            length,
+            1,
+            LocalBinding::CharArray {
+                slot: self.local_slots.len(),
+                length,
+            },
+        )
+    }
+
+    fn declare_slot(
+        &mut self,
+        name: &str,
+        scalar_type: ScalarType,
+        byte_size: usize,
+        alignment: usize,
+        binding: LocalBinding,
+    ) -> CompileResult<usize> {
+        let Some(scope) = self.scopes.last() else {
             return Err(CompileError::new("internal error: no local scope"));
         };
         if scope.contains_key(name) {
@@ -726,20 +874,17 @@ impl LoweringContext {
             )));
         }
         let slot = self.local_slots.len();
-        let offset = align_to(self.next_local_offset, scalar_size(scalar_type));
-        self.next_local_offset = offset + scalar_size(scalar_type);
+        let offset = align_to(self.next_local_offset, alignment);
+        self.next_local_offset = offset + byte_size;
         self.local_slots.push(LocalSlot {
             offset,
             scalar_type,
+            byte_size,
         });
-        scope.insert(
-            name.to_string(),
-            LocalBinding {
-                slot,
-                scalar_type,
-                referent,
-            },
-        );
+        let Some(scope) = self.scopes.last_mut() else {
+            return Err(CompileError::new("internal error: no local scope"));
+        };
+        scope.insert(name.to_string(), binding);
         Ok(slot)
     }
 
@@ -781,10 +926,18 @@ impl LoweringContext {
             }),
             Expr::Identifier(name) => {
                 if let Some(binding) = self.local_binding(name) {
-                    return Ok(LoweredExpr::Local {
-                        offset: self.local_offset(binding.slot)?,
-                        scalar_type: binding.scalar_type,
-                    });
+                    return match binding {
+                        LocalBinding::Scalar {
+                            slot, scalar_type, ..
+                        } => Ok(LoweredExpr::Local {
+                            offset: self.local_offset(slot)?,
+                            scalar_type,
+                        }),
+                        LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                            offset: self.local_offset(slot)?,
+                            byte_size: length,
+                        }),
+                    };
                 }
                 if let Some(scalar_type) = self
                     .global_bindings
@@ -856,11 +1009,18 @@ impl LoweringContext {
         match target {
             LValue::Identifier(name) => {
                 if let Some(binding) = self.local_binding(name) {
-                    return Ok(LoweredLValue::Local {
-                        slot: binding.slot,
-                        offset: self.local_offset(binding.slot)?,
-                        scalar_type: binding.scalar_type,
-                    });
+                    return match binding {
+                        LocalBinding::Scalar {
+                            slot, scalar_type, ..
+                        } => Ok(LoweredLValue::Local {
+                            slot,
+                            offset: self.local_offset(slot)?,
+                            scalar_type,
+                        }),
+                        LocalBinding::CharArray { .. } => Err(CompileError::new(
+                            "assignment to local array is not supported",
+                        )),
+                    };
                 }
                 if let Some(scalar_type) = self
                     .global_bindings
@@ -978,9 +1138,24 @@ impl LoweringContext {
                     right: Box::new(self.lower_expr(index)?),
                 })
             }
-            LValue::Identifier(_) | LValue::Member { .. } => {
-                Err(CompileError::new("unsupported address-of target"))
+            LValue::Identifier(name) => {
+                let Some(binding) = self.local_binding(name) else {
+                    return Err(CompileError::new("unsupported address-of target"));
+                };
+                match binding {
+                    LocalBinding::Scalar {
+                        slot, scalar_type, ..
+                    } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size: scalar_size(scalar_type),
+                    }),
+                    LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size: length,
+                    }),
+                }
             }
+            LValue::Member { .. } => Err(CompileError::new("unsupported address-of target")),
         }
     }
 
@@ -1094,7 +1269,10 @@ impl LoweringContext {
     fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
         if let Expr::Identifier(name) = expr
             && let Some(binding) = self.local_binding(name)
-            && let Some(referent) = binding.referent
+            && let LocalBinding::Scalar {
+                referent: Some(referent),
+                ..
+            } = binding
         {
             return Ok(referent);
         }
@@ -1180,7 +1358,9 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
         }
         | LoweredExpr::PointerField { scalar_type, .. } => Some(*scalar_type),
         LoweredExpr::GlobalIntSubscript { .. } => Some(ScalarType::Int),
-        LoweredExpr::GlobalPointerSubscript { .. } => Some(ScalarType::Pointer),
+        LoweredExpr::LocalAddress { .. } | LoweredExpr::GlobalPointerSubscript { .. } => {
+            Some(ScalarType::Pointer)
+        }
         LoweredExpr::PointerSubscript { element_type, .. } => Some(*element_type),
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
             Some(lowered_lvalue_scalar_type(target))
@@ -1280,6 +1460,21 @@ fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
     }
 }
 
+fn local_char_array_initializer_values(value: &str, length: usize) -> CompileResult<Vec<u8>> {
+    if value.len() > length {
+        return Err(CompileError::new(
+            "local char array initializer is too large",
+        ));
+    }
+    let mut values = Vec::with_capacity(length);
+    values.extend_from_slice(value.as_bytes());
+    if values.len() < length {
+        values.push(0);
+    }
+    values.resize(length, 0);
+    Ok(values)
+}
+
 const fn scalar_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Int => 4,
@@ -1377,7 +1572,10 @@ fn inline_constant_calls_in_instruction(
         }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => inline_constant_calls_in_expr(value, constants),
-        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => {}
+        Instruction::Return(None)
+        | Instruction::Jump { .. }
+        | Instruction::Label { .. }
+        | Instruction::InitLocalBytes { .. } => {}
     }
 }
 
@@ -1430,7 +1628,8 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
-        | LoweredExpr::Local { .. } => {}
+        | LoweredExpr::Local { .. }
+        | LoweredExpr::LocalAddress { .. } => {}
     }
 }
 

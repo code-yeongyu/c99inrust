@@ -63,6 +63,12 @@ pub struct Function {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchCase {
+    pub value: Expr,
+    pub statements: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parameter {
     pub name: String,
     pub scalar_type: ScalarType,
@@ -92,6 +98,11 @@ pub enum Statement {
         name: String,
         initializer: Option<Expr>,
     },
+    LocalCharArray {
+        name: String,
+        length: usize,
+        initializer: Option<String>,
+    },
     DeclarationList(Vec<Self>),
     Assignment {
         target: LValue,
@@ -116,7 +127,13 @@ pub enum Statement {
         post: Option<Box<Self>>,
         body: Box<Self>,
     },
+    Switch {
+        condition: Expr,
+        cases: Vec<SwitchCase>,
+        default: Vec<Self>,
+    },
     Expression(Expr),
+    Break,
     Return(Option<Expr>),
 }
 
@@ -490,6 +507,9 @@ impl Parser<'_> {
         if self.check_punctuator("{") {
             return Ok(Statement::Block(self.block_items()?));
         }
+        if let Some(statement) = self.static_aggregate_declaration()? {
+            return Ok(statement);
+        }
         if let Some(scalar_type) = self.declaration_type_at_current() {
             return self.declaration_statement(scalar_type);
         }
@@ -504,6 +524,14 @@ impl Parser<'_> {
         }
         if self.check_keyword(Keyword::For) {
             return self.for_statement();
+        }
+        if self.check_keyword(Keyword::Switch) {
+            return self.switch_statement();
+        }
+        if self.check_keyword(Keyword::Break) {
+            self.advance();
+            self.expect_punctuator(";")?;
+            return Ok(Statement::Break);
         }
         if self.check_keyword(Keyword::Return) {
             self.advance();
@@ -556,37 +584,61 @@ impl Parser<'_> {
                 scalar_type = ScalarType::Pointer;
             }
             let name = self.expect_identifier()?;
-            let initializer = if self.check_punctuator("[") {
+            let statement = if self.check_punctuator("[") {
                 if !type_includes_char || scalar_type != ScalarType::Int {
-                    return Err(CompileError::new(
-                        "only local char arrays with string initializers are supported",
-                    ));
+                    return Err(CompileError::new("only local char arrays are supported"));
                 }
                 self.advance();
-                if !self.check_punctuator("]") {
-                    let _size = self.expression()?;
-                }
+                let explicit_length = if self.check_punctuator("]") {
+                    None
+                } else {
+                    Some(local_char_array_length(&self.expression()?)?)
+                };
                 self.expect_punctuator("]")?;
-                self.expect_punctuator("=")?;
-                let initializer = self.expression()?;
-                if !matches!(initializer, Expr::StringLiteral(_)) {
-                    return Err(CompileError::new(
-                        "local char arrays require string literal initializers",
-                    ));
+                let initializer = if self.check_punctuator("=") {
+                    self.advance();
+                    let initializer = self.expression()?;
+                    let Expr::StringLiteral(value) = initializer else {
+                        return Err(CompileError::new(
+                            "local char arrays require string literal initializers",
+                        ));
+                    };
+                    Some(value)
+                } else {
+                    None
+                };
+                let length = match (explicit_length, &initializer) {
+                    (Some(length), _) => length,
+                    (None, Some(value)) => inferred_local_char_array_length(value)?,
+                    (None, None) => {
+                        return Err(CompileError::new(
+                            "local char arrays require a size or string literal initializer",
+                        ));
+                    }
+                };
+                if let Some(value) = &initializer {
+                    validate_local_char_array_initializer(value, length)?;
                 }
-                scalar_type = ScalarType::Pointer;
-                Some(initializer)
+                Statement::LocalCharArray {
+                    name,
+                    length,
+                    initializer,
+                }
             } else if self.check_punctuator("=") {
                 self.advance();
-                Some(self.expression()?)
+                Statement::Declaration {
+                    scalar_type,
+                    name,
+                    initializer: Some(self.expression()?),
+                }
             } else {
-                None
+                Statement::Declaration {
+                    scalar_type,
+                    name,
+                    initializer: None,
+                }
             };
-            declarations.push(Statement::Declaration {
-                scalar_type,
-                name,
-                initializer,
-            });
+            declarations.push(statement);
             if self.check_punctuator(",") {
                 self.advance();
                 continue;
@@ -599,6 +651,42 @@ impl Parser<'_> {
         } else {
             Ok(Statement::DeclarationList(declarations))
         }
+    }
+
+    fn static_aggregate_declaration(&mut self) -> CompileResult<Option<Statement>> {
+        if !self.check_keyword(Keyword::Static) {
+            return Ok(None);
+        }
+        let tokens = &self.tokens[self.index..];
+        let Some(assign_index) = top_level_punctuator_index(tokens, "=") else {
+            return Ok(None);
+        };
+        if top_level_punctuator_index(&tokens[..assign_index], "[").is_some() {
+            return Ok(None);
+        }
+        if !tokens
+            .get(assign_index + 1)
+            .is_some_and(|token| token_is_punctuator(token, "{"))
+        {
+            return Ok(None);
+        }
+        let Some(name_index) = previous_identifier_index(tokens, assign_index) else {
+            return Err(CompileError::new("expected static aggregate name"));
+        };
+        let name = token_identifier(&tokens[name_index])
+            .ok_or_else(|| CompileError::new("expected static aggregate name"))?
+            .to_owned();
+        let Some(semicolon_index) = top_level_punctuator_index(tokens, ";") else {
+            return Err(CompileError::new(
+                "unterminated static aggregate declaration",
+            ));
+        };
+        self.index += semicolon_index + 1;
+        Ok(Some(Statement::Declaration {
+            scalar_type: ScalarType::Int,
+            name,
+            initializer: None,
+        }))
     }
 
     fn if_statement(&mut self) -> CompileResult<Statement> {
@@ -670,6 +758,55 @@ impl Parser<'_> {
             post,
             body,
         })
+    }
+
+    fn switch_statement(&mut self) -> CompileResult<Statement> {
+        self.expect_keyword(Keyword::Switch)?;
+        self.expect_punctuator("(")?;
+        let condition = self.expression()?;
+        self.expect_punctuator(")")?;
+        self.expect_punctuator("{")?;
+        let mut cases = Vec::new();
+        let mut default = Vec::new();
+        let mut saw_default = false;
+        while !self.check_punctuator("}") {
+            if self.check_keyword(Keyword::Case) {
+                self.advance();
+                let value = self.expression()?;
+                self.expect_punctuator(":")?;
+                let statements = self.switch_label_statements()?;
+                cases.push(SwitchCase { value, statements });
+                continue;
+            }
+            if self.check_keyword(Keyword::Default) {
+                if saw_default {
+                    return Err(CompileError::new("duplicate default label"));
+                }
+                saw_default = true;
+                self.advance();
+                self.expect_punctuator(":")?;
+                default = self.switch_label_statements()?;
+                continue;
+            }
+            return self.expected("switch case label");
+        }
+        self.expect_punctuator("}")?;
+        Ok(Statement::Switch {
+            condition,
+            cases,
+            default,
+        })
+    }
+
+    fn switch_label_statements(&mut self) -> CompileResult<Vec<Statement>> {
+        let mut statements = Vec::new();
+        while !self.check_punctuator("}")
+            && !self.check_keyword(Keyword::Case)
+            && !self.check_keyword(Keyword::Default)
+        {
+            statements.push(self.statement()?);
+        }
+        Ok(statements)
     }
 
     fn block_items(&mut self) -> CompileResult<Vec<Statement>> {
@@ -967,9 +1104,22 @@ impl Parser<'_> {
                     }
                     Ok(Expr::Integer(value))
                 }
-                TokenKind::StringLiteral(value) => {
-                    let value = value.clone();
+                TokenKind::CharLiteral(value) => {
+                    let value = i64::from(u32::from(*value));
                     self.advance();
+                    Ok(Expr::Integer(value))
+                }
+                TokenKind::StringLiteral(value) => {
+                    let mut value = value.clone();
+                    self.advance();
+                    while let Some(Token {
+                        kind: TokenKind::StringLiteral(next),
+                        ..
+                    }) = self.peek()
+                    {
+                        value.push_str(next);
+                        self.advance();
+                    }
                     Ok(Expr::StringLiteral(value))
                 }
                 TokenKind::Identifier(value) => {
@@ -1041,6 +1191,7 @@ impl Parser<'_> {
         let mut index = self.index;
         let mut saw_type = false;
         let mut saw_double = false;
+        let mut saw_storage_class = false;
         let mut saw_struct_pointer = false;
         let mut long_count = 0usize;
         while let Some(token) = self.tokens.get(index) {
@@ -1053,6 +1204,9 @@ impl Parser<'_> {
                     | Keyword::Unsigned
                     | Keyword::Volatile,
                 ) => {}
+                TokenKind::Keyword(Keyword::Static) => {
+                    saw_storage_class = true;
+                }
                 TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short) => {
                     saw_type = true;
                 }
@@ -1076,6 +1230,8 @@ impl Parser<'_> {
                         && self.struct_pointer_declarator_follows(index + 1)
                     {
                         saw_struct_pointer = true;
+                    } else if saw_storage_class {
+                        break;
                     } else {
                         return None;
                     }
@@ -1086,6 +1242,9 @@ impl Parser<'_> {
             index += 1;
         }
         if !saw_type {
+            if saw_storage_class {
+                return Some((ScalarType::Int, index));
+            }
             return None;
         }
         if saw_struct_pointer {
@@ -1533,6 +1692,30 @@ const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
         ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
     }
+}
+
+fn local_char_array_length(expr: &Expr) -> CompileResult<usize> {
+    let value = eval_integer_initializer_expr(expr)?.to_i64_trunc()?;
+    if value <= 0 {
+        return Err(CompileError::new("local char array size must be positive"));
+    }
+    usize::try_from(value).map_err(|_| CompileError::new("local char array size is too large"))
+}
+
+fn inferred_local_char_array_length(value: &str) -> CompileResult<usize> {
+    value
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| CompileError::new("local char array size overflow"))
+}
+
+fn validate_local_char_array_initializer(value: &str, length: usize) -> CompileResult<()> {
+    if value.len() > length {
+        return Err(CompileError::new(
+            "local char array initializer is too large",
+        ));
+    }
+    Ok(())
 }
 
 fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> {

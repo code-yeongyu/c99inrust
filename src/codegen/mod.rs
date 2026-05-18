@@ -75,9 +75,9 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
     match expr {
         LoweredExpr::Cast { target, .. } => scalar_width(*target),
         LoweredExpr::DoubleLiteral(_) => ValueWidth::F64,
-        LoweredExpr::StringLiteral(_) | LoweredExpr::GlobalPointerSubscript { .. } => {
-            ValueWidth::I64
-        }
+        LoweredExpr::StringLiteral(_)
+        | LoweredExpr::LocalAddress { .. }
+        | LoweredExpr::GlobalPointerSubscript { .. } => ValueWidth::I64,
         LoweredExpr::Global { scalar_type, .. } | LoweredExpr::Local { scalar_type, .. } => {
             scalar_width(*scalar_type)
         }
@@ -353,17 +353,15 @@ fn emit_aarch64_function(
                 offset,
                 scalar_type,
                 value,
-            } => {
-                emit_aarch64_store_local(
-                    *slot,
-                    *offset,
-                    *scalar_type,
-                    value,
-                    frame.temporary_base,
-                    &mut labels,
-                    assembly,
-                )?;
-                emit_aarch64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
+            } => emit_aarch64_store_local_instruction(
+                (*slot, *offset, *scalar_type),
+                value,
+                frame.temporary_base,
+                &mut labels,
+                assembly,
+            )?,
+            Instruction::InitLocalBytes { offset, values } => {
+                emit_aarch64_init_local_bytes(*offset, values, assembly)?;
             }
             Instruction::StoreGlobal {
                 name,
@@ -426,6 +424,26 @@ fn emit_aarch64_function(
         )?;
     }
     Ok(())
+}
+
+fn emit_aarch64_store_local_instruction(
+    local: (usize, usize, ScalarType),
+    value: &LoweredExpr,
+    temporary_base: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let (slot, offset, scalar_type) = local;
+    emit_aarch64_store_local(
+        slot,
+        offset,
+        scalar_type,
+        value,
+        temporary_base,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_result(scalar_width(scalar_type), offset, assembly)
 }
 
 #[derive(Clone, Copy)]
@@ -533,6 +551,9 @@ fn emit_x86_64_function(
             } => {
                 emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
                 emit_x86_64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
+            }
+            Instruction::InitLocalBytes { offset, values } => {
+                emit_x86_64_init_local_bytes(*offset, values, assembly)?;
             }
             Instruction::StoreGlobal {
                 name,
@@ -675,6 +696,9 @@ fn emit_aarch64_expr_natural(
         }
         LoweredExpr::StringLiteral(value) => {
             emit_aarch64_load_string_address(value, labels, assembly)
+        }
+        LoweredExpr::LocalAddress { offset, .. } => {
+            write_assembly!(assembly, "\tadd x0, sp, #{offset}\n")
         }
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
@@ -994,6 +1018,21 @@ fn emit_aarch64_store_result(
 ) -> CompileResult<()> {
     let register = aarch64_result_register(width);
     write_assembly!(assembly, "\tstr {register}, [sp, #{offset}]\n")
+}
+
+fn emit_aarch64_init_local_bytes(
+    offset: usize,
+    values: &[u8],
+    assembly: &mut String,
+) -> CompileResult<()> {
+    for (index, value) in values.iter().enumerate() {
+        let byte_offset = offset
+            .checked_add(index)
+            .ok_or_else(|| CompileError::new("local byte initializer offset overflow"))?;
+        write_assembly!(assembly, "\tmov w16, #{value}\n")?;
+        write_assembly!(assembly, "\tstrb w16, [sp, #{byte_offset}]\n")?;
+    }
+    Ok(())
 }
 
 fn emit_aarch64_load_temporary(
@@ -1841,6 +1880,11 @@ fn emit_x86_64_expr_natural(
         LoweredExpr::StringLiteral(value) => {
             emit_x86_64_load_string_address(value, target, labels, assembly)
         }
+        LoweredExpr::LocalAddress { offset, byte_size } => write_assembly!(
+            assembly,
+            "\tleaq {}(%rbp), %rax\n",
+            x86_stack_object_offset(*offset, *byte_size)
+        ),
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::GlobalIntSubscript { .. }
@@ -2221,6 +2265,24 @@ fn emit_x86_64_store_result(
         "\tmov{suffix} {register}, {}(%rbp)\n",
         x86_stack_offset(offset, width)
     )
+}
+
+fn emit_x86_64_init_local_bytes(
+    offset: usize,
+    values: &[u8],
+    assembly: &mut String,
+) -> CompileResult<()> {
+    for (index, value) in values.iter().enumerate() {
+        let byte_offset = offset
+            .checked_add(index)
+            .ok_or_else(|| CompileError::new("local byte initializer offset overflow"))?;
+        write_assembly!(
+            assembly,
+            "\tmovb ${value}, {}(%rbp)\n",
+            x86_stack_byte_offset(offset, values.len(), byte_offset)
+        )?;
+    }
+    Ok(())
 }
 
 fn emit_x86_64_load_temporary(
@@ -3196,7 +3258,10 @@ fn instruction_depth(instruction: &Instruction) -> usize {
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_depth(value),
         Instruction::JumpIfZero { condition, .. } => expr_depth(condition),
-        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => 0,
+        Instruction::Return(None)
+        | Instruction::Jump { .. }
+        | Instruction::Label { .. }
+        | Instruction::InitLocalBytes { .. } => 0,
     }
 }
 
@@ -3225,7 +3290,8 @@ const fn instruction_label(instruction: &Instruction) -> Option<usize> {
         Instruction::StoreLocal { .. }
         | Instruction::StoreGlobal { .. }
         | Instruction::Eval(_)
-        | Instruction::Return(_) => None,
+        | Instruction::Return(_)
+        | Instruction::InitLocalBytes { .. } => None,
         Instruction::JumpIfZero { label, .. }
         | Instruction::Jump { label }
         | Instruction::Label { label } => Some(*label),
@@ -3238,7 +3304,8 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
-        | LoweredExpr::Local { .. } => 0,
+        | LoweredExpr::Local { .. }
+        | LoweredExpr::LocalAddress { .. } => 0,
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::GlobalByteSubscript { index, .. }
@@ -3309,7 +3376,10 @@ fn instruction_needs_preserved_temp(instruction: &Instruction) -> bool {
         }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_needs_preserved_temp(value),
-        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => false,
+        Instruction::Return(None)
+        | Instruction::Jump { .. }
+        | Instruction::Label { .. }
+        | Instruction::InitLocalBytes { .. } => false,
     }
 }
 
@@ -3353,7 +3423,8 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
-        | LoweredExpr::Local { .. } => false,
+        | LoweredExpr::Local { .. }
+        | LoweredExpr::LocalAddress { .. } => false,
     }
 }
 
@@ -3383,7 +3454,10 @@ fn instruction_uses_call(instruction: &Instruction) -> bool {
         }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_uses_call(value),
-        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => false,
+        Instruction::Return(None)
+        | Instruction::Jump { .. }
+        | Instruction::Label { .. }
+        | Instruction::InitLocalBytes { .. } => false,
     }
 }
 
@@ -3394,7 +3468,8 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
-        | LoweredExpr::Local { .. } => false,
+        | LoweredExpr::Local { .. }
+        | LoweredExpr::LocalAddress { .. } => false,
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
@@ -3439,11 +3514,20 @@ fn x86_stack_offset(byte_offset: usize, width: ValueWidth) -> String {
     format!("-{}", byte_offset + width_bytes(width))
 }
 
+fn x86_stack_object_offset(byte_offset: usize, byte_size: usize) -> String {
+    format!("-{}", byte_offset + byte_size)
+}
+
+fn x86_stack_byte_offset(object_offset: usize, object_size: usize, byte_offset: usize) -> String {
+    let index = byte_offset - object_offset;
+    format!("-{}", object_offset + object_size - index)
+}
+
 fn local_stack_bytes(function: &LoweredFunction) -> usize {
     function
         .local_slots
         .iter()
-        .map(|local_slot| local_slot.offset + width_bytes(scalar_width(local_slot.scalar_type)))
+        .map(|local_slot| local_slot.offset + local_slot.byte_size)
         .max()
         .unwrap_or(0)
 }

@@ -51,8 +51,10 @@ impl Preprocessor {
         let source = fs::read_to_string(path)
             .map_err(|error| CompileError::new(format!("failed to read source: {error}")))?;
         let current_dir = path.parent().map(Path::to_path_buf);
+        let current_file = path.to_string_lossy();
         let output = self.preprocess_source(
             &source,
+            current_file.as_ref(),
             current_dir.as_deref(),
             &mut macros,
             &mut included_files,
@@ -69,10 +71,11 @@ impl Preprocessor {
     ///
     /// Returns an error when directives are malformed or conditional
     /// preprocessing is unbalanced.
-    pub fn preprocess_text(&self, _name: &str, source: &str) -> CompileResult<PreprocessedUnit> {
+    pub fn preprocess_text(&self, name: &str, source: &str) -> CompileResult<PreprocessedUnit> {
         let mut macros = self.predefined.clone();
         let mut included_files = Vec::new();
-        let output = self.preprocess_source(source, None, &mut macros, &mut included_files)?;
+        let output =
+            self.preprocess_source(source, name, None, &mut macros, &mut included_files)?;
         Ok(PreprocessedUnit {
             source: output,
             included_files,
@@ -82,6 +85,7 @@ impl Preprocessor {
     fn preprocess_source(
         &self,
         source: &str,
+        current_file: &str,
         current_dir: Option<&Path>,
         macros: &mut HashMap<String, MacroDefinition>,
         included_files: &mut Vec<PathBuf>,
@@ -105,7 +109,8 @@ impl Preprocessor {
                 continue;
             }
             if all_conditions_active(&condition_stack) {
-                output.push_str(&expand_macros(raw_line, macros));
+                let expanded = expand_macros(raw_line, macros);
+                output.push_str(&expand_builtin_macros(&expanded, current_file, line_number));
                 output.push('\n');
             }
         }
@@ -139,8 +144,10 @@ impl Preprocessor {
                                 })?;
                                 state.included_files.push(resolved.clone());
                                 let include_dir = resolved.parent().map(Path::to_path_buf);
+                                let include_file = resolved.to_string_lossy();
                                 let included = self.preprocess_source(
                                     &source,
+                                    include_file.as_ref(),
                                     include_dir.as_deref(),
                                     state.macros,
                                     state.included_files,
@@ -557,6 +564,47 @@ fn expand_macros(line: &str, macros: &HashMap<String, MacroDefinition>) -> Strin
         current = next;
     }
     current
+}
+
+fn expand_builtin_macros(line: &str, current_file: &str, line_number: usize) -> String {
+    let chars = line.chars().collect::<Vec<_>>();
+    let mut output = String::new();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let current = chars[index];
+        if current == '"' || current == '\'' {
+            copy_quoted(&chars, &mut index, &mut output);
+            continue;
+        }
+        if is_identifier_start(current) {
+            let identifier = read_identifier(&chars, &mut index);
+            match identifier.as_str() {
+                "__FILE__" => output.push_str(&c_string_literal(current_file)),
+                "__LINE__" => output.push_str(&line_number.to_string()),
+                _ => output.push_str(&identifier),
+            }
+            continue;
+        }
+        output.push(current);
+        index += 1;
+    }
+    output
+}
+
+fn c_string_literal(value: &str) -> String {
+    let mut literal = String::from("\"");
+    for current in value.chars() {
+        match current {
+            '\\' => literal.push_str("\\\\"),
+            '"' => literal.push_str("\\\""),
+            '\n' => literal.push_str("\\n"),
+            '\r' => literal.push_str("\\r"),
+            '\t' => literal.push_str("\\t"),
+            _ => literal.push(current),
+        }
+    }
+    literal.push('"');
+    literal
 }
 
 fn expand_macros_once(line: &str, macros: &HashMap<String, MacroDefinition>) -> String {
