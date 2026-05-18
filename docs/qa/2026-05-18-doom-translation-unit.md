@@ -973,3 +973,55 @@ FAIL p_inter.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After netinet Port Macro Recheck
+
+The preprocessor now supplies the Doom-era `IPPORT_USERRESERVED` constant for
+`<netinet/in.h>`, covering `i_net.c`'s global port definition:
+
+```text
+int DOOMPORT = (IPPORT_USERRESERVED +0x1d );
+```
+
+Regression coverage added:
+
+```text
+preprocessor_provides_doom_netinet_port_base
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779106926
+scan=/tmp/c99inrust-doom-scan-1779106926.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779106926.txt
+ok=9
+fail=53
+```
+
+This did not add a new OK translation unit, but it moved `i_net.c` into body
+parsing:
+
+```text
+before: FAIL i_net.c
+  error: 3870:16: unsupported global integer initializer
+after: FAIL i_net.c
+  error: 3905:5: expected expression
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7104:29: unsupported global integer initializer
+FAIL i_net.c
+  error: 3905:5: expected expression
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL p_inter.c
+  error: unsupported function parameter
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
