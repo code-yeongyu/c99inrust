@@ -240,19 +240,21 @@ impl Preprocessor {
 }
 
 fn define_builtin_system_macros(include_path: &str, macros: &mut HashMap<String, MacroDefinition>) {
-    if include_path != "values.h" {
-        return;
-    }
-    for (name, replacement) in [
-        ("MAXINT", "2147483647"),
-        ("MININT", "(-2147483647 - 1)"),
-        ("MAXLONG", "2147483647"),
-        ("MINLONG", "(-2147483647 - 1)"),
-    ] {
+    let definitions = match include_path {
+        "values.h" => &[
+            ("MAXINT", "2147483647"),
+            ("MININT", "(-2147483647 - 1)"),
+            ("MAXLONG", "2147483647"),
+            ("MINLONG", "(-2147483647 - 1)"),
+        ][..],
+        "netinet/in.h" => &[("IPPORT_USERRESERVED", "5000")][..],
+        _ => return,
+    };
+    for (name, replacement) in definitions {
         macros.insert(
-            name.to_string(),
+            (*name).to_string(),
             MacroDefinition::Object {
-                replacement: replacement.to_string(),
+                replacement: (*replacement).to_string(),
             },
         );
     }

@@ -102,6 +102,21 @@ fn preprocessor_provides_doom_values_h_integer_limits() {
 }
 
 #[test]
+fn preprocessor_provides_doom_netinet_port_base() {
+    // given
+    let source = "#include <netinet/in.h>\nint port = IPPORT_USERRESERVED + 0x1d;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-netinet.c", source)
+        .expect("preprocessor should provide Doom-era netinet port base");
+
+    // then
+    assert!(unit.source.contains("#include <netinet/in.h>"));
+    assert!(unit.source.contains("int port = 5000 + 0x1d;"));
+}
+
+#[test]
 fn preprocessor_removes_comments_before_macro_expansion() {
     // given
     let source = "#define HU_FONTSTART '!'\t// the first font character\n#define HU_FONTSIZE ('_' - HU_FONTSTART + 1)\nextern int hu_font[HU_FONTSIZE];\n";
