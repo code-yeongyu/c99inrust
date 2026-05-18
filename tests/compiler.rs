@@ -104,6 +104,25 @@ fn compiler_accepts_local_pointer_declaration_slice() {
 }
 
 #[test]
+fn compiler_accepts_local_char_array_string_initializer_slice() {
+    // given
+    let source = r#"void use(char* name) { name = name; }
+int main(void) { char name1[] = "FLOOR7_2"; char* name; name = name1; use(name); return 0; }"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tleaq .L"));
+    assert!(assembly.contains("\t.byte 70,76,79,79,82,55,95,50,0\n"));
+}
+
+#[test]
 fn compiler_accepts_pointer_dereference_slice() {
     // given
     let source = "int read_and_bump(int *p) { int value; value = *p; p++; return value; } int main(void) { return 0; }";

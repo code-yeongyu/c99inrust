@@ -538,7 +538,7 @@ impl Parser<'_> {
     }
 
     fn declaration_statement(&mut self, base_type: ScalarType) -> CompileResult<Statement> {
-        self.consume_declaration_type(base_type)?;
+        let type_includes_char = self.consume_declaration_type(base_type)?;
         let mut declarations = Vec::new();
         loop {
             let mut scalar_type = base_type;
@@ -547,7 +547,27 @@ impl Parser<'_> {
                 scalar_type = ScalarType::Pointer;
             }
             let name = self.expect_identifier()?;
-            let initializer = if self.check_punctuator("=") {
+            let initializer = if self.check_punctuator("[") {
+                if !type_includes_char || scalar_type != ScalarType::Int {
+                    return Err(CompileError::new(
+                        "only local char arrays with string initializers are supported",
+                    ));
+                }
+                self.advance();
+                if !self.check_punctuator("]") {
+                    let _size = self.expression()?;
+                }
+                self.expect_punctuator("]")?;
+                self.expect_punctuator("=")?;
+                let initializer = self.expression()?;
+                if !matches!(initializer, Expr::StringLiteral(_)) {
+                    return Err(CompileError::new(
+                        "local char arrays require string literal initializers",
+                    ));
+                }
+                scalar_type = ScalarType::Pointer;
+                Some(initializer)
+            } else if self.check_punctuator("=") {
                 self.advance();
                 Some(self.expression()?)
             } else {
@@ -994,15 +1014,18 @@ impl Parser<'_> {
             .map(|(scalar_type, _end)| scalar_type)
     }
 
-    fn consume_declaration_type(&mut self, expected: ScalarType) -> CompileResult<()> {
+    fn consume_declaration_type(&mut self, expected: ScalarType) -> CompileResult<bool> {
         let Some((actual, end)) = self.declaration_type_span_at_current() else {
             return self.expected("declaration type");
         };
         if actual != expected {
             return Err(CompileError::new("unexpected declaration type"));
         }
+        let type_includes_char = self.tokens[self.index..end]
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)));
         self.index = end;
-        Ok(())
+        Ok(type_includes_char)
     }
 
     fn declaration_type_span_at_current(&self) -> Option<(ScalarType, usize)> {
