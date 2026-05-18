@@ -82,6 +82,7 @@ pub enum ScalarType {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
+    Empty,
     Block(Vec<Self>),
     Declaration {
         scalar_type: ScalarType,
@@ -469,6 +470,10 @@ impl Parser<'_> {
     }
 
     fn statement(&mut self) -> CompileResult<Statement> {
+        if self.check_punctuator(";") {
+            self.advance();
+            return Ok(Statement::Empty);
+        }
         if self.check_punctuator("{") {
             return Ok(Statement::Block(self.block_items()?));
         }

@@ -159,6 +159,42 @@ fn compiler_accepts_post_decrement_condition_slice() {
 }
 
 #[test]
+fn compiler_emits_post_increment_value_slice() {
+    // given
+    let source = "int main(void) { int x = 4; return (x++ == 4 && x == 5) ? 0 : 1; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\taddl $1, %eax\n"));
+    assert!(assembly.contains("\tmovl $4, %eax\n"));
+    assert!(assembly.contains("\tmovl $5, %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_pointer_post_increment_dereference_slice() {
+    // given
+    let source = "void skip(int *p) { while (*(p++) != 1); } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("skip:"));
+    assert!(assembly.contains("\taddq $1, %rax\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_address_of_subscript_slice() {
     // given
     let source = "int address_of_subscript(int *p, int i) { int *q; q = &p[i]; return 0; } int main(void) { return 0; }";

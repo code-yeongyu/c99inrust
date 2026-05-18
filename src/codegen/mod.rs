@@ -82,7 +82,9 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         | LoweredExpr::Call { .. }
         | LoweredExpr::Integer(_) => ValueWidth::I32,
         LoweredExpr::PointerSubscript { element_type, .. } => scalar_width(*element_type),
-        LoweredExpr::Assign { target, .. } => lowered_lvalue_width(target),
+        LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
+            lowered_lvalue_width(target)
+        }
         LoweredExpr::Unary { op, expr } => match op {
             UnaryOp::LogicalNot => ValueWidth::I32,
             UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot => expr_width(expr),
@@ -623,6 +625,67 @@ fn emit_aarch64_expr_natural(
         LoweredExpr::StringLiteral(value) => {
             emit_aarch64_load_string_address(value, labels, assembly)
         }
+        expr @ (LoweredExpr::Global { .. }
+        | LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::PointerSubscript { .. }
+        | LoweredExpr::PointerField { .. }
+        | LoweredExpr::Assign { .. }
+        | LoweredExpr::PostIncrement { .. }) => {
+            emit_aarch64_memory_expr(expr, temporary_base, depth, labels, assembly)
+        }
+        LoweredExpr::Local {
+            offset,
+            scalar_type,
+        } => emit_aarch64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
+        LoweredExpr::Unary { op, expr } => {
+            emit_aarch64_unary_expr(*op, expr, temporary_base, depth, labels, assembly)
+        }
+        LoweredExpr::Cast { target, expr } => emit_aarch64_expr_with_width(
+            expr,
+            scalar_width(*target),
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => emit_aarch64_conditional(
+            ConditionalExpr {
+                condition,
+                then_expr,
+                else_expr,
+            },
+            expr_width(expr),
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Binary { op, left, right } => emit_aarch64_binary_expr(
+            BinaryExpr {
+                op: *op,
+                left,
+                right,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_aarch64_memory_expr(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match expr {
         LoweredExpr::Global { name, scalar_type } => {
             emit_aarch64_load_global(name, scalar_width(*scalar_type), labels.target, assembly)
         }
@@ -669,48 +732,12 @@ fn emit_aarch64_expr_natural(
         LoweredExpr::Assign { target, value } => {
             emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
         }
-        LoweredExpr::Local {
-            offset,
-            scalar_type,
-        } => emit_aarch64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
-        LoweredExpr::Unary { op, expr } => {
-            emit_aarch64_unary_expr(*op, expr, temporary_base, depth, labels, assembly)
+        LoweredExpr::PostIncrement { target } => {
+            emit_aarch64_post_increment(target, temporary_base, depth, labels.target, assembly)
         }
-        LoweredExpr::Cast { target, expr } => emit_aarch64_expr_with_width(
-            expr,
-            scalar_width(*target),
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
-        LoweredExpr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => emit_aarch64_conditional(
-            ConditionalExpr {
-                condition,
-                then_expr,
-                else_expr,
-            },
-            expr_width(expr),
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
-        LoweredExpr::Binary { op, left, right } => emit_aarch64_binary_expr(
-            BinaryExpr {
-                op: *op,
-                left,
-                right,
-            },
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
+        _ => Err(CompileError::new(
+            "internal error: expected aarch64 memory expression",
+        )),
     }
 }
 
@@ -1152,6 +1179,50 @@ fn emit_aarch64_assign(
     }
 }
 
+fn emit_aarch64_post_increment(
+    target: &LoweredLValue,
+    temporary_base: usize,
+    depth: usize,
+    codegen_target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = lowered_lvalue_width(target);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    match target {
+        LoweredLValue::Local { offset, .. } => {
+            emit_aarch64_load_temporary(width, *offset, assembly)?;
+            emit_aarch64_store_temporary(width, value_offset, assembly)?;
+            emit_aarch64_increment_result(width, assembly)?;
+            emit_aarch64_store_result(width, *offset, assembly)?;
+            emit_aarch64_load_temporary(width, value_offset, assembly)
+        }
+        LoweredLValue::Global { name, .. } => {
+            emit_aarch64_load_global(name, width, codegen_target, assembly)?;
+            emit_aarch64_store_temporary(width, value_offset, assembly)?;
+            emit_aarch64_increment_result(width, assembly)?;
+            emit_aarch64_store_global(name, width, codegen_target, assembly)?;
+            emit_aarch64_load_temporary(width, value_offset, assembly)
+        }
+        LoweredLValue::PointerSubscript { .. } | LoweredLValue::PointerField { .. } => Err(
+            CompileError::new("post-increment expression supports direct lvalues only"),
+        ),
+    }
+}
+
+fn emit_aarch64_increment_result(width: ValueWidth, assembly: &mut String) -> CompileResult<()> {
+    match width {
+        ValueWidth::I32 => {
+            assembly.push_str("\tadd w0, w0, #1\n");
+            Ok(())
+        }
+        ValueWidth::I64 => {
+            assembly.push_str("\tadd x0, x0, #1\n");
+            Ok(())
+        }
+        ValueWidth::F64 => Err(CompileError::new("unsupported double post-increment")),
+    }
+}
+
 fn emit_aarch64_store_pointer_subscript(
     subscript: PointerSubscriptExpr<'_>,
     value: &LoweredExpr,
@@ -1466,7 +1537,8 @@ fn emit_x86_64_expr_natural(
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::PointerSubscript { .. }
         | LoweredExpr::PointerField { .. }
-        | LoweredExpr::Assign { .. }) => emit_x86_64_global_or_assignment_expr(
+        | LoweredExpr::Assign { .. }
+        | LoweredExpr::PostIncrement { .. }) => emit_x86_64_global_or_assignment_expr(
             expr,
             temporary_base,
             depth,
@@ -1479,29 +1551,7 @@ fn emit_x86_64_expr_natural(
             scalar_type,
         } => emit_x86_64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
         LoweredExpr::Unary { op, expr } => {
-            emit_x86_64_expr(expr, temporary_base, depth, target, labels, assembly)?;
-            let width = expr_width(expr);
-            match op {
-                UnaryOp::Plus => {}
-                UnaryOp::Minus => match width {
-                    ValueWidth::I32 => assembly.push_str("\tnegl %eax\n"),
-                    ValueWidth::I64 => assembly.push_str("\tnegq %rax\n"),
-                    ValueWidth::F64 => emit_x86_64_negate_f64(target, labels, assembly)?,
-                },
-                UnaryOp::BitNot => match width {
-                    ValueWidth::I32 => assembly.push_str("\tnotl %eax\n"),
-                    ValueWidth::I64 => assembly.push_str("\tnotq %rax\n"),
-                    ValueWidth::F64 => {
-                        return Err(CompileError::new("unsupported double bitwise operator"));
-                    }
-                },
-                UnaryOp::LogicalNot => {
-                    emit_x86_64_compare_result_to_zero(width, assembly);
-                    assembly.push_str("\tsete %al\n");
-                    assembly.push_str("\tmovzbl %al, %eax\n");
-                }
-            }
-            Ok(())
+            emit_x86_64_unary_expr(*op, expr, temporary_base, depth, target, labels, assembly)
         }
         LoweredExpr::Cast {
             target: scalar_type,
@@ -1545,6 +1595,40 @@ fn emit_x86_64_expr_natural(
             assembly,
         ),
     }
+}
+
+fn emit_x86_64_unary_expr(
+    op: UnaryOp,
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    emit_x86_64_expr(expr, temporary_base, depth, target, labels, assembly)?;
+    let width = expr_width(expr);
+    match op {
+        UnaryOp::Plus => {}
+        UnaryOp::Minus => match width {
+            ValueWidth::I32 => assembly.push_str("\tnegl %eax\n"),
+            ValueWidth::I64 => assembly.push_str("\tnegq %rax\n"),
+            ValueWidth::F64 => emit_x86_64_negate_f64(target, labels, assembly)?,
+        },
+        UnaryOp::BitNot => match width {
+            ValueWidth::I32 => assembly.push_str("\tnotl %eax\n"),
+            ValueWidth::I64 => assembly.push_str("\tnotq %rax\n"),
+            ValueWidth::F64 => {
+                return Err(CompileError::new("unsupported double bitwise operator"));
+            }
+        },
+        UnaryOp::LogicalNot => {
+            emit_x86_64_compare_result_to_zero(width, assembly);
+            assembly.push_str("\tsete %al\n");
+            assembly.push_str("\tmovzbl %al, %eax\n");
+        }
+    }
+    Ok(())
 }
 
 fn emit_x86_64_integer(value: i64, assembly: &mut String) -> CompileResult<()> {
@@ -1618,6 +1702,9 @@ fn emit_x86_64_global_or_assignment_expr(
             labels,
             assembly,
         ),
+        LoweredExpr::PostIncrement { target: lvalue } => {
+            emit_x86_64_post_increment(lvalue, temporary_base, depth, target, labels, assembly)
+        }
         _ => Err(CompileError::new(
             "internal error: expected x86-64 global expression",
         )),
@@ -2127,6 +2214,51 @@ fn emit_x86_64_assign(
     }
 }
 
+fn emit_x86_64_post_increment(
+    target: &LoweredLValue,
+    temporary_base: usize,
+    depth: usize,
+    codegen_target: Target,
+    _labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = lowered_lvalue_width(target);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    match target {
+        LoweredLValue::Local { offset, .. } => {
+            emit_x86_64_load_temporary(width, *offset, assembly)?;
+            emit_x86_64_store_temporary(width, value_offset, assembly)?;
+            emit_x86_64_increment_result(width, assembly)?;
+            emit_x86_64_store_result(width, *offset, assembly)?;
+            emit_x86_64_load_temporary(width, value_offset, assembly)
+        }
+        LoweredLValue::Global { name, .. } => {
+            emit_x86_64_load_global(name, width, codegen_target, assembly)?;
+            emit_x86_64_store_temporary(width, value_offset, assembly)?;
+            emit_x86_64_increment_result(width, assembly)?;
+            emit_x86_64_store_global(name, width, codegen_target, assembly)?;
+            emit_x86_64_load_temporary(width, value_offset, assembly)
+        }
+        LoweredLValue::PointerSubscript { .. } | LoweredLValue::PointerField { .. } => Err(
+            CompileError::new("post-increment expression supports direct lvalues only"),
+        ),
+    }
+}
+
+fn emit_x86_64_increment_result(width: ValueWidth, assembly: &mut String) -> CompileResult<()> {
+    match width {
+        ValueWidth::I32 => {
+            assembly.push_str("\taddl $1, %eax\n");
+            Ok(())
+        }
+        ValueWidth::I64 => {
+            assembly.push_str("\taddq $1, %rax\n");
+            Ok(())
+        }
+        ValueWidth::F64 => Err(CompileError::new("unsupported double post-increment")),
+    }
+}
+
 fn emit_x86_64_store_pointer_subscript(
     subscript: PointerSubscriptExpr<'_>,
     value: &LoweredExpr,
@@ -2527,6 +2659,7 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         }
         LoweredExpr::PointerField { pointer, .. } => 1 + expr_depth(pointer),
         LoweredExpr::Assign { target, value } => assign_expr_depth(target, value),
+        LoweredExpr::PostIncrement { target } => 1 + lvalue_address_depth(target),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
             left,
@@ -2619,6 +2752,7 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         LoweredExpr::Assign { target, value } => {
             lvalue_needs_preserved_temp(target) || expr_needs_preserved_temp(value)
         }
+        LoweredExpr::PostIncrement { target } => lvalue_needs_preserved_temp(target),
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
@@ -2670,6 +2804,7 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         }
         LoweredExpr::PointerField { pointer, .. } => expr_uses_call(pointer),
         LoweredExpr::Assign { target, value } => lvalue_uses_call(target) || expr_uses_call(value),
+        LoweredExpr::PostIncrement { target } => lvalue_uses_call(target),
         LoweredExpr::Conditional {
             condition,
             then_expr,

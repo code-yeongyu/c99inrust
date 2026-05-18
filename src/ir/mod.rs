@@ -98,6 +98,9 @@ pub enum LoweredExpr {
         target: LoweredLValue,
         value: Box<Self>,
     },
+    PostIncrement {
+        target: LoweredLValue,
+    },
     Local {
         offset: usize,
         scalar_type: ScalarType,
@@ -481,6 +484,7 @@ impl LoweringContext {
 
     fn lower_statement(&mut self, statement: &Statement) -> CompileResult<()> {
         match statement {
+            Statement::Empty => Ok(()),
             Statement::Block(statements) => self.lower_block(statements),
             Statement::Declaration {
                 scalar_type,
@@ -767,9 +771,7 @@ impl LoweringContext {
                     value: Box::new(self.lower_expr(value)?),
                 })
             }
-            Expr::PostIncrement { .. } => Err(CompileError::new(
-                "post-increment values are not supported yet",
-            )),
+            Expr::PostIncrement { target } => self.lower_post_increment_expr(target),
             Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
@@ -1029,14 +1031,7 @@ impl LoweringContext {
 
     fn lower_post_increment_statement(&mut self, target: &LValue) -> CompileResult<()> {
         let target = self.lower_lvalue(target)?;
-        if !matches!(
-            lowered_lvalue_scalar_type(&target),
-            ScalarType::Int | ScalarType::Pointer
-        ) {
-            return Err(CompileError::new(
-                "post-increment currently supports int and pointer lvalues only",
-            ));
-        }
+        ensure_post_increment_scalar(&target)?;
         let current = lowered_lvalue_to_expr(&target);
         self.push_store(
             target,
@@ -1048,6 +1043,24 @@ impl LoweringContext {
         );
         Ok(())
     }
+
+    fn lower_post_increment_expr(&self, target: &LValue) -> CompileResult<LoweredExpr> {
+        let target = self.lower_lvalue(target)?;
+        ensure_post_increment_scalar(&target)?;
+        Ok(LoweredExpr::PostIncrement { target })
+    }
+}
+
+fn ensure_post_increment_scalar(target: &LoweredLValue) -> CompileResult<()> {
+    if !matches!(
+        lowered_lvalue_scalar_type(target),
+        ScalarType::Int | ScalarType::Pointer
+    ) {
+        return Err(CompileError::new(
+            "post-increment currently supports int and pointer lvalues only",
+        ));
+    }
+    Ok(())
 }
 
 const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
@@ -1060,7 +1073,9 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
         }
         | LoweredExpr::PointerField { scalar_type, .. } => Some(*scalar_type),
         LoweredExpr::PointerSubscript { element_type, .. } => Some(*element_type),
-        LoweredExpr::Assign { target, .. } => Some(lowered_lvalue_scalar_type(target)),
+        LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
+            Some(lowered_lvalue_scalar_type(target))
+        }
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
@@ -1281,7 +1296,8 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
             inline_constant_calls_in_expr(left, constants);
             inline_constant_calls_in_expr(right, constants);
         }
-        LoweredExpr::Integer(_)
+        LoweredExpr::PostIncrement { .. }
+        | LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
