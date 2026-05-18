@@ -14,13 +14,15 @@ This repository currently ships the first verified vertical slice:
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
 | Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
 | Parser | int function bodies with local `int` declarations, assignments, zero-argument calls, `if`/`else`, `while`, `for`, blocks, returns, plus Doom-shaped surface declarations |
-| IR | scoped local-slot lowering, label lowering, zero-argument call lowering, and short-circuit logical lowering for supported `int` statements and expressions |
-| Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly with zero-argument direct calls |
+| IR | scoped local-slot lowering, label lowering, zero-argument call lowering, constant integer call folding, and short-circuit logical lowering for supported `int` statements and expressions |
+| Codegen | native macOS ARM64 assembly, native executable build via host `cc`, plus modeled x86_64 Darwin/Linux assembly with zero-argument direct calls |
 | Doom | official source audit command and QA plan |
 
 Full C99, full Doom playability, all-world architecture coverage, and
-Clang-beating optimization are explicit future milestones. The compiler will
-not claim those until the checks prove them.
+general Clang-beating optimization are explicit future milestones. The current
+benchmark slice beats local Apple Clang for compile-to-assembly time,
+one-command binary build time, runtime, and basic assembly-shape counters; see
+`docs/qa/2026-05-18-rust-slop-performance.md`.
 
 The full-spec track is enforced through a Clang-oracle test harness: supported
 C99 snippets must compile with `c99inrust`, compile with the host C compiler in
@@ -42,6 +44,8 @@ c99inrust lex examples/answer.c
 c99inrust preprocess -I include examples/answer.c
 c99inrust compile -S examples/answer.c -o answer.s
 cc answer.s -o answer
+./answer
+c99inrust build examples/answer.c -o answer
 ./answer
 ```
 

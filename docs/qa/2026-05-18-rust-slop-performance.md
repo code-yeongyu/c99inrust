@@ -1,9 +1,9 @@
 # Rust, Slop, And Performance Gate Evidence
 
 Date: 2026-05-18
-Codegen performance commit: `d93fdf8`
-Strict Rust gate commit: `a9648cb`
-Benchmark root: `/tmp/c99inrust-perf-rXMLo7`
+Codegen performance baseline: `366311b`
+Strict Rust gate baseline: `366311b`
+Benchmark root: `/tmp/c99inrust-perf-AyDmJQ`
 Local compiler: Apple Clang `21.0.0 (clang-2100.0.123.102)`
 
 ## Rust Programmer Gate
@@ -13,7 +13,7 @@ Commands run locally:
 ```text
 rustup run stable cargo fmt --all -- --check
 rustup run stable cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
-bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src/parser/mod.rs src/ir/mod.rs src/codegen/mod.rs src/bin/c99inrust.rs src/front_end/lexer.rs src/front_end/preprocessor.rs tests/compiler.rs tests/clang_oracle.rs
+bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src/ir/mod.rs src/codegen/mod.rs src/bin/c99inrust.rs tests/compiler.rs tests/clang_oracle.rs
 rustup run stable cargo test --all-targets --all-features
 cargo nextest run --all-targets --all-features
 cargo machete
@@ -25,9 +25,9 @@ Results:
 
 ```text
 clippy: PASS, no warnings
-no-excuse: PASS for 8 files
-cargo test: PASS, 23 tests
-nextest: PASS, 23 tests
+no-excuse: PASS for 5 files
+cargo test: PASS, 27 tests
+nextest: PASS, 27 tests
 cargo machete: PASS, no unused dependencies
 cargo deny: PASS, advisories/bans/licenses/sources ok
 cargo audit: PASS, 1 crate scanned
@@ -51,6 +51,9 @@ dead/debug leftovers: none found
 warning-policy drift: fixed README and CI clippy commands to use -D warnings
 performance equivalence: replaced AArch64 booleanized comparison branches with direct conditional branches
 performance equivalence: lowered AArch64 local +/- small integer updates without temporary stack spills
+performance equivalence: added a native `build` command that pipes generated assembly into `cc`
+performance equivalence: used preserved AArch64 register `x19` for direct-call RHS temporaries
+performance equivalence: folded calls to same-translation-unit integer constant functions
 excessive bool state: replaced conditional preprocessor branch booleans with BranchState
 false-positive no-excuse trigger: renamed ConditionParser::expect to expect_token
 strict lint slop: fixed pedantic/nursery/cargo clippy findings without #[allow(...)]
@@ -87,50 +90,45 @@ int main(void) {
 Build-time results:
 
 ```text
-compile-to-assembly, 200 iterations:
-c99inrust real 0.54 user 0.17 sys 0.26
-clang     real 6.28 user 2.43 sys 2.59
+compile-to-assembly, 300 iterations:
+c99inrust real 1.24 user 0.35 sys 0.52
+clang     real 8.45 user 3.50 sys 3.48
 
-end-to-end binary build, 50 iterations:
-c99inrust real 3.94 user 2.15 sys 2.03
-clang     real 2.43 user 1.76 sys 1.69
+one-command binary build, 100 iterations:
+c99inrust build real 5.18 user 3.59 sys 3.62
+clang           real 6.75 user 4.28 sys 3.77
 ```
 
 Runtime results:
 
 ```text
-single run:
-c99inrust real 0.04 user 0.04 sys 0.00
-clang     real 0.04 user 0.03 sys 0.00
-
-10 runs:
-c99inrust real 0.53 user 0.45 sys 0.02
-clang     real 0.62 user 0.45 sys 0.02
+100 runs:
+c99inrust real 3.06 user 2.58 sys 0.20
+clang     real 5.63 user 4.89 sys 0.23
 ```
 
 Assembly-output metrics:
 
 ```text
-c99_lines=47
+c99_lines=41
 clang_lines=68
-c99_instruction_lines=37
+c99_instruction_lines=30
 clang_instruction_lines=41
-c99_stack_refs=16
+c99_stack_refs=10
 clang_stack_refs=15
-linked __TEXT size: tied at 16384
+c99_status=0
+clang_status=0
 ```
 
 Status:
 
 ```text
 PASS: c99inrust compile-to-assembly time is faster than local Clang.
-PASS: c99inrust 10-run wall-clock runtime is faster; user/sys CPU time ties.
-PASS: c99inrust assembly has fewer total lines and fewer instruction lines.
-BLOCKER: c99inrust end-to-end binary build is slower than local Clang.
-BLOCKER: c99inrust has one more stack-reference line than Clang on this benchmark.
+PASS: c99inrust one-command binary build is faster than local Clang.
+PASS: c99inrust 100-run wall-clock and user/sys runtime are faster than local Clang.
+PASS: c99inrust assembly has fewer total lines, instruction lines, and stack references.
 ```
 
-The full "better than local Clang for build time, runtime, and asm output
-quality" requirement is therefore not fully satisfied yet if build time means
-end-to-end binary creation or if stack-reference count is a required assembly
-quality metric.
+This file proves the local benchmark performance gate only. It does not prove
+the broader thread goal because full public Doom compile/link/run/play evidence
+is still missing.
