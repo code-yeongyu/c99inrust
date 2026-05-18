@@ -65,6 +65,25 @@ fn compiler_emits_stack_slots_for_local_int_assignments() {
 }
 
 #[test]
+fn compiler_accepts_compound_assignment_slice() {
+    // given
+    let source = "int main(void) { int x = 40; int y = 8; x += y / 2; x -= 1; return x; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tidivl %ecx\n"));
+    assert!(assembly.contains("\taddl %ecx, %eax\n"));
+    assert!(assembly.contains("\tsubl %ecx, %eax\n"));
+    assert!(assembly.contains("ret"));
+}
+
+#[test]
 fn compiler_marks_linux_assembly_stack_non_executable() {
     // given
     let source = "int main(void) { return 0; }";
@@ -959,6 +978,37 @@ fn compiler_accepts_unsigned_scalar_return_signatures() {
     // then
     assert!(assembly.contains(".globl _SwapSHORT"));
     assert!(assembly.contains("movz w0, #42"));
+}
+
+#[test]
+fn compiler_accepts_doom_member_access_slice() {
+    // given
+    let source = r"typedef int fixed_t;
+typedef struct { fixed_t x,y; } mpoint_t;
+typedef struct { mpoint_t a,b; } mline_t;
+typedef struct { fixed_t slp, islp; } islope_t;
+void AM_getIslope(mline_t* ml, islope_t* is) {
+    int dx, dy;
+    dy = ml->a.y - ml->b.y;
+    dx = ml->b.x - ml->a.x;
+    is->islp = dx + dy;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl AM_getIslope"));
+    assert!(assembly.contains("\tmovl 4(%rax), %eax\n"));
+    assert!(assembly.contains("\tmovl 12(%rax), %eax\n"));
+    assert!(assembly.contains("\tmovl 8(%rax), %eax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+    assert!(assembly.contains("\tmovl %eax, 4(%rcx)\n"));
 }
 
 #[test]

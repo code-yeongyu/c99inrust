@@ -50,6 +50,13 @@ struct PointerSubscriptExpr<'a> {
     element_type: ScalarType,
 }
 
+#[derive(Clone, Copy)]
+struct PointerFieldExpr<'a> {
+    pointer: &'a LoweredExpr,
+    offset: usize,
+    scalar_type: ScalarType,
+}
+
 const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
     match scalar_type {
         ScalarType::Int => ValueWidth::I32,
@@ -66,6 +73,7 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         LoweredExpr::Global { scalar_type, .. } | LoweredExpr::Local { scalar_type, .. } => {
             scalar_width(*scalar_type)
         }
+        LoweredExpr::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
         LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::PointerSubscript {
             element_type: ScalarType::Int,
@@ -94,6 +102,7 @@ const fn lowered_lvalue_width(target: &LoweredLValue) -> ValueWidth {
             scalar_width(*scalar_type)
         }
         LoweredLValue::PointerSubscript { element_type, .. } => scalar_width(*element_type),
+        LoweredLValue::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
     }
 }
 
@@ -642,6 +651,21 @@ fn emit_aarch64_expr_natural(
             labels,
             assembly,
         ),
+        LoweredExpr::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => emit_aarch64_load_pointer_field(
+            PointerFieldExpr {
+                pointer,
+                offset: *offset,
+                scalar_type: *scalar_type,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         LoweredExpr::Assign { target, value } => {
             emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
         }
@@ -1109,6 +1133,22 @@ fn emit_aarch64_assign(
             labels,
             assembly,
         ),
+        LoweredLValue::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => emit_aarch64_store_pointer_field(
+            PointerFieldExpr {
+                pointer,
+                offset: *offset,
+                scalar_type: *scalar_type,
+            },
+            value,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
     }
 }
 
@@ -1150,6 +1190,60 @@ fn emit_aarch64_store_pointer_subscript(
         "\tstr {}, [x16, w17, sxtw #{}]\n",
         aarch64_result_register(width),
         memory_scale_shift(width)
+    )
+}
+
+fn emit_aarch64_load_pointer_field(
+    field: PointerFieldExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(field.scalar_type);
+    emit_aarch64_expr_with_width(
+        field.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(
+        assembly,
+        "\tldr {}, [x0, #{}]\n",
+        aarch64_result_register(width),
+        field.offset
+    )
+}
+
+fn emit_aarch64_store_pointer_field(
+    field: PointerFieldExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(field.scalar_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
+    emit_aarch64_store_temporary(width, value_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        field.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmov x16, x0\n");
+    emit_aarch64_load_temporary(width, value_offset, assembly)?;
+    write_assembly!(
+        assembly,
+        "\tstr {}, [x16, #{}]\n",
+        aarch64_result_register(width),
+        field.offset
     )
 }
 
@@ -1371,6 +1465,7 @@ fn emit_x86_64_expr_natural(
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::PointerSubscript { .. }
+        | LoweredExpr::PointerField { .. }
         | LoweredExpr::Assign { .. }) => emit_x86_64_global_or_assignment_expr(
             expr,
             temporary_base,
@@ -1488,6 +1583,22 @@ fn emit_x86_64_global_or_assignment_expr(
                 pointer,
                 index,
                 element_type: *element_type,
+            },
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => emit_x86_64_load_pointer_field(
+            PointerFieldExpr {
+                pointer,
+                offset: *offset,
+                scalar_type: *scalar_type,
             },
             temporary_base,
             depth,
@@ -1917,6 +2028,33 @@ fn emit_x86_64_load_pointer_subscript(
     )
 }
 
+fn emit_x86_64_load_pointer_field(
+    field: PointerFieldExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(field.scalar_type);
+    emit_x86_64_expr_with_width(
+        field.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(
+        assembly,
+        "\tmov{} {}(%rax), {}\n",
+        x86_64_instruction_suffix(width),
+        field.offset,
+        x86_64_result_register(width)
+    )
+}
+
 fn emit_x86_64_assign(
     target: &LoweredLValue,
     value: &LoweredExpr,
@@ -1961,6 +2099,23 @@ fn emit_x86_64_assign(
                 pointer,
                 index,
                 element_type: *element_type,
+            },
+            value,
+            temporary_base,
+            depth,
+            codegen_target,
+            labels,
+            assembly,
+        ),
+        LoweredLValue::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => emit_x86_64_store_pointer_field(
+            PointerFieldExpr {
+                pointer,
+                offset: *offset,
+                scalar_type: *scalar_type,
             },
             value,
             temporary_base,
@@ -2023,6 +2178,47 @@ fn emit_x86_64_store_pointer_subscript(
         x86_64_instruction_suffix(width),
         x86_64_result_register(width),
         memory_scale_bytes(width)
+    )
+}
+
+fn emit_x86_64_store_pointer_field(
+    field: PointerFieldExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(field.scalar_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    emit_x86_64_expr_with_width(
+        value,
+        width,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(width, value_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        field.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmovq %rax, %rcx\n");
+    emit_x86_64_load_temporary(width, value_offset, assembly)?;
+    write_assembly!(
+        assembly,
+        "\tmov{} {}, {}(%rcx)\n",
+        x86_64_instruction_suffix(width),
+        x86_64_result_register(width),
+        field.offset
     )
 }
 
@@ -2329,6 +2525,7 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             pointer_lvalue_address_depth(pointer, index)
         }
+        LoweredExpr::PointerField { pointer, .. } => 1 + expr_depth(pointer),
         LoweredExpr::Assign { target, value } => assign_expr_depth(target, value),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
@@ -2358,6 +2555,7 @@ fn lvalue_address_depth(target: &LoweredLValue) -> usize {
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             pointer_lvalue_address_depth(pointer, index)
         }
+        LoweredLValue::PointerField { pointer, .. } => 1 + expr_depth(pointer),
     }
 }
 
@@ -2417,6 +2615,7 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
         }
+        LoweredExpr::PointerField { pointer, .. } => expr_needs_preserved_temp(pointer),
         LoweredExpr::Assign { target, value } => {
             lvalue_needs_preserved_temp(target) || expr_needs_preserved_temp(value)
         }
@@ -2435,6 +2634,7 @@ fn lvalue_needs_preserved_temp(target: &LoweredLValue) -> bool {
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
         }
+        LoweredLValue::PointerField { pointer, .. } => expr_needs_preserved_temp(pointer),
     }
 }
 
@@ -2468,6 +2668,7 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             expr_uses_call(pointer) || expr_uses_call(index)
         }
+        LoweredExpr::PointerField { pointer, .. } => expr_uses_call(pointer),
         LoweredExpr::Assign { target, value } => lvalue_uses_call(target) || expr_uses_call(value),
         LoweredExpr::Conditional {
             condition,
@@ -2484,6 +2685,7 @@ fn lvalue_uses_call(target: &LoweredLValue) -> bool {
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             expr_uses_call(pointer) || expr_uses_call(index)
         }
+        LoweredLValue::PointerField { pointer, .. } => expr_uses_call(pointer),
     }
 }
 

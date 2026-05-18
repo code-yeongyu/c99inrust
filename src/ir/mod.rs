@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
-    BinaryOp, Constant, Expr, Function, Global, GlobalInitializer, LValue, Program, ReturnType,
-    ScalarType, Statement, UnaryOp,
+    BinaryOp, Constant, Expr, FieldType, Function, Global, GlobalInitializer, LValue, Program,
+    ReturnType, ScalarType, Statement, StructLayout, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +89,11 @@ pub enum LoweredExpr {
         index: Box<Self>,
         element_type: ScalarType,
     },
+    PointerField {
+        pointer: Box<Self>,
+        offset: usize,
+        scalar_type: ScalarType,
+    },
     Assign {
         target: LoweredLValue,
         value: Box<Self>,
@@ -133,6 +138,11 @@ pub enum LoweredLValue {
         index: Box<LoweredExpr>,
         element_type: ScalarType,
     },
+    PointerField {
+        pointer: Box<LoweredExpr>,
+        offset: usize,
+        scalar_type: ScalarType,
+    },
 }
 
 /// Lowers parsed functions into stack-slot IR.
@@ -142,12 +152,18 @@ pub enum LoweredLValue {
 /// Returns an error when a function body uses unsupported semantics such as
 /// undeclared locals or a missing `int` return.
 pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
+    let structs = program
+        .structs
+        .iter()
+        .map(|layout| (layout.name.clone(), layout.clone()))
+        .collect::<HashMap<_, _>>();
     let constants = lower_constants(&program.constants)?;
     let (globals, global_bindings) = lower_globals(&program.globals, &constants)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function_with_globals(
             function,
+            &structs,
             &global_bindings,
             &constants,
         )?);
@@ -279,6 +295,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Subscript { .. } => Err(CompileError::new(
             "subscript expression is not an integer constant expression",
         )),
+        Expr::Member { .. } => Err(CompileError::new(
+            "member expression is not an integer constant expression",
+        )),
         Expr::Assignment { .. } => Err(CompileError::new(
             "assignment expression is not an integer constant expression",
         )),
@@ -332,19 +351,26 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 /// Returns an error when lowering detects unsupported semantics such as
 /// undeclared locals, duplicate locals in a scope, or a missing `int` return.
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
+    let structs = HashMap::new();
     let global_bindings = HashMap::new();
     let constants = HashMap::new();
-    lower_function_with_globals(function, &global_bindings, &constants)
+    lower_function_with_globals(function, &structs, &global_bindings, &constants)
 }
 
 fn lower_function_with_globals(
     function: &Function,
+    structs: &HashMap<String, StructLayout>,
     global_bindings: &HashMap<String, GlobalBinding>,
     constants: &HashMap<String, i64>,
 ) -> CompileResult<LoweredFunction> {
-    let mut context = LoweringContext::new(function.return_type, global_bindings, constants);
+    let mut context =
+        LoweringContext::new(function.return_type, structs, global_bindings, constants);
     for parameter in &function.parameters {
-        context.declare_local(&parameter.name, parameter.scalar_type)?;
+        context.declare_local(
+            &parameter.name,
+            parameter.scalar_type,
+            parameter.referent.clone(),
+        )?;
     }
     for statement in &function.statements {
         context.lower_statement(statement)?;
@@ -367,10 +393,11 @@ fn lower_function_with_globals(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct LocalBinding {
     slot: usize,
     scalar_type: ScalarType,
+    referent: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -400,8 +427,21 @@ impl GlobalBinding {
     }
 }
 
+struct ResolvedMember {
+    pointer: LoweredExpr,
+    offset: usize,
+    field_type: FieldType,
+}
+
+struct StructAddress {
+    pointer: LoweredExpr,
+    offset: usize,
+    struct_name: String,
+}
+
 struct LoweringContext {
     return_type: ReturnType,
+    structs: HashMap<String, StructLayout>,
     global_bindings: HashMap<String, GlobalBinding>,
     constants: HashMap<String, i64>,
     scopes: Vec<HashMap<String, LocalBinding>>,
@@ -415,11 +455,13 @@ struct LoweringContext {
 impl LoweringContext {
     fn new(
         return_type: ReturnType,
+        structs: &HashMap<String, StructLayout>,
         global_bindings: &HashMap<String, GlobalBinding>,
         constants: &HashMap<String, i64>,
     ) -> Self {
         Self {
             return_type,
+            structs: structs.clone(),
             global_bindings: global_bindings.clone(),
             constants: constants.clone(),
             scopes: vec![HashMap::new()],
@@ -439,7 +481,7 @@ impl LoweringContext {
                 name,
                 initializer,
             } => {
-                let slot = self.declare_local(name, *scalar_type)?;
+                let slot = self.declare_local(name, *scalar_type, None)?;
                 let value = initializer.as_ref().map_or_else(
                     || Ok(zero_expr_for(*scalar_type)),
                     |expr| self.lower_expr(expr),
@@ -604,7 +646,12 @@ impl LoweringContext {
         self.pop_scope()
     }
 
-    fn declare_local(&mut self, name: &str, scalar_type: ScalarType) -> CompileResult<usize> {
+    fn declare_local(
+        &mut self,
+        name: &str,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    ) -> CompileResult<usize> {
         let Some(scope) = self.scopes.last_mut() else {
             return Err(CompileError::new("internal error: no local scope"));
         };
@@ -620,7 +667,14 @@ impl LoweringContext {
             offset,
             scalar_type,
         });
-        scope.insert(name.to_string(), LocalBinding { slot, scalar_type });
+        scope.insert(
+            name.to_string(),
+            LocalBinding {
+                slot,
+                scalar_type,
+                referent,
+            },
+        );
         Ok(slot)
     }
 
@@ -641,7 +695,7 @@ impl LoweringContext {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(name).copied())
+            .find_map(|scope| scope.get(name).cloned())
     }
 
     fn local_offset(&self, slot: usize) -> CompileResult<usize> {
@@ -692,6 +746,11 @@ impl LoweringContext {
             Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
             Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
+            Expr::Member {
+                base,
+                field,
+                dereference,
+            } => self.lower_member_expr(base, field, *dereference),
             Expr::Subscript { array, index } => self.lower_subscript(array, index),
             Expr::Assignment { target, value } => {
                 let target = self.lower_lvalue(target)?;
@@ -753,6 +812,11 @@ impl LoweringContext {
                 )))
             }
             LValue::Subscript { array, index } => self.lower_subscript_lvalue(array, index),
+            LValue::Member {
+                base,
+                field,
+                dereference,
+            } => self.lower_member_lvalue(base, field, *dereference),
         }
     }
 
@@ -793,6 +857,117 @@ impl LoweringContext {
         })
     }
 
+    fn lower_member_expr(
+        &self,
+        base: &Expr,
+        field: &str,
+        dereference: bool,
+    ) -> CompileResult<LoweredExpr> {
+        let member = self.resolve_member_access(base, field, dereference)?;
+        let FieldType::Scalar(scalar_type) = member.field_type else {
+            return Err(CompileError::new("struct member value is not supported"));
+        };
+        Ok(LoweredExpr::PointerField {
+            pointer: Box::new(member.pointer),
+            offset: member.offset,
+            scalar_type,
+        })
+    }
+
+    fn lower_member_lvalue(
+        &self,
+        base: &Expr,
+        field: &str,
+        dereference: bool,
+    ) -> CompileResult<LoweredLValue> {
+        let member = self.resolve_member_access(base, field, dereference)?;
+        let FieldType::Scalar(scalar_type) = member.field_type else {
+            return Err(CompileError::new(
+                "assignment to struct member is not supported",
+            ));
+        };
+        Ok(LoweredLValue::PointerField {
+            pointer: Box::new(member.pointer),
+            offset: member.offset,
+            scalar_type,
+        })
+    }
+
+    fn resolve_member_access(
+        &self,
+        base: &Expr,
+        field: &str,
+        dereference: bool,
+    ) -> CompileResult<ResolvedMember> {
+        let access = if dereference {
+            let pointer = self.lower_expr(base)?;
+            if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
+                return Err(CompileError::new("member dereference requires a pointer"));
+            }
+            StructAddress {
+                pointer,
+                offset: 0,
+                struct_name: self.pointer_referent_for_expr(base)?,
+            }
+        } else {
+            self.resolve_struct_address(base)?
+        };
+        let layout = self
+            .structs
+            .get(&access.struct_name)
+            .ok_or_else(|| CompileError::new(format!("unknown struct: {}", access.struct_name)))?;
+        let field = layout
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field)
+            .ok_or_else(|| {
+                CompileError::new(format!(
+                    "unknown struct field: {}.{field}",
+                    access.struct_name
+                ))
+            })?;
+        Ok(ResolvedMember {
+            pointer: access.pointer,
+            offset: access
+                .offset
+                .checked_add(field.offset)
+                .ok_or_else(|| CompileError::new("struct member offset overflow"))?,
+            field_type: field.field_type.clone(),
+        })
+    }
+
+    fn resolve_struct_address(&self, expr: &Expr) -> CompileResult<StructAddress> {
+        if let Expr::Member {
+            base,
+            field,
+            dereference,
+        } = expr
+        {
+            let member = self.resolve_member_access(base, field, *dereference)?;
+            let FieldType::Struct(struct_name) = member.field_type else {
+                return Err(CompileError::new("member base is not a struct"));
+            };
+            return Ok(StructAddress {
+                pointer: member.pointer,
+                offset: member.offset,
+                struct_name,
+            });
+        }
+        Err(CompileError::new("member access requires a struct base"))
+    }
+
+    fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
+        if let Expr::Identifier(name) = expr
+            && let Some(binding) = self.local_binding(name)
+            && let Some(referent) = binding.referent
+        {
+            return Ok(referent);
+        }
+        Err(CompileError::new(
+            "pointer member access requires a typed pointer",
+        ))
+    }
+
     fn push_store(&mut self, target: LoweredLValue, value: LoweredExpr) {
         match target {
             LoweredLValue::Local {
@@ -812,7 +987,8 @@ impl LoweringContext {
                     value,
                 });
             }
-            target @ LoweredLValue::PointerSubscript { .. } => {
+            target @ (LoweredLValue::PointerSubscript { .. }
+            | LoweredLValue::PointerField { .. }) => {
                 self.instructions
                     .push(Instruction::Eval(LoweredExpr::Assign {
                         target,
@@ -849,7 +1025,8 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
         | LoweredExpr::Cast {
             target: scalar_type,
             ..
-        } => Some(*scalar_type),
+        }
+        | LoweredExpr::PointerField { scalar_type, .. } => Some(*scalar_type),
         LoweredExpr::PointerSubscript { element_type, .. } => Some(*element_type),
         LoweredExpr::Assign { target, .. } => Some(lowered_lvalue_scalar_type(target)),
         LoweredExpr::Integer(_)
@@ -870,7 +1047,8 @@ const fn lowered_lvalue_scalar_type(target: &LoweredLValue) -> ScalarType {
         | LoweredLValue::PointerSubscript {
             element_type: scalar_type,
             ..
-        } => *scalar_type,
+        }
+        | LoweredLValue::PointerField { scalar_type, .. } => *scalar_type,
     }
 }
 
@@ -896,6 +1074,15 @@ fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
             pointer: pointer.clone(),
             index: index.clone(),
             element_type: *element_type,
+        },
+        LoweredLValue::PointerField {
+            pointer,
+            offset,
+            scalar_type,
+        } => LoweredExpr::PointerField {
+            pointer: pointer.clone(),
+            offset: *offset,
+            scalar_type: *scalar_type,
         },
     }
 }
@@ -1042,6 +1229,9 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             inline_constant_calls_in_expr(pointer, constants);
             inline_constant_calls_in_expr(index, constants);
+        }
+        LoweredExpr::PointerField { pointer, .. } => {
+            inline_constant_calls_in_expr(pointer, constants);
         }
         LoweredExpr::Assign { value, .. } => {
             inline_constant_calls_in_expr(value, constants);

@@ -3,9 +3,31 @@ use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    pub structs: Vec<StructLayout>,
     pub constants: Vec<Constant>,
     pub globals: Vec<Global>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructLayout {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructField {
+    pub name: String,
+    pub field_type: FieldType,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldType {
+    Scalar(ScalarType),
+    Struct(String),
+    Pointer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +63,7 @@ pub struct Function {
 pub struct Parameter {
     pub name: String,
     pub scalar_type: ScalarType,
+    pub referent: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +115,15 @@ pub enum Statement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LValue {
     Identifier(String),
-    Subscript { array: Box<Expr>, index: Box<Expr> },
+    Subscript {
+        array: Box<Expr>,
+        index: Box<Expr>,
+    },
+    Member {
+        base: Box<Expr>,
+        field: String,
+        dereference: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +139,11 @@ pub enum Expr {
     Subscript {
         array: Box<Self>,
         index: Box<Self>,
+    },
+    Member {
+        base: Box<Self>,
+        field: String,
+        dereference: bool,
     },
     Assignment {
         target: LValue,
@@ -164,6 +200,12 @@ pub enum BinaryOp {
     BitAnd,
     BitXor,
     BitOr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AssignmentOperator {
+    Simple,
+    Compound(BinaryOp),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,11 +295,16 @@ pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslat
 pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Program> {
     let mut parser = SurfaceParser { tokens, index: 0 };
     let external_items = parser.external_token_groups()?;
+    let mut structs = Vec::new();
     let mut constants = Vec::new();
     let mut globals = Vec::new();
     let mut functions = Vec::new();
     let mut unsupported_data_declaration = false;
     for item_tokens in &external_items {
+        if let Some(layout) = parse_struct_typedef(item_tokens, &structs)? {
+            structs.push(layout);
+            continue;
+        }
         let enum_constants = parse_enum_constants(item_tokens)?;
         if !enum_constants.is_empty() {
             constants.extend(enum_constants);
@@ -301,6 +348,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         ));
     }
     Ok(Program {
+        structs,
         constants,
         globals,
         functions,
@@ -319,6 +367,7 @@ impl Parser<'_> {
             functions.push(self.function()?);
         }
         Ok(Program {
+            structs: Vec::new(),
             constants: Vec::new(),
             globals: Vec::new(),
             functions,
@@ -408,6 +457,7 @@ impl Parser<'_> {
         parameters.push(Parameter {
             name: name.to_owned(),
             scalar_type,
+            referent: pointer_referent_type(tokens),
         });
         Ok(())
     }
@@ -447,8 +497,19 @@ impl Parser<'_> {
 
     fn assignment_statement(&mut self, expect_semicolon: bool) -> CompileResult<Statement> {
         let name = self.expect_identifier()?;
-        self.expect_punctuator("=")?;
-        let value = self.expression()?;
+        let op = self
+            .assignment_operator_at_current()
+            .ok_or_else(|| CompileError::new("expected assignment operator"))?;
+        self.advance();
+        let value = self.assignment()?;
+        let value = match op {
+            AssignmentOperator::Simple => value,
+            AssignmentOperator::Compound(op) => Expr::Binary {
+                op,
+                left: Box::new(Expr::Identifier(name.clone())),
+                right: Box::new(value),
+            },
+        };
         if expect_semicolon {
             self.expect_punctuator(";")?;
         }
@@ -525,7 +586,7 @@ impl Parser<'_> {
         } else if let Some(scalar_type) = self.declaration_type_at_current() {
             Some(Box::new(self.declaration_statement(scalar_type)?))
         } else {
-            Some(Box::new(self.assignment_statement(true)?))
+            Some(Box::new(self.expression_statement(true)?))
         };
         let condition = if self.check_punctuator(";") {
             None
@@ -572,14 +633,22 @@ impl Parser<'_> {
 
     fn assignment(&mut self) -> CompileResult<Expr> {
         let target = self.conditional()?;
-        if !self.check_punctuator("=") {
+        let Some(op) = self.assignment_operator_at_current() else {
             return Ok(target);
-        }
+        };
         self.advance();
-        let target = lvalue_from_expr(target)?;
+        let lvalue = lvalue_from_expr(target.clone())?;
         let value = self.assignment()?;
+        let value = match op {
+            AssignmentOperator::Simple => value,
+            AssignmentOperator::Compound(op) => Expr::Binary {
+                op,
+                left: Box::new(target),
+                right: Box::new(value),
+            },
+        };
         Ok(Expr::Assignment {
-            target,
+            target: lvalue,
             value: Box::new(value),
         })
     }
@@ -730,6 +799,17 @@ impl Parser<'_> {
                 };
                 continue;
             }
+            if self.check_punctuator(".") || self.check_punctuator("->") {
+                let dereference = self.check_punctuator("->");
+                self.advance();
+                let field = self.expect_identifier()?;
+                expr = Expr::Member {
+                    base: Box::new(expr),
+                    field,
+                    dereference,
+                };
+                continue;
+            }
             if self.check_punctuator("++") {
                 self.advance();
                 expr = Expr::PostIncrement {
@@ -846,7 +926,36 @@ impl Parser<'_> {
         ) && self
             .tokens
             .get(self.index + 1)
-            .is_some_and(|token| token_is_punctuator(token, "="))
+            .is_some_and(token_is_assignment_operator)
+    }
+
+    fn assignment_operator_at_current(&self) -> Option<AssignmentOperator> {
+        let token = self.peek()?;
+        if token_is_punctuator(token, "=") {
+            Some(AssignmentOperator::Simple)
+        } else if token_is_punctuator(token, "+=") {
+            Some(AssignmentOperator::Compound(BinaryOp::Add))
+        } else if token_is_punctuator(token, "-=") {
+            Some(AssignmentOperator::Compound(BinaryOp::Sub))
+        } else if token_is_punctuator(token, "*=") {
+            Some(AssignmentOperator::Compound(BinaryOp::Mul))
+        } else if token_is_punctuator(token, "/=") {
+            Some(AssignmentOperator::Compound(BinaryOp::Div))
+        } else if token_is_punctuator(token, "%=") {
+            Some(AssignmentOperator::Compound(BinaryOp::Mod))
+        } else if token_is_punctuator(token, "<<=") {
+            Some(AssignmentOperator::Compound(BinaryOp::ShiftLeft))
+        } else if token_is_punctuator(token, ">>=") {
+            Some(AssignmentOperator::Compound(BinaryOp::ShiftRight))
+        } else if token_is_punctuator(token, "&=") {
+            Some(AssignmentOperator::Compound(BinaryOp::BitAnd))
+        } else if token_is_punctuator(token, "^=") {
+            Some(AssignmentOperator::Compound(BinaryOp::BitXor))
+        } else if token_is_punctuator(token, "|=") {
+            Some(AssignmentOperator::Compound(BinaryOp::BitOr))
+        } else {
+            None
+        }
     }
 
     fn expect_keyword(&mut self, expected: Keyword) -> CompileResult<()> {
@@ -931,6 +1040,15 @@ fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
     match expr {
         Expr::Identifier(name) => Ok(LValue::Identifier(name)),
         Expr::Subscript { array, index } => Ok(LValue::Subscript { array, index }),
+        Expr::Member {
+            base,
+            field,
+            dereference,
+        } => Ok(LValue::Member {
+            base,
+            field,
+            dereference,
+        }),
         _ => Err(CompileError::new("unsupported assignment target")),
     }
 }
@@ -977,6 +1095,23 @@ fn parameter_has_pointer(tokens: &[Token]) -> bool {
         );
     }
     false
+}
+
+fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
+    if !parameter_has_pointer(tokens) {
+        return None;
+    }
+    let name_index = tokens
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
+    tokens[..name_index]
+        .iter()
+        .rev()
+        .find_map(token_identifier)
+        .filter(|name| supported_typedef_scalar(name).is_none())
+        .map(ToOwned::to_owned)
 }
 
 fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
@@ -1029,6 +1164,179 @@ fn parse_enum_constants(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
             .at(tokens[open_brace].line, tokens[open_brace].column));
     };
     parse_enum_body(&tokens[open_brace + 1..close_brace])
+}
+
+fn parse_struct_typedef(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<StructLayout>> {
+    if !token_has_keyword(tokens, Keyword::Typedef) || !token_has_keyword(tokens, Keyword::Struct) {
+        return Ok(None);
+    }
+    let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
+        return Ok(None);
+    };
+    let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
+        return Ok(None);
+    };
+    let Some(name) = last_top_level_identifier(tokens) else {
+        return Ok(None);
+    };
+    let Some((fields, size)) =
+        parse_struct_fields(&tokens[open_brace + 1..close_brace], known_structs)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(StructLayout { name, fields, size }))
+}
+
+fn parse_struct_fields(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<(Vec<StructField>, usize)>> {
+    let mut fields = Vec::new();
+    let mut offset = 0usize;
+    let mut max_alignment = 1usize;
+    let mut start = 0usize;
+    for index in 0..tokens.len() {
+        if !token_is_punctuator(&tokens[index], ";") {
+            continue;
+        }
+        let declaration = &tokens[start..index];
+        if !declaration.is_empty()
+            && !parse_struct_field_declaration(
+                declaration,
+                known_structs,
+                &mut fields,
+                &mut offset,
+                &mut max_alignment,
+            )?
+        {
+            return Ok(None);
+        }
+        start = index + 1;
+    }
+    if start < tokens.len() {
+        return Ok(None);
+    }
+    let size = align_struct_offset(offset, max_alignment)?;
+    Ok(Some((fields, size)))
+}
+
+fn parse_struct_field_declaration(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+    fields: &mut Vec<StructField>,
+    offset: &mut usize,
+    max_alignment: &mut usize,
+) -> CompileResult<bool> {
+    let ranges = top_level_comma_ranges(tokens);
+    let Some((first_start, first_end)) = ranges.first().copied() else {
+        return Ok(false);
+    };
+    let first = &tokens[first_start..first_end];
+    let Some(first_name_index) = previous_identifier_index(first, first.len()) else {
+        return Ok(false);
+    };
+    let base_specifiers = &first[..first_name_index];
+    let Some(base_type) = struct_field_type(base_specifiers, known_structs) else {
+        return Ok(false);
+    };
+    for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
+        let segment = &tokens[start..end];
+        let Some(name_index) = previous_identifier_index(segment, segment.len()) else {
+            return Ok(false);
+        };
+        let Some(name) = token_identifier(&segment[name_index]) else {
+            return Ok(false);
+        };
+        let field_type = if range_index == 0 {
+            base_type.clone()
+        } else if segment[..name_index]
+            .iter()
+            .any(|token| token_is_punctuator(token, "*"))
+        {
+            FieldType::Pointer
+        } else {
+            base_type.clone()
+        };
+        let size = field_type_size(&field_type, known_structs)?;
+        let alignment = field_type_alignment(&field_type, known_structs)?;
+        *max_alignment = (*max_alignment).max(alignment);
+        *offset = align_struct_offset(*offset, alignment)?;
+        fields.push(StructField {
+            name: name.to_owned(),
+            field_type,
+            offset: *offset,
+        });
+        *offset = offset
+            .checked_add(size)
+            .ok_or_else(|| CompileError::new("struct size overflow"))?;
+    }
+    Ok(true)
+}
+
+fn top_level_comma_ranges(tokens: &[Token]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        if token_is_punctuator(token, ",") {
+            ranges.push((start, index));
+            start = index + 1;
+        }
+    }
+    ranges.push((start, tokens.len()));
+    ranges
+}
+
+fn struct_field_type(tokens: &[Token], known_structs: &[StructLayout]) -> Option<FieldType> {
+    if tokens.iter().any(|token| token_is_punctuator(token, "*")) {
+        return Some(FieldType::Pointer);
+    }
+    if let Some(scalar_type) = integer_parameter_type(tokens) {
+        return Some(FieldType::Scalar(scalar_type));
+    }
+    let name = tokens.iter().rev().find_map(token_identifier)?;
+    if known_structs.iter().any(|layout| layout.name == name) {
+        return Some(FieldType::Struct(name.to_owned()));
+    }
+    supported_typedef_scalar(name).map(FieldType::Scalar)
+}
+
+fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> CompileResult<usize> {
+    match field_type {
+        FieldType::Scalar(scalar_type) => Ok(scalar_size_for_layout(*scalar_type)),
+        FieldType::Pointer => Ok(8),
+        FieldType::Struct(name) => known_structs
+            .iter()
+            .find(|layout| layout.name == *name)
+            .map(|layout| layout.size)
+            .ok_or_else(|| CompileError::new(format!("unknown struct field type: {name}"))),
+    }
+}
+
+fn field_type_alignment(
+    field_type: &FieldType,
+    known_structs: &[StructLayout],
+) -> CompileResult<usize> {
+    field_type_size(field_type, known_structs).map(|size| size.clamp(1, 8))
+}
+
+const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
+    match scalar_type {
+        ScalarType::Int => 4,
+        ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+    }
+}
+
+fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> {
+    let remainder = offset % alignment;
+    if remainder == 0 {
+        return Ok(offset);
+    }
+    offset
+        .checked_add(alignment - remainder)
+        .ok_or_else(|| CompileError::new("struct offset overflow"))
 }
 
 fn parse_enum_body(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
@@ -1720,6 +2028,7 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
             "call to {callee} is not an integer initializer"
         ))),
         Expr::StringLiteral(_)
+        | Expr::Member { .. }
         | Expr::Subscript { .. }
         | Expr::Assignment { .. }
         | Expr::PostIncrement { .. } => {
@@ -2251,6 +2560,17 @@ fn token_is_keyword(token: &Token, keyword: Keyword) -> bool {
 
 fn token_is_punctuator(token: &Token, expected: &str) -> bool {
     matches!(&token.kind, TokenKind::Punctuator(value) if value == expected)
+}
+
+fn token_is_assignment_operator(token: &Token) -> bool {
+    matches!(
+        &token.kind,
+        TokenKind::Punctuator(value)
+            if matches!(
+                value.as_str(),
+                "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "<<=" | ">>=" | "&=" | "^=" | "|="
+            )
+    )
 }
 
 fn last_token_is_punctuator(tokens: &[Token], expected: &str) -> bool {
