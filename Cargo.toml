@@ -1,0 +1,27 @@
+[package]
+name = "c99inrust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Strict Rust C99 compiler foundation aimed at official Doom source milestones."
+license = "MIT"
+repository = "https://github.com/code-yeongyu/c99inrust"
+keywords = ["c99", "compiler", "doom", "rust"]
+categories = ["compilers", "command-line-utilities"]
+
+[lib]
+name = "c99inrust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "c99inrust"
+path = "src/bin/c99inrust.rs"
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = "deny"
