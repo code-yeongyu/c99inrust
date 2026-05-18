@@ -60,13 +60,16 @@ which lets the Doom `i_main.c` entry translation unit assign `myargc` and
 `myargv`. Postfix `++` is supported as an `int` side-effect statement, covering
 the `m_argv.c` `for (...; i++)` scan loop. The compiler also accepts
 translation units that contain only ignorable internal static metadata, covering
-`doomdef.c`, while still rejecting unsupported data-only globals. Pointer
-returns remain unsupported.
+`doomdef.c`, while still rejecting unsupported data-only globals. It now accepts
+the `doomstat.c` enum-backed global state definitions after declaration-only
+header `extern` arrays, including simple checked enum arithmetic such as
+`(8+16+32)` with C operator precedence for the supported arithmetic operators.
+Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but eight of the 62 C files still fail before object generation. `doomdef.c`,
-`i_main.c`, `m_argv.c`, `m_bbox.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`, and
-`r_sky.c` currently reach assembly generation.
+but nine of the 62 C files still fail before object generation. `doomdef.c`,
+`doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_fixed.c`, `m_random.c`,
+`m_swap.c`, and `r_sky.c` currently reach assembly generation.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 

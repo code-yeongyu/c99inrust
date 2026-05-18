@@ -842,3 +842,81 @@ FAIL p_ceilng.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After doomstat Enum Globals
+
+`compile -S` now accepts the Doom `doomstat.c` global-state translation unit.
+The source defines enum-backed globals after a large header surface with
+declaration-only `extern` arrays:
+
+```text
+GameMode_t gamemode = indetermined;
+GameMission_t gamemission = doom;
+Language_t language = english;
+boolean modifiedgame;
+```
+
+The compiler now ignores declaration-only `extern` arrays when deciding whether
+a globals-only unit is an unsupported data definition, while still rejecting
+actual unsupported data-table definitions. It also resolves enum constants in
+global initializers and evaluates simple checked parenthesized enum arithmetic
+chains such as `(8+16+32)`, using C operator precedence for the supported
+arithmetic operators.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doomstat_enum_globals_slice
+compiler_accepts_doomstat_globals_after_header_extern_arrays_slice
+compiler_rejects_unsupported_data_only_translation_unit
+enum_global_initializer_matches_host_c_compiler_exit_code
+enum_arithmetic_initializer_matches_host_c_compiler_exit_code
+enum_additive_chain_initializer_matches_host_c_compiler_exit_code
+enum_mixed_precedence_initializer_matches_host_c_compiler_exit_code
+```
+
+Manual single-file QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/c99inrust-doom-src/linuxdoom-1.10 /tmp/c99inrust-doom-src/linuxdoom-1.10/doomstat.c -o /tmp/c99inrust-doomstat.s
+observed=_gamemode .long 4
+observed=_gamemission .long 0
+observed=_language .long 0
+observed=_modifiedgame .long 0
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779105971
+scan=/tmp/c99inrust-doom-scan-1779105971.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779105971.txt
+ok=9
+fail=53
+OK doomdef.c
+OK doomstat.c
+OK i_main.c
+OK m_argv.c
+OK m_bbox.c
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7052:28: unsupported global integer initializer
+FAIL d_items.c
+  error: translation unit has no supported function definitions
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL p_inter.c
+  error: unsupported function parameter
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
