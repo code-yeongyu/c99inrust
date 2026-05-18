@@ -103,6 +103,12 @@ pub enum Statement {
         length: usize,
         initializer: Option<String>,
     },
+    LocalIntArray {
+        name: String,
+        length: usize,
+        initializer: Option<Vec<i32>>,
+    },
+    LocalConstants(Vec<Constant>),
     DeclarationList(Vec<Self>),
     Assignment {
         target: LValue,
@@ -161,6 +167,9 @@ pub enum Expr {
     Integer(i64),
     DoubleLiteral(String),
     StringLiteral(String),
+    SizeOfExpr {
+        expr: Box<Self>,
+    },
     Subscript {
         array: Box<Self>,
         index: Box<Self>,
@@ -510,6 +519,9 @@ impl Parser<'_> {
         if let Some(statement) = self.static_aggregate_declaration()? {
             return Ok(statement);
         }
+        if let Some(statement) = self.local_enum_declaration()? {
+            return Ok(statement);
+        }
         if let Some(scalar_type) = self.declaration_type_at_current() {
             return self.declaration_statement(scalar_type);
         }
@@ -585,45 +597,7 @@ impl Parser<'_> {
             }
             let name = self.expect_identifier()?;
             let statement = if self.check_punctuator("[") {
-                if !type_includes_char || scalar_type != ScalarType::Int {
-                    return Err(CompileError::new("only local char arrays are supported"));
-                }
-                self.advance();
-                let explicit_length = if self.check_punctuator("]") {
-                    None
-                } else {
-                    Some(local_char_array_length(&self.expression()?)?)
-                };
-                self.expect_punctuator("]")?;
-                let initializer = if self.check_punctuator("=") {
-                    self.advance();
-                    let initializer = self.expression()?;
-                    let Expr::StringLiteral(value) = initializer else {
-                        return Err(CompileError::new(
-                            "local char arrays require string literal initializers",
-                        ));
-                    };
-                    Some(value)
-                } else {
-                    None
-                };
-                let length = match (explicit_length, &initializer) {
-                    (Some(length), _) => length,
-                    (None, Some(value)) => inferred_local_char_array_length(value)?,
-                    (None, None) => {
-                        return Err(CompileError::new(
-                            "local char arrays require a size or string literal initializer",
-                        ));
-                    }
-                };
-                if let Some(value) = &initializer {
-                    validate_local_char_array_initializer(value, length)?;
-                }
-                Statement::LocalCharArray {
-                    name,
-                    length,
-                    initializer,
-                }
+                self.local_array_declaration(type_includes_char, scalar_type, name)?
             } else if self.check_punctuator("=") {
                 self.advance();
                 Statement::Declaration {
@@ -651,6 +625,175 @@ impl Parser<'_> {
         } else {
             Ok(Statement::DeclarationList(declarations))
         }
+    }
+
+    fn local_array_declaration(
+        &mut self,
+        type_includes_char: bool,
+        scalar_type: ScalarType,
+        name: String,
+    ) -> CompileResult<Statement> {
+        if scalar_type != ScalarType::Int {
+            return Err(CompileError::new(
+                "only local int and char arrays are supported",
+            ));
+        }
+        self.advance();
+        let explicit_length = if self.check_punctuator("]") {
+            None
+        } else {
+            Some(local_array_length(&self.expression()?)?)
+        };
+        self.expect_punctuator("]")?;
+        if type_includes_char {
+            return self.local_char_array_declaration(name, explicit_length);
+        }
+        self.local_int_array_declaration(name, explicit_length)
+    }
+
+    fn local_char_array_declaration(
+        &mut self,
+        name: String,
+        explicit_length: Option<usize>,
+    ) -> CompileResult<Statement> {
+        let initializer = if self.check_punctuator("=") {
+            self.advance();
+            let initializer = self.expression()?;
+            let Expr::StringLiteral(value) = initializer else {
+                return Err(CompileError::new(
+                    "local char arrays require string literal initializers",
+                ));
+            };
+            Some(value)
+        } else {
+            None
+        };
+        let length = match (explicit_length, &initializer) {
+            (Some(length), _) => length,
+            (None, Some(value)) => inferred_local_char_array_length(value)?,
+            (None, None) => {
+                return Err(CompileError::new(
+                    "local char arrays require a size or string literal initializer",
+                ));
+            }
+        };
+        if let Some(value) = &initializer {
+            validate_local_char_array_initializer(value, length)?;
+        }
+        Ok(Statement::LocalCharArray {
+            name,
+            length,
+            initializer,
+        })
+    }
+
+    fn local_int_array_declaration(
+        &mut self,
+        name: String,
+        explicit_length: Option<usize>,
+    ) -> CompileResult<Statement> {
+        let initializer = if self.check_punctuator("=") {
+            self.advance();
+            Some(self.local_int_array_initializer()?)
+        } else {
+            None
+        };
+        let length = match (explicit_length, &initializer) {
+            (Some(length), _) => length,
+            (None, Some(values)) if !values.is_empty() => values.len(),
+            (None, _) => {
+                return Err(CompileError::new(
+                    "local int arrays require a size or initializer",
+                ));
+            }
+        };
+        let initializer = initializer
+            .map(|mut values| {
+                if values.len() > length {
+                    return Err(CompileError::new(
+                        "local int array initializer is too large",
+                    ));
+                }
+                values.resize(length, 0);
+                Ok(values)
+            })
+            .transpose()?;
+        Ok(Statement::LocalIntArray {
+            name,
+            length,
+            initializer,
+        })
+    }
+
+    fn local_int_array_initializer(&mut self) -> CompileResult<Vec<i32>> {
+        self.expect_punctuator("{")?;
+        let mut values = Vec::new();
+        if self.check_punctuator("}") {
+            self.advance();
+            return Ok(values);
+        }
+        loop {
+            let value = eval_integer_initializer_expr(&self.expression()?)?.to_i64_trunc()?;
+            values.push(
+                i32::try_from(value)
+                    .map_err(|_| CompileError::new("local int array initializer too large"))?,
+            );
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+            self.expect_punctuator(",")?;
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+        }
+    }
+
+    fn local_enum_declaration(&mut self) -> CompileResult<Option<Statement>> {
+        if !self.check_keyword(Keyword::Enum) {
+            return Ok(None);
+        }
+        self.advance();
+        if matches!(
+            self.peek().map(|token| &token.kind),
+            Some(TokenKind::Identifier(_))
+        ) && !self
+            .tokens
+            .get(self.index + 1)
+            .is_some_and(|token| token_is_punctuator(token, "="))
+        {
+            self.advance();
+        }
+        self.expect_punctuator("{")?;
+        let constants = self.local_enum_constants()?;
+        self.expect_punctuator("}")?;
+        self.expect_punctuator(";")?;
+        Ok(Some(Statement::LocalConstants(constants)))
+    }
+
+    fn local_enum_constants(&mut self) -> CompileResult<Vec<Constant>> {
+        let mut constants = Vec::new();
+        let mut next_value = 0i64;
+        while !self.check_punctuator("}") {
+            let name = self.expect_identifier()?;
+            let value = if self.check_punctuator("=") {
+                self.advance();
+                eval_integer_initializer_expr(&self.expression()?)?.to_i64_trunc()?
+            } else {
+                next_value
+            };
+            next_value = value
+                .checked_add(1)
+                .ok_or_else(|| CompileError::new("enum constant overflow"))?;
+            constants.push(Constant { name, value });
+            if self.check_punctuator(",") {
+                self.advance();
+                continue;
+            }
+            break;
+        }
+        Ok(constants)
     }
 
     fn static_aggregate_declaration(&mut self) -> CompileResult<Option<Statement>> {
@@ -1025,8 +1168,9 @@ impl Parser<'_> {
                     .map_err(|_| CompileError::new("sizeof result does not fit i64"));
             }
         }
-        let _expr = self.unary()?;
-        Ok(Expr::Integer(4))
+        Ok(Expr::SizeOfExpr {
+            expr: Box::new(self.unary()?),
+        })
     }
 
     fn postfix(&mut self) -> CompileResult<Expr> {
@@ -1198,13 +1342,12 @@ impl Parser<'_> {
             match &token.kind {
                 TokenKind::Keyword(
                     Keyword::Const
-                    | Keyword::Register
                     | Keyword::Restrict
                     | Keyword::Signed
                     | Keyword::Unsigned
                     | Keyword::Volatile,
                 ) => {}
-                TokenKind::Keyword(Keyword::Static) => {
+                TokenKind::Keyword(Keyword::Register | Keyword::Static) => {
                     saw_storage_class = true;
                 }
                 TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short) => {
@@ -1694,7 +1837,7 @@ const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
     }
 }
 
-fn local_char_array_length(expr: &Expr) -> CompileResult<usize> {
+fn local_array_length(expr: &Expr) -> CompileResult<usize> {
     let value = eval_integer_initializer_expr(expr)?.to_i64_trunc()?;
     if value <= 0 {
         return Err(CompileError::new("local char array size must be positive"));
@@ -2570,48 +2713,7 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
         Expr::Binary { op, left, right } => {
             let left = eval_integer_initializer_expr(left)?;
             let right = eval_integer_initializer_expr(right)?;
-            match op {
-                BinaryOp::Mul => left.checked_mul(right),
-                BinaryOp::Div => left.checked_div(right),
-                BinaryOp::Mod => left.checked_rem(right),
-                BinaryOp::Add => left.checked_add(right),
-                BinaryOp::Sub => left.checked_sub(right),
-                BinaryOp::ShiftLeft => left.checked_shl(right),
-                BinaryOp::ShiftRight => left.checked_shr(right),
-                BinaryOp::BitAnd => {
-                    InitializerNumber::new(left.to_i128_integer()? & right.to_i128_integer()?, 1)
-                }
-                BinaryOp::BitXor => {
-                    InitializerNumber::new(left.to_i128_integer()? ^ right.to_i128_integer()?, 1)
-                }
-                BinaryOp::BitOr => {
-                    InitializerNumber::new(left.to_i128_integer()? | right.to_i128_integer()?, 1)
-                }
-                BinaryOp::Less => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? < right.to_i128_integer()?,
-                ))),
-                BinaryOp::LessEqual => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? <= right.to_i128_integer()?,
-                ))),
-                BinaryOp::Greater => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? > right.to_i128_integer()?,
-                ))),
-                BinaryOp::GreaterEqual => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? >= right.to_i128_integer()?,
-                ))),
-                BinaryOp::Equal => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? == right.to_i128_integer()?,
-                ))),
-                BinaryOp::NotEqual => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? != right.to_i128_integer()?,
-                ))),
-                BinaryOp::LogicalAnd => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? != 0 && right.to_i128_integer()? != 0,
-                ))),
-                BinaryOp::LogicalOr => Ok(InitializerNumber::integer(i64::from(
-                    left.to_i128_integer()? != 0 || right.to_i128_integer()? != 0,
-                ))),
-            }
+            eval_integer_binary_initializer_expr(*op, left, right)
         }
         Expr::Conditional {
             condition,
@@ -2631,6 +2733,7 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
             "call to {callee} is not an integer initializer"
         ))),
         Expr::StringLiteral(_)
+        | Expr::SizeOfExpr { .. }
         | Expr::AddressOf { .. }
         | Expr::Dereference { .. }
         | Expr::Member { .. }
@@ -2639,6 +2742,55 @@ fn eval_integer_initializer_expr(expr: &Expr) -> CompileResult<InitializerNumber
         | Expr::PostIncrement { .. } => {
             Err(CompileError::new("unsupported global integer initializer"))
         }
+    }
+}
+
+fn eval_integer_binary_initializer_expr(
+    op: BinaryOp,
+    left: InitializerNumber,
+    right: InitializerNumber,
+) -> CompileResult<InitializerNumber> {
+    match op {
+        BinaryOp::Mul => left.checked_mul(right),
+        BinaryOp::Div => left.checked_div(right),
+        BinaryOp::Mod => left.checked_rem(right),
+        BinaryOp::Add => left.checked_add(right),
+        BinaryOp::Sub => left.checked_sub(right),
+        BinaryOp::ShiftLeft => left.checked_shl(right),
+        BinaryOp::ShiftRight => left.checked_shr(right),
+        BinaryOp::BitAnd => {
+            InitializerNumber::new(left.to_i128_integer()? & right.to_i128_integer()?, 1)
+        }
+        BinaryOp::BitXor => {
+            InitializerNumber::new(left.to_i128_integer()? ^ right.to_i128_integer()?, 1)
+        }
+        BinaryOp::BitOr => {
+            InitializerNumber::new(left.to_i128_integer()? | right.to_i128_integer()?, 1)
+        }
+        BinaryOp::Less => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? < right.to_i128_integer()?,
+        ))),
+        BinaryOp::LessEqual => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? <= right.to_i128_integer()?,
+        ))),
+        BinaryOp::Greater => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? > right.to_i128_integer()?,
+        ))),
+        BinaryOp::GreaterEqual => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? >= right.to_i128_integer()?,
+        ))),
+        BinaryOp::Equal => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? == right.to_i128_integer()?,
+        ))),
+        BinaryOp::NotEqual => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? != right.to_i128_integer()?,
+        ))),
+        BinaryOp::LogicalAnd => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? != 0 && right.to_i128_integer()? != 0,
+        ))),
+        BinaryOp::LogicalOr => Ok(InitializerNumber::integer(i64::from(
+            left.to_i128_integer()? != 0 || right.to_i128_integer()? != 0,
+        ))),
     }
 }
 

@@ -55,6 +55,10 @@ pub enum Instruction {
         offset: usize,
         values: Vec<u8>,
     },
+    InitLocalInts {
+        offset: usize,
+        values: Vec<i32>,
+    },
     StoreGlobal {
         name: String,
         scalar_type: ScalarType,
@@ -338,6 +342,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::StringLiteral(_) => Err(CompileError::new(
             "string literal is not an integer constant expression",
         )),
+        Expr::SizeOfExpr { .. } => Err(CompileError::new(
+            "sizeof expression is not an integer constant expression",
+        )),
         Expr::Subscript { .. } => Err(CompileError::new(
             "subscript expression is not an integer constant expression",
         )),
@@ -456,6 +463,10 @@ enum LocalBinding {
         slot: usize,
         length: usize,
     },
+    IntArray {
+        slot: usize,
+        length: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -549,6 +560,17 @@ impl LoweringContext {
                 length,
                 initializer,
             } => self.lower_local_char_array(name, *length, initializer.as_deref()),
+            Statement::LocalIntArray {
+                name,
+                length,
+                initializer,
+            } => self.lower_local_int_array(name, *length, initializer.as_deref()),
+            Statement::LocalConstants(constants) => {
+                for constant in constants {
+                    self.constants.insert(constant.name.clone(), constant.value);
+                }
+                Ok(())
+            }
             Statement::DeclarationList(declarations) => {
                 for declaration in declarations {
                     self.lower_statement(declaration)?;
@@ -652,6 +674,22 @@ impl LoweringContext {
             self.instructions.push(Instruction::InitLocalBytes {
                 offset: self.local_offset(slot)?,
                 values: local_char_array_initializer_values(value, length)?,
+            });
+        }
+        Ok(())
+    }
+
+    fn lower_local_int_array(
+        &mut self,
+        name: &str,
+        length: usize,
+        initializer: Option<&[i32]>,
+    ) -> CompileResult<()> {
+        let slot = self.declare_int_array(name, length)?;
+        if let Some(values) = initializer {
+            self.instructions.push(Instruction::InitLocalInts {
+                offset: self.local_offset(slot)?,
+                values: values.to_vec(),
             });
         }
         Ok(())
@@ -857,6 +895,20 @@ impl LoweringContext {
         )
     }
 
+    fn declare_int_array(&mut self, name: &str, length: usize) -> CompileResult<usize> {
+        let byte_size = local_int_array_byte_size(length)?;
+        self.declare_slot(
+            name,
+            ScalarType::Int,
+            byte_size,
+            scalar_size(ScalarType::Int),
+            LocalBinding::IntArray {
+                slot: self.local_slots.len(),
+                length,
+            },
+        )
+    }
+
     fn declare_slot(
         &mut self,
         name: &str,
@@ -937,6 +989,10 @@ impl LoweringContext {
                             offset: self.local_offset(slot)?,
                             byte_size: length,
                         }),
+                        LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                            offset: self.local_offset(slot)?,
+                            byte_size: local_int_array_byte_size(length)?,
+                        }),
                     };
                 }
                 if let Some(scalar_type) = self
@@ -969,6 +1025,7 @@ impl LoweringContext {
                 field,
                 dereference,
             } => self.lower_member_expr(base, field, *dereference),
+            Expr::SizeOfExpr { expr } => self.lower_sizeof_expr(expr),
             Expr::Dereference { pointer } => self.lower_subscript(pointer, &Expr::Integer(0)),
             Expr::AddressOf { target } => self.lower_address_of(target),
             Expr::Subscript { array, index } => self.lower_subscript(array, index),
@@ -1017,9 +1074,9 @@ impl LoweringContext {
                             offset: self.local_offset(slot)?,
                             scalar_type,
                         }),
-                        LocalBinding::CharArray { .. } => Err(CompileError::new(
-                            "assignment to local array is not supported",
-                        )),
+                        LocalBinding::CharArray { .. } | LocalBinding::IntArray { .. } => Err(
+                            CompileError::new("assignment to local array is not supported"),
+                        ),
                     };
                 }
                 if let Some(scalar_type) = self
@@ -1043,6 +1100,26 @@ impl LoweringContext {
                 dereference,
             } => self.lower_member_lvalue(base, field, *dereference),
         }
+    }
+
+    fn lower_sizeof_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
+        if let Expr::Identifier(name) = expr
+            && let Some(binding) = self.local_binding(name)
+        {
+            let size = match binding {
+                LocalBinding::Scalar { scalar_type, .. } => scalar_size(scalar_type),
+                LocalBinding::CharArray { length, .. } => length,
+                LocalBinding::IntArray { length, .. } => local_int_array_byte_size(length)?,
+            };
+            return i64::try_from(size)
+                .map(LoweredExpr::Integer)
+                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
+        }
+        let expr = self.lower_expr(expr)?;
+        let size = lowered_expr_scalar_type(&expr).map_or(4, scalar_size);
+        i64::try_from(size)
+            .map(LoweredExpr::Integer)
+            .map_err(|_| CompileError::new("sizeof result does not fit i64"))
     }
 
     fn lower_subscript(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredExpr> {
@@ -1152,6 +1229,10 @@ impl LoweringContext {
                     LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
                         offset: self.local_offset(slot)?,
                         byte_size: length,
+                    }),
+                    LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size: local_int_array_byte_size(length)?,
                     }),
                 }
             }
@@ -1475,6 +1556,12 @@ fn local_char_array_initializer_values(value: &str, length: usize) -> CompileRes
     Ok(values)
 }
 
+fn local_int_array_byte_size(length: usize) -> CompileResult<usize> {
+    length
+        .checked_mul(scalar_size(ScalarType::Int))
+        .ok_or_else(|| CompileError::new("local int array size overflow"))
+}
+
 const fn scalar_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Int => 4,
@@ -1575,7 +1662,8 @@ fn inline_constant_calls_in_instruction(
         Instruction::Return(None)
         | Instruction::Jump { .. }
         | Instruction::Label { .. }
-        | Instruction::InitLocalBytes { .. } => {}
+        | Instruction::InitLocalBytes { .. }
+        | Instruction::InitLocalInts { .. } => {}
     }
 }
 

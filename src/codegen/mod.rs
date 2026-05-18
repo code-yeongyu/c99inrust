@@ -363,6 +363,9 @@ fn emit_aarch64_function(
             Instruction::InitLocalBytes { offset, values } => {
                 emit_aarch64_init_local_bytes(*offset, values, assembly)?;
             }
+            Instruction::InitLocalInts { offset, values } => {
+                emit_aarch64_init_local_ints(*offset, values, assembly)?;
+            }
             Instruction::StoreGlobal {
                 name,
                 scalar_type,
@@ -554,6 +557,9 @@ fn emit_x86_64_function(
             }
             Instruction::InitLocalBytes { offset, values } => {
                 emit_x86_64_init_local_bytes(*offset, values, assembly)?;
+            }
+            Instruction::InitLocalInts { offset, values } => {
+                emit_x86_64_init_local_ints(*offset, values, assembly)?;
             }
             Instruction::StoreGlobal {
                 name,
@@ -1031,6 +1037,25 @@ fn emit_aarch64_init_local_bytes(
             .ok_or_else(|| CompileError::new("local byte initializer offset overflow"))?;
         write_assembly!(assembly, "\tmov w16, #{value}\n")?;
         write_assembly!(assembly, "\tstrb w16, [sp, #{byte_offset}]\n")?;
+    }
+    Ok(())
+}
+
+fn emit_aarch64_init_local_ints(
+    offset: usize,
+    values: &[i32],
+    assembly: &mut String,
+) -> CompileResult<()> {
+    for (index, value) in values.iter().enumerate() {
+        let byte_offset = offset
+            .checked_add(
+                index
+                    .checked_mul(4)
+                    .ok_or_else(|| CompileError::new("local int initializer offset overflow"))?,
+            )
+            .ok_or_else(|| CompileError::new("local int initializer offset overflow"))?;
+        emit_aarch64_i32_to_register(i64::from(*value), "w16", assembly)?;
+        write_assembly!(assembly, "\tstr w16, [sp, #{byte_offset}]\n")?;
     }
     Ok(())
 }
@@ -2285,6 +2310,32 @@ fn emit_x86_64_init_local_bytes(
     Ok(())
 }
 
+fn emit_x86_64_init_local_ints(
+    offset: usize,
+    values: &[i32],
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let byte_size = values
+        .len()
+        .checked_mul(4)
+        .ok_or_else(|| CompileError::new("local int initializer size overflow"))?;
+    for (index, value) in values.iter().enumerate() {
+        let byte_offset = offset
+            .checked_add(
+                index
+                    .checked_mul(4)
+                    .ok_or_else(|| CompileError::new("local int initializer offset overflow"))?,
+            )
+            .ok_or_else(|| CompileError::new("local int initializer offset overflow"))?;
+        write_assembly!(
+            assembly,
+            "\tmovl ${value}, {}(%rbp)\n",
+            x86_stack_byte_offset(offset, byte_size, byte_offset)
+        )?;
+    }
+    Ok(())
+}
+
 fn emit_x86_64_load_temporary(
     width: ValueWidth,
     offset: usize,
@@ -3261,7 +3312,8 @@ fn instruction_depth(instruction: &Instruction) -> usize {
         Instruction::Return(None)
         | Instruction::Jump { .. }
         | Instruction::Label { .. }
-        | Instruction::InitLocalBytes { .. } => 0,
+        | Instruction::InitLocalBytes { .. }
+        | Instruction::InitLocalInts { .. } => 0,
     }
 }
 
@@ -3291,7 +3343,8 @@ const fn instruction_label(instruction: &Instruction) -> Option<usize> {
         | Instruction::StoreGlobal { .. }
         | Instruction::Eval(_)
         | Instruction::Return(_)
-        | Instruction::InitLocalBytes { .. } => None,
+        | Instruction::InitLocalBytes { .. }
+        | Instruction::InitLocalInts { .. } => None,
         Instruction::JumpIfZero { label, .. }
         | Instruction::Jump { label }
         | Instruction::Label { label } => Some(*label),
@@ -3379,7 +3432,8 @@ fn instruction_needs_preserved_temp(instruction: &Instruction) -> bool {
         Instruction::Return(None)
         | Instruction::Jump { .. }
         | Instruction::Label { .. }
-        | Instruction::InitLocalBytes { .. } => false,
+        | Instruction::InitLocalBytes { .. }
+        | Instruction::InitLocalInts { .. } => false,
     }
 }
 
@@ -3457,7 +3511,8 @@ fn instruction_uses_call(instruction: &Instruction) -> bool {
         Instruction::Return(None)
         | Instruction::Jump { .. }
         | Instruction::Label { .. }
-        | Instruction::InitLocalBytes { .. } => false,
+        | Instruction::InitLocalBytes { .. }
+        | Instruction::InitLocalInts { .. } => false,
     }
 }
 

@@ -569,6 +569,33 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_local_int_array_sizeof_slice() {
+    // given
+    let source = r"int main(void) {
+    static int values[] = { 0, 4, 7 };
+    static int index = 0;
+    int out;
+    out = values[index++];
+    if (index == sizeof(values)/sizeof(int)) index = 0;
+    return out;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl $0, -12(%rbp)\n"));
+    assert!(assembly.contains("\tmovl $4, -8(%rbp)\n"));
+    assert!(assembly.contains("\tmovl $7, -4(%rbp)\n"));
+    assert!(assembly.contains("\tmovl $12, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_switch_case_break_slice() {
     // given
     let source = r"int main(void) {
@@ -601,6 +628,33 @@ fn compiler_accepts_switch_case_break_slice() {
     assert!(assembly.contains("\tmovl $45, %eax\n"));
     assert!(assembly.contains("\tsete %al\n"));
     assert!(assembly.contains("\tjmp .Lmain_"));
+}
+
+#[test]
+fn compiler_accepts_local_enum_and_register_implicit_int_slice() {
+    // given
+    let source = r"int main(void) {
+    enum {
+        LEFT = 1,
+        RIGHT = 2
+    };
+    register outcode = 0;
+    outcode = LEFT | RIGHT;
+    return outcode;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl $1, %eax\n"));
+    assert!(assembly.contains("\tmovl $2, %eax\n"));
+    assert!(assembly.contains("\torl %ecx, %eax\n"));
 }
 
 #[test]
