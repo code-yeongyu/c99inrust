@@ -1616,13 +1616,18 @@ fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Gl
             ),
         );
     };
-    let Some(assign_index) = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
-    else {
-        return Ok(None);
-    };
-    let assign_index = close_bracket + 1 + assign_index;
-    let Ok(values) = parse_unsigned_char_initializer(&declaration[assign_index + 1..]) else {
-        return Ok(None);
+    let values = if let Some(assign_index) =
+        top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+    {
+        let assign_index = close_bracket + 1 + assign_index;
+        let Ok(values) = parse_unsigned_char_initializer(&declaration[assign_index + 1..]) else {
+            return Ok(None);
+        };
+        values
+    } else {
+        let length =
+            parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?;
+        vec![0; length]
     };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global array name"))?
@@ -1631,6 +1636,25 @@ fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Gl
         name,
         initializer: GlobalInitializer::UnsignedCharArray(values),
     }))
+}
+
+fn parse_unsigned_char_array_length(tokens: &[Token]) -> CompileResult<usize> {
+    match tokens {
+        [
+            Token {
+                kind: TokenKind::Integer(value),
+                line,
+                column,
+            },
+        ] => usize::try_from(*value).map_err(|_| {
+            CompileError::new("unsigned char array length does not fit usize").at(*line, *column)
+        }),
+        [first, ..] => {
+            Err(CompileError::new("expected unsigned char array length")
+                .at(first.line, first.column))
+        }
+        [] => Err(CompileError::new("expected unsigned char array length")),
+    }
 }
 
 fn parse_global_extern_scalar(tokens: &[Token]) -> CompileResult<Option<Global>> {

@@ -1020,6 +1020,28 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_m_cheat_xlate_table_slice() {
+    // given
+    let source = r"static unsigned char cheat_xlate_table[256];
+int main(void) {
+    int i;
+    for (i = 0; i < 4; i++) cheat_xlate_table[i] = i + 1;
+    return cheat_xlate_table[(unsigned char)2];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly = emit_assembly(&lowered, Target::native()).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("cheat_xlate_table"));
+    assert!(assembly.contains(".byte 0,0,0,0"));
+    assert!(assembly.contains("main"));
+}
+
+#[test]
 fn compiler_accepts_m_bbox_pointer_subscript_slice() {
     // given
     let source = r"enum { BOXTOP, BOXBOTTOM, BOXLEFT, BOXRIGHT };

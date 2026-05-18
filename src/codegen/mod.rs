@@ -51,6 +51,12 @@ struct PointerSubscriptExpr<'a> {
 }
 
 #[derive(Clone, Copy)]
+struct GlobalByteSubscriptExpr<'a> {
+    name: &'a str,
+    index: &'a LoweredExpr,
+}
+
+#[derive(Clone, Copy)]
 struct PointerFieldExpr<'a> {
     pointer: &'a LoweredExpr,
     offset: usize,
@@ -103,6 +109,7 @@ const fn lowered_lvalue_width(target: &LoweredLValue) -> ValueWidth {
         LoweredLValue::Local { scalar_type, .. } | LoweredLValue::Global { scalar_type, .. } => {
             scalar_width(*scalar_type)
         }
+        LoweredLValue::GlobalByteSubscript { .. } => ValueWidth::I32,
         LoweredLValue::PointerSubscript { element_type, .. } => scalar_width(*element_type),
         LoweredLValue::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
     }
@@ -1144,6 +1151,16 @@ fn emit_aarch64_assign(
             emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
             emit_aarch64_store_global(name, width, labels.target, assembly)
         }
+        LoweredLValue::GlobalByteSubscript { name, index } => {
+            emit_aarch64_store_global_byte_subscript(
+                GlobalByteSubscriptExpr { name, index },
+                value,
+                temporary_base,
+                depth,
+                labels,
+                assembly,
+            )
+        }
         LoweredLValue::PointerSubscript {
             pointer,
             index,
@@ -1203,9 +1220,11 @@ fn emit_aarch64_post_increment(
             emit_aarch64_store_global(name, width, codegen_target, assembly)?;
             emit_aarch64_load_temporary(width, value_offset, assembly)
         }
-        LoweredLValue::PointerSubscript { .. } | LoweredLValue::PointerField { .. } => Err(
-            CompileError::new("post-increment expression supports direct lvalues only"),
-        ),
+        LoweredLValue::GlobalByteSubscript { .. }
+        | LoweredLValue::PointerSubscript { .. }
+        | LoweredLValue::PointerField { .. } => Err(CompileError::new(
+            "post-increment expression supports direct lvalues only",
+        )),
     }
 }
 
@@ -1262,6 +1281,41 @@ fn emit_aarch64_store_pointer_subscript(
         aarch64_result_register(width),
         memory_scale_shift(width)
     )
+}
+
+fn emit_aarch64_store_global_byte_subscript(
+    subscript: GlobalByteSubscriptExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let label = label_name(subscript.name, labels.target);
+    emit_aarch64_expr_with_width(
+        value,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I32, value_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmov w17, w0\n");
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tadd x16, x16, {label}@PAGEOFF\n")?;
+    emit_aarch64_load_temporary(ValueWidth::I32, value_offset, assembly)?;
+    assembly.push_str("\tstrb w0, [x16, w17, sxtw]\n");
+    Ok(())
 }
 
 fn emit_aarch64_load_pointer_field(
@@ -2177,6 +2231,17 @@ fn emit_x86_64_assign(
             )?;
             emit_x86_64_store_global(name, width, codegen_target, assembly)
         }
+        LoweredLValue::GlobalByteSubscript { name, index } => {
+            emit_x86_64_store_global_byte_subscript(
+                GlobalByteSubscriptExpr { name, index },
+                value,
+                temporary_base,
+                depth,
+                codegen_target,
+                labels,
+                assembly,
+            )
+        }
         LoweredLValue::PointerSubscript {
             pointer,
             index,
@@ -2239,9 +2304,11 @@ fn emit_x86_64_post_increment(
             emit_x86_64_store_global(name, width, codegen_target, assembly)?;
             emit_x86_64_load_temporary(width, value_offset, assembly)
         }
-        LoweredLValue::PointerSubscript { .. } | LoweredLValue::PointerField { .. } => Err(
-            CompileError::new("post-increment expression supports direct lvalues only"),
-        ),
+        LoweredLValue::GlobalByteSubscript { .. }
+        | LoweredLValue::PointerSubscript { .. }
+        | LoweredLValue::PointerField { .. } => Err(CompileError::new(
+            "post-increment expression supports direct lvalues only",
+        )),
     }
 }
 
@@ -2311,6 +2378,44 @@ fn emit_x86_64_store_pointer_subscript(
         x86_64_result_register(width),
         memory_scale_bytes(width)
     )
+}
+
+fn emit_x86_64_store_global_byte_subscript(
+    subscript: GlobalByteSubscriptExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let label = label_name(subscript.name, target);
+    emit_x86_64_expr_with_width(
+        value,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I32, value_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    assembly.push_str("\tmovq %rax, %rdx\n");
+    write_assembly!(assembly, "\tleaq {label}(%rip), %rcx\n")?;
+    emit_x86_64_load_temporary(ValueWidth::I32, value_offset, assembly)?;
+    assembly.push_str("\tmovb %al, (%rcx,%rdx)\n");
+    Ok(())
 }
 
 fn emit_x86_64_store_pointer_field(
@@ -2685,6 +2790,7 @@ fn assign_expr_depth(target: &LoweredLValue, value: &LoweredExpr) -> usize {
 fn lvalue_address_depth(target: &LoweredLValue) -> usize {
     match target {
         LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => 0,
+        LoweredLValue::GlobalByteSubscript { index, .. } => expr_depth(index),
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             pointer_lvalue_address_depth(pointer, index)
         }
@@ -2765,6 +2871,7 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
 fn lvalue_needs_preserved_temp(target: &LoweredLValue) -> bool {
     match target {
         LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => false,
+        LoweredLValue::GlobalByteSubscript { index, .. } => expr_needs_preserved_temp(index),
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
         }
@@ -2817,6 +2924,7 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
 fn lvalue_uses_call(target: &LoweredLValue) -> bool {
     match target {
         LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => false,
+        LoweredLValue::GlobalByteSubscript { index, .. } => expr_uses_call(index),
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             expr_uses_call(pointer) || expr_uses_call(index)
         }

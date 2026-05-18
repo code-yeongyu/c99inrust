@@ -136,6 +136,10 @@ pub enum LoweredLValue {
         name: String,
         scalar_type: ScalarType,
     },
+    GlobalByteSubscript {
+        name: String,
+        index: Box<LoweredExpr>,
+    },
     PointerSubscript {
         pointer: Box<LoweredExpr>,
         index: Box<LoweredExpr>,
@@ -873,6 +877,15 @@ impl LoweringContext {
     }
 
     fn lower_subscript_lvalue(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredLValue> {
+        if let Expr::Identifier(name) = array
+            && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
+        {
+            return Ok(LoweredLValue::GlobalByteSubscript {
+                name: name.clone(),
+                index: Box::new(self.lower_expr(index)?),
+            });
+        }
+
         let pointer = self.lower_expr(array)?;
         if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
             return Err(CompileError::new(
@@ -1037,7 +1050,8 @@ impl LoweringContext {
                     value,
                 });
             }
-            target @ (LoweredLValue::PointerSubscript { .. }
+            target @ (LoweredLValue::GlobalByteSubscript { .. }
+            | LoweredLValue::PointerSubscript { .. }
             | LoweredLValue::PointerField { .. }) => {
                 self.instructions
                     .push(Instruction::Eval(LoweredExpr::Assign {
@@ -1115,6 +1129,7 @@ const fn lowered_lvalue_scalar_type(target: &LoweredLValue) -> ScalarType {
             ..
         }
         | LoweredLValue::PointerField { scalar_type, .. } => *scalar_type,
+        LoweredLValue::GlobalByteSubscript { .. } => ScalarType::Int,
     }
 }
 
@@ -1131,6 +1146,10 @@ fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
         LoweredLValue::Global { name, scalar_type } => LoweredExpr::Global {
             name: name.clone(),
             scalar_type: *scalar_type,
+        },
+        LoweredLValue::GlobalByteSubscript { name, index } => LoweredExpr::GlobalByteSubscript {
+            name: name.clone(),
+            index: index.clone(),
         },
         LoweredLValue::PointerSubscript {
             pointer,
