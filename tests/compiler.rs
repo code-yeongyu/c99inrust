@@ -3134,6 +3134,29 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_double_pointer_parameter_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int height;
+} patch_t;
+int first_height(patch_t** font) {
+    return font[0]->height;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("first_height:"));
+    assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_global_function_pointer_assignment_call_slice() {
     // given
     let source = r"void (*messageRoutine)(int response);

@@ -2189,13 +2189,19 @@ fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
         .enumerate()
         .rev()
         .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
-    tokens[..name_index]
+    let specifiers = &tokens[..name_index];
+    let pointer_depth = specifiers
+        .iter()
+        .filter(|token| token_is_punctuator(token, "*"))
+        .count();
+    let base_referent = specifiers
         .iter()
         .rev()
         .find_map(token_identifier)
         .filter(|name| supported_typedef_scalar(name).is_none())
         .map(ToOwned::to_owned)
-        .or_else(|| declaration_base_referent_type(&tokens[..name_index]))
+        .or_else(|| declaration_base_referent_type(specifiers));
+    pointer_referent_for_depth(pointer_depth, base_referent.as_deref())
 }
 
 fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
