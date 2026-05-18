@@ -723,6 +723,33 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_enum_typedef_parameter_slice() {
+    // given
+    let source = r"typedef enum {
+    lowerToFloor,
+    raiseToHighest
+} ceiling_e;
+int apply(ceiling_e type) {
+    return type;
+}
+int main(void) {
+    return apply(raiseToHighest);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("apply:"));
+    assert!(assembly.contains("\tmovl %edi, -4(%rbp)\n"));
+    assert!(assembly.contains("\tcall apply\n"));
+}
+
+#[test]
 fn compiler_accepts_local_pointer_array_slice() {
     // given
     let source = r#"void use(char* value);

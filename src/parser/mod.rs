@@ -586,7 +586,7 @@ impl Parser<'_> {
         let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
             return Err(CompileError::new("unsupported function parameter"));
         };
-        let scalar_type = parameter_scalar_type(tokens)
+        let scalar_type = parameter_scalar_type(tokens, self.known_scalar_typedefs)
             .ok_or_else(|| CompileError::new("unsupported function parameter"))?;
         parameters.push(Parameter {
             name: name.to_owned(),
@@ -1920,7 +1920,7 @@ fn statement_from_expression(expr: Expr) -> Statement {
     }
 }
 
-fn parameter_scalar_type(tokens: &[Token]) -> Option<ScalarType> {
+fn parameter_scalar_type(tokens: &[Token], known_scalar_typedefs: &[String]) -> Option<ScalarType> {
     if parameter_has_pointer(tokens) {
         return Some(ScalarType::Pointer);
     }
@@ -1929,7 +1929,7 @@ fn parameter_scalar_type(tokens: &[Token]) -> Option<ScalarType> {
         .enumerate()
         .rev()
         .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
-    integer_parameter_type(&tokens[..name_index])
+    integer_parameter_type_with_typedefs(&tokens[..name_index], known_scalar_typedefs)
 }
 
 fn parameter_has_pointer(tokens: &[Token]) -> bool {
@@ -1999,6 +1999,13 @@ fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
 }
 
 fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
+    integer_parameter_type_with_typedefs(tokens, &[])
+}
+
+fn integer_parameter_type_with_typedefs(
+    tokens: &[Token],
+    known_scalar_typedefs: &[String],
+) -> Option<ScalarType> {
     let mut saw_type = false;
     let mut long_count = 0usize;
     for token in tokens {
@@ -2014,7 +2021,12 @@ fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
                 long_count += 1;
             }
             TokenKind::Identifier(name) => {
-                let scalar_type = supported_typedef_scalar(name)?;
+                let scalar_type = supported_typedef_scalar(name).or_else(|| {
+                    known_scalar_typedefs
+                        .iter()
+                        .any(|known_name| known_name == name)
+                        .then_some(ScalarType::Int)
+                })?;
                 if scalar_type != ScalarType::Int {
                     return None;
                 }
