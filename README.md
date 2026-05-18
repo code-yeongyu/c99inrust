@@ -22,6 +22,11 @@ Full C99, full Doom playability, all-world architecture coverage, and
 Clang-beating optimization are explicit future milestones. The compiler will
 not claim those until the checks prove them.
 
+The full-spec track is enforced through a Clang-oracle test harness: supported
+C99 snippets must compile with `c99inrust`, compile with the host C compiler in
+`-std=c99` mode, and produce the same observable exit code before the supported
+surface can grow.
+
 ## Install
 
 ```bash
