@@ -83,6 +83,7 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         }
         LoweredExpr::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
         LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::GlobalIntSubscript { .. }
         | LoweredExpr::PointerSubscript {
             element_type: ScalarType::Int,
             ..
@@ -111,7 +112,9 @@ const fn lowered_lvalue_width(target: &LoweredLValue) -> ValueWidth {
         LoweredLValue::Local { scalar_type, .. } | LoweredLValue::Global { scalar_type, .. } => {
             scalar_width(*scalar_type)
         }
-        LoweredLValue::GlobalByteSubscript { .. } => ValueWidth::I32,
+        LoweredLValue::GlobalByteSubscript { .. } | LoweredLValue::GlobalIntSubscript { .. } => {
+            ValueWidth::I32
+        }
         LoweredLValue::GlobalPointerSubscript { .. } => ValueWidth::I64,
         LoweredLValue::PointerSubscript { element_type, .. } => scalar_width(*element_type),
         LoweredLValue::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
@@ -230,6 +233,14 @@ fn emit_globals(
                 assembly.push_str(".p2align 2\n");
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.long {value}\n")?;
+            }
+            LoweredGlobalInitializer::IntArray(length) => {
+                let byte_len = length
+                    .checked_mul(4)
+                    .ok_or_else(|| CompileError::new("global int-array size overflow"))?;
+                assembly.push_str(".p2align 2\n");
+                write_assembly!(assembly, "{label}:\n")?;
+                write_assembly!(assembly, "\t.zero {byte_len}\n")?;
             }
             LoweredGlobalInitializer::PointerNull => {
                 assembly.push_str(".p2align 3\n");
@@ -645,6 +656,7 @@ fn emit_aarch64_expr_natural(
         }
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::GlobalIntSubscript { .. }
         | LoweredExpr::GlobalPointerSubscript { .. }
         | LoweredExpr::PointerSubscript { .. }
         | LoweredExpr::PointerField { .. }
@@ -718,6 +730,14 @@ fn emit_aarch64_memory_expr(
                 assembly,
             )
         }
+        LoweredExpr::GlobalIntSubscript { name, index } => emit_aarch64_load_global_int_subscript(
+            name,
+            index,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         LoweredExpr::GlobalPointerSubscript { name, index } => {
             emit_aarch64_load_global_pointer_subscript(
                 name,
@@ -1120,6 +1140,29 @@ fn emit_aarch64_load_global_byte_subscript(
     Ok(())
 }
 
+fn emit_aarch64_load_global_int_subscript(
+    name: &str,
+    index: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, labels.target);
+    emit_aarch64_expr_with_width(
+        index,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tadd x16, x16, {label}@PAGEOFF\n")?;
+    assembly.push_str("\tldr w0, [x16, w0, sxtw #2]\n");
+    Ok(())
+}
+
 fn emit_aarch64_load_global_pointer_subscript(
     name: &str,
     index: &LoweredExpr,
@@ -1198,6 +1241,16 @@ fn emit_aarch64_assign(
         }
         LoweredLValue::GlobalByteSubscript { name, index } => {
             emit_aarch64_store_global_byte_subscript(
+                GlobalByteSubscriptExpr { name, index },
+                value,
+                temporary_base,
+                depth,
+                labels,
+                assembly,
+            )
+        }
+        LoweredLValue::GlobalIntSubscript { name, index } => {
+            emit_aarch64_store_global_int_subscript(
                 GlobalByteSubscriptExpr { name, index },
                 value,
                 temporary_base,
@@ -1291,6 +1344,7 @@ fn emit_aarch64_post_increment(
             assembly,
         ),
         LoweredLValue::GlobalByteSubscript { .. }
+        | LoweredLValue::GlobalIntSubscript { .. }
         | LoweredLValue::GlobalPointerSubscript { .. }
         | LoweredLValue::PointerSubscript { .. } => Err(CompileError::new(
             "post-increment expression supports direct lvalues only",
@@ -1423,6 +1477,41 @@ fn emit_aarch64_store_global_byte_subscript(
     write_assembly!(assembly, "\tadd x16, x16, {label}@PAGEOFF\n")?;
     emit_aarch64_load_temporary(ValueWidth::I32, value_offset, assembly)?;
     assembly.push_str("\tstrb w0, [x16, w17, sxtw]\n");
+    Ok(())
+}
+
+fn emit_aarch64_store_global_int_subscript(
+    subscript: GlobalByteSubscriptExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let label = label_name(subscript.name, labels.target);
+    emit_aarch64_expr_with_width(
+        value,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I32, value_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmov w17, w0\n");
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tadd x16, x16, {label}@PAGEOFF\n")?;
+    emit_aarch64_load_temporary(ValueWidth::I32, value_offset, assembly)?;
+    assembly.push_str("\tstr w0, [x16, w17, sxtw #2]\n");
     Ok(())
 }
 
@@ -1732,6 +1821,7 @@ fn emit_x86_64_expr_natural(
         }
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::GlobalIntSubscript { .. }
         | LoweredExpr::GlobalPointerSubscript { .. }
         | LoweredExpr::PointerSubscript { .. }
         | LoweredExpr::PointerField { .. }
@@ -1848,6 +1938,15 @@ fn emit_x86_64_global_or_assignment_expr(
             emit_x86_64_load_global(name, scalar_width(*scalar_type), target, assembly)
         }
         LoweredExpr::GlobalByteSubscript { name, index } => emit_x86_64_load_global_byte_subscript(
+            name,
+            index,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::GlobalIntSubscript { name, index } => emit_x86_64_load_global_int_subscript(
             name,
             index,
             temporary_base,
@@ -2284,6 +2383,31 @@ fn emit_x86_64_load_global_byte_subscript(
     Ok(())
 }
 
+fn emit_x86_64_load_global_int_subscript(
+    name: &str,
+    index: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    emit_x86_64_expr_with_width(
+        index,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    write_assembly!(assembly, "\tleaq {label}(%rip), %rcx\n")?;
+    assembly.push_str("\tmovl (%rcx,%rax,4), %eax\n");
+    Ok(())
+}
+
 fn emit_x86_64_load_global_pointer_subscript(
     name: &str,
     index: &LoweredExpr,
@@ -2422,6 +2546,17 @@ fn emit_x86_64_assign(
                 assembly,
             )
         }
+        LoweredLValue::GlobalIntSubscript { name, index } => {
+            emit_x86_64_store_global_int_subscript(
+                GlobalByteSubscriptExpr { name, index },
+                value,
+                temporary_base,
+                depth,
+                codegen_target,
+                labels,
+                assembly,
+            )
+        }
         LoweredLValue::GlobalPointerSubscript { name, index } => {
             emit_x86_64_store_global_pointer_subscript(
                 GlobalByteSubscriptExpr { name, index },
@@ -2512,6 +2647,7 @@ fn emit_x86_64_post_increment(
             assembly,
         ),
         LoweredLValue::GlobalByteSubscript { .. }
+        | LoweredLValue::GlobalIntSubscript { .. }
         | LoweredLValue::GlobalPointerSubscript { .. }
         | LoweredLValue::PointerSubscript { .. } => Err(CompileError::new(
             "post-increment expression supports direct lvalues only",
@@ -2664,6 +2800,44 @@ fn emit_x86_64_store_global_byte_subscript(
     write_assembly!(assembly, "\tleaq {label}(%rip), %rcx\n")?;
     emit_x86_64_load_temporary(ValueWidth::I32, value_offset, assembly)?;
     assembly.push_str("\tmovb %al, (%rcx,%rdx)\n");
+    Ok(())
+}
+
+fn emit_x86_64_store_global_int_subscript(
+    subscript: GlobalByteSubscriptExpr<'_>,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let label = label_name(subscript.name, target);
+    emit_x86_64_expr_with_width(
+        value,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I32, value_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 1,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    assembly.push_str("\tmovq %rax, %rdx\n");
+    write_assembly!(assembly, "\tleaq {label}(%rip), %rcx\n")?;
+    emit_x86_64_load_temporary(ValueWidth::I32, value_offset, assembly)?;
+    assembly.push_str("\tmovl %eax, (%rcx,%rdx,4)\n");
     Ok(())
 }
 
@@ -3046,6 +3220,7 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
         LoweredExpr::GlobalByteSubscript { index, .. }
+        | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_depth(index),
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             pointer_lvalue_address_depth(pointer, index)
@@ -3079,6 +3254,7 @@ fn lvalue_address_depth(target: &LoweredLValue) -> usize {
     match target {
         LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => 0,
         LoweredLValue::GlobalByteSubscript { index, .. }
+        | LoweredLValue::GlobalIntSubscript { index, .. }
         | LoweredLValue::GlobalPointerSubscript { index, .. } => expr_depth(index),
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             pointer_lvalue_address_depth(pointer, index)
@@ -3140,6 +3316,7 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
             expr_needs_preserved_temp(expr)
         }
         LoweredExpr::GlobalByteSubscript { index, .. }
+        | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_needs_preserved_temp(index),
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
@@ -3162,6 +3339,7 @@ fn lvalue_needs_preserved_temp(target: &LoweredLValue) -> bool {
     match target {
         LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => false,
         LoweredLValue::GlobalByteSubscript { index, .. }
+        | LoweredLValue::GlobalIntSubscript { index, .. }
         | LoweredLValue::GlobalPointerSubscript { index, .. } => expr_needs_preserved_temp(index),
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             expr_needs_preserved_temp(pointer) || expr_needs_preserved_temp(index)
@@ -3197,6 +3375,7 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         | LoweredExpr::Local { .. } => false,
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
         LoweredExpr::GlobalByteSubscript { index, .. }
+        | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_uses_call(index),
         LoweredExpr::PointerSubscript { pointer, index, .. } => {
             expr_uses_call(pointer) || expr_uses_call(index)
@@ -3217,6 +3396,7 @@ fn lvalue_uses_call(target: &LoweredLValue) -> bool {
     match target {
         LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => false,
         LoweredLValue::GlobalByteSubscript { index, .. }
+        | LoweredLValue::GlobalIntSubscript { index, .. }
         | LoweredLValue::GlobalPointerSubscript { index, .. } => expr_uses_call(index),
         LoweredLValue::PointerSubscript { pointer, index, .. } => {
             expr_uses_call(pointer) || expr_uses_call(index)

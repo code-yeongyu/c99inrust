@@ -21,6 +21,7 @@ pub struct LoweredGlobal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredGlobalInitializer {
     Int(i32),
+    IntArray(usize),
     PointerNull,
     PointerArray(usize),
     UnsignedCharArray(Vec<u8>),
@@ -85,6 +86,10 @@ pub enum LoweredExpr {
         name: String,
         index: Box<Self>,
     },
+    GlobalIntSubscript {
+        name: String,
+        index: Box<Self>,
+    },
     GlobalPointerSubscript {
         name: String,
         index: Box<Self>,
@@ -142,6 +147,10 @@ pub enum LoweredLValue {
         scalar_type: ScalarType,
     },
     GlobalByteSubscript {
+        name: String,
+        index: Box<LoweredExpr>,
+    },
+    GlobalIntSubscript {
         name: String,
         index: Box<LoweredExpr>,
     },
@@ -214,6 +223,10 @@ fn lower_globals(
                     ))
                 })?),
                 GlobalBinding::Int,
+            ),
+            GlobalInitializer::IntArray(length) => (
+                LoweredGlobalInitializer::IntArray(*length),
+                GlobalBinding::IntArray,
             ),
             GlobalInitializer::IntConstant(name) => {
                 let Some(value) = constants.get(name) else {
@@ -429,6 +442,7 @@ struct LocalBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GlobalBinding {
     Int,
+    IntArray,
     Pointer,
     PointerArray,
     UnsignedCharArray,
@@ -449,7 +463,7 @@ impl GlobalBinding {
         match self {
             Self::Int => Some(ScalarType::Int),
             Self::Pointer => Some(ScalarType::Pointer),
-            Self::PointerArray | Self::UnsignedCharArray => None,
+            Self::IntArray | Self::PointerArray | Self::UnsignedCharArray => None,
         }
     }
 }
@@ -877,6 +891,14 @@ impl LoweringContext {
             });
         }
         if let Expr::Identifier(name) = array
+            && self.global_bindings.get(name) == Some(&GlobalBinding::IntArray)
+        {
+            return Ok(LoweredExpr::GlobalIntSubscript {
+                name: name.clone(),
+                index: Box::new(self.lower_expr(index)?),
+            });
+        }
+        if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::PointerArray)
         {
             return Ok(LoweredExpr::GlobalPointerSubscript {
@@ -903,6 +925,14 @@ impl LoweringContext {
             && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
         {
             return Ok(LoweredLValue::GlobalByteSubscript {
+                name: name.clone(),
+                index: Box::new(self.lower_expr(index)?),
+            });
+        }
+        if let Expr::Identifier(name) = array
+            && self.global_bindings.get(name) == Some(&GlobalBinding::IntArray)
+        {
+            return Ok(LoweredLValue::GlobalIntSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
             });
@@ -1089,6 +1119,7 @@ impl LoweringContext {
                 });
             }
             target @ (LoweredLValue::GlobalByteSubscript { .. }
+            | LoweredLValue::GlobalIntSubscript { .. }
             | LoweredLValue::GlobalPointerSubscript { .. }
             | LoweredLValue::PointerSubscript { .. }
             | LoweredLValue::PointerField { .. }) => {
@@ -1144,6 +1175,7 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
             ..
         }
         | LoweredExpr::PointerField { scalar_type, .. } => Some(*scalar_type),
+        LoweredExpr::GlobalIntSubscript { .. } => Some(ScalarType::Int),
         LoweredExpr::GlobalPointerSubscript { .. } => Some(ScalarType::Pointer),
         LoweredExpr::PointerSubscript { element_type, .. } => Some(*element_type),
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
@@ -1169,8 +1201,10 @@ const fn lowered_lvalue_scalar_type(target: &LoweredLValue) -> ScalarType {
             ..
         }
         | LoweredLValue::PointerField { scalar_type, .. } => *scalar_type,
+        LoweredLValue::GlobalByteSubscript { .. } | LoweredLValue::GlobalIntSubscript { .. } => {
+            ScalarType::Int
+        }
         LoweredLValue::GlobalPointerSubscript { .. } => ScalarType::Pointer,
-        LoweredLValue::GlobalByteSubscript { .. } => ScalarType::Int,
     }
 }
 
@@ -1189,6 +1223,10 @@ fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
             scalar_type: *scalar_type,
         },
         LoweredLValue::GlobalByteSubscript { name, index } => LoweredExpr::GlobalByteSubscript {
+            name: name.clone(),
+            index: index.clone(),
+        },
+        LoweredLValue::GlobalIntSubscript { name, index } => LoweredExpr::GlobalIntSubscript {
             name: name.clone(),
             index: index.clone(),
         },
@@ -1356,6 +1394,7 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
             inline_constant_calls_in_expr(expr, constants);
         }
         LoweredExpr::GlobalByteSubscript { index, .. }
+        | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => {
             inline_constant_calls_in_expr(index, constants);
         }
