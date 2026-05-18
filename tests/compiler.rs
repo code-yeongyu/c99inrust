@@ -395,3 +395,73 @@ fn compiler_accepts_parameter_list_signatures_when_body_does_not_use_parameters(
     assert!(assembly.contains(".globl _main"));
     assert!(assembly.contains("movz w0, #42"));
 }
+
+#[test]
+fn compiler_accepts_typedef_return_signatures() {
+    // given
+    let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return 42; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _FixedMul"));
+    assert!(assembly.contains("movz w0, #42"));
+}
+
+#[test]
+fn compiler_accepts_split_line_typedef_return_signatures() {
+    // given
+    let source = "typedef int fixed_t; fixed_t\nFixedMul\n(fixed_t a,\n fixed_t b)\n{ return 42; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _FixedMul"));
+    assert!(assembly.contains("movz w0, #42"));
+}
+
+#[test]
+fn compiler_accepts_unsigned_scalar_return_signatures() {
+    // given
+    let source =
+        "unsigned short SwapSHORT(unsigned short x) { return 42; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _SwapSHORT"));
+    assert!(assembly.contains("movz w0, #42"));
+}
+
+#[test]
+fn compiler_rejects_pointer_return_signatures() {
+    // given
+    let source = "char *name(void) { return 0; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let error = parse_supported_translation_unit(&tokens)
+        .expect_err("translation unit should reject pointer returns");
+
+    // then
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported function definition: name")
+    );
+}
