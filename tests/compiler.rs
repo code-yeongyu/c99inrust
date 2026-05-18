@@ -697,6 +697,32 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_local_array_of_enum_typedef_slice() {
+    // given
+    let source = r"typedef enum {
+    DI_EAST,
+    DI_WEST
+} dirtype_t;
+int main(void) {
+    dirtype_t d[3];
+    d[0] = DI_WEST;
+    return d[0];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_local_pointer_array_slice() {
     // given
     let source = r#"void use(char* value);

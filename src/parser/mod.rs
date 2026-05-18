@@ -392,6 +392,7 @@ pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
         index: 0,
         known_structs: &[],
         known_constants: &[],
+        known_scalar_typedefs: &[],
     };
     parser.program()
 }
@@ -418,6 +419,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let external_items = parser.external_token_groups()?;
     let mut structs = Vec::new();
     let mut constants = Vec::new();
+    let mut scalar_typedefs = Vec::new();
     let mut globals = Vec::new();
     let mut functions = Vec::new();
     let mut unsupported_data_declaration = false;
@@ -428,6 +430,9 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         }
         let enum_constants = parse_enum_constants(item_tokens, &constants)?;
         if !enum_constants.is_empty() {
+            if let Some(name) = enum_typedef_name(item_tokens) {
+                scalar_typedefs.push(name);
+            }
             constants.extend(enum_constants);
             continue;
         }
@@ -459,6 +464,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             index: 0,
             known_structs: &structs,
             known_constants: &constants,
+            known_scalar_typedefs: &scalar_typedefs,
         };
         functions.push(function_parser.function()?);
         if !function_parser.check_end() {
@@ -485,6 +491,7 @@ struct Parser<'a> {
     index: usize,
     known_structs: &'a [StructLayout],
     known_constants: &'a [Constant],
+    known_scalar_typedefs: &'a [String],
 }
 
 impl Parser<'_> {
@@ -1695,7 +1702,7 @@ impl Parser<'_> {
                     if saw_type {
                         break;
                     }
-                    if let Some(scalar_type) = supported_typedef_scalar(name) {
+                    if let Some(scalar_type) = self.supported_declaration_typedef_scalar(name) {
                         if scalar_type != ScalarType::Int {
                             return None;
                         }
@@ -1729,6 +1736,15 @@ impl Parser<'_> {
         } else {
             Some((ScalarType::LongLong, index))
         }
+    }
+
+    fn supported_declaration_typedef_scalar(&self, name: &str) -> Option<ScalarType> {
+        supported_typedef_scalar(name).or_else(|| {
+            self.known_scalar_typedefs
+                .iter()
+                .any(|known_name| known_name == name)
+                .then_some(ScalarType::Int)
+        })
     }
 
     fn struct_pointer_declarator_follows(&self, mut index: usize) -> bool {
@@ -2383,6 +2399,13 @@ fn tokens_start_enum_declaration(tokens: &[Token]) -> bool {
             Some(TokenKind::Keyword(Keyword::Enum))
         )
     )
+}
+
+fn enum_typedef_name(tokens: &[Token]) -> Option<String> {
+    if !token_has_keyword(tokens, Keyword::Typedef) || !token_has_keyword(tokens, Keyword::Enum) {
+        return None;
+    }
+    last_top_level_identifier(tokens)
 }
 
 fn next_enum_separator(tokens: &[Token], start: usize) -> usize {
@@ -3295,6 +3318,7 @@ fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {
         index: 0,
         known_structs: &[],
         known_constants: &[],
+        known_scalar_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
@@ -3368,6 +3392,7 @@ fn parse_integer_initializer_with_constants(
         index: 0,
         known_structs: &[],
         known_constants: constants,
+        known_scalar_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
