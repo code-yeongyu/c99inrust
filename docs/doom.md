@@ -98,6 +98,8 @@ assignment-expression path, covering scalar conditions such as `++fuzzpos`.
 Local `char name[] = "literal"` declarations are accepted by lowering them as
 pointer locals initialized from string-literal storage.
 Plain `unsigned` parameters are accepted as integer parameters.
+The Doom typedef scalar set includes `lighttable_t`, enabling globals such as
+`lighttable_t* dc_colormap`.
 Global pointer arrays such as `byte* ylookup[MAXHEIGHT]` are emitted as
 zero-filled pointer storage and support pointer element loads/stores.
 Global int arrays such as `int columnofs[MAXWIDTH]` are emitted as zero-filled
@@ -117,7 +119,8 @@ The current `r_draw.c` blocker has moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, and the
 local char-array string initializers in `R_FillBackScreen`, and the
 `unsigned ofs` parameter in `R_VideoErase`, and the global arrays `ylookup` and
-`columnofs`. It is now the global pointer/scalar `dc_colormap`.
+`columnofs`, and the `lighttable_t* dc_colormap` global. It is now the global
+array `fuzzoffset`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
