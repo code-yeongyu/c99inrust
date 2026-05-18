@@ -142,8 +142,8 @@ pub enum LoweredLValue {
 /// Returns an error when a function body uses unsupported semantics such as
 /// undeclared locals or a missing `int` return.
 pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
-    let (globals, global_bindings) = lower_globals(&program.globals)?;
     let constants = lower_constants(&program.constants)?;
+    let (globals, global_bindings) = lower_globals(&program.globals, &constants)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function_with_globals(
@@ -159,6 +159,7 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
 
 fn lower_globals(
     globals: &[Global],
+    constants: &HashMap<String, i64>,
 ) -> CompileResult<(Vec<LoweredGlobal>, HashMap<String, GlobalBinding>)> {
     let mut lowered = Vec::with_capacity(globals.len());
     let mut bindings = HashMap::with_capacity(globals.len());
@@ -182,6 +183,22 @@ fn lower_globals(
                 })?),
                 GlobalBinding::Int,
             ),
+            GlobalInitializer::IntConstant(name) => {
+                let Some(value) = constants.get(name) else {
+                    return Err(CompileError::new(format!(
+                        "unknown global initializer constant: {name}"
+                    )));
+                };
+                (
+                    LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
+                        CompileError::new(format!(
+                            "global int initializer does not fit i32: {}",
+                            global.name
+                        ))
+                    })?),
+                    GlobalBinding::Int,
+                )
+            }
             GlobalInitializer::PointerNull => (
                 LoweredGlobalInitializer::PointerNull,
                 GlobalBinding::Pointer,

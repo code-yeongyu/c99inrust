@@ -418,6 +418,61 @@ fn compiler_rejects_unsupported_data_only_translation_unit() {
 }
 
 #[test]
+fn compiler_accepts_doomstat_enum_globals_slice() {
+    // given
+    let source = r"typedef enum { shareware, registered, commercial, retail, indetermined } GameMode_t;
+typedef enum { doom, doom2, pack_tnt, pack_plut, none } GameMission_t;
+typedef enum { english, french, german, unknown } Language_t;
+typedef int boolean;
+GameMode_t gamemode = indetermined;
+GameMission_t gamemission = doom;
+Language_t language = english;
+boolean modifiedgame;";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("gamemode:"));
+    assert!(assembly.contains("gamemission:"));
+    assert!(assembly.contains("language:"));
+    assert!(assembly.contains("modifiedgame:"));
+    assert!(assembly.contains("\t.long 4\n"));
+    assert!(assembly.contains("\t.long 0\n"));
+}
+
+#[test]
+fn compiler_accepts_doomstat_globals_after_header_extern_arrays_slice() {
+    // given
+    let source = r#"static const char rcsid[] = "doom";
+typedef enum { shareware, registered, commercial, retail, indetermined } GameMode_t;
+typedef int boolean;
+extern int finesine[5*8192/4];
+extern char *sprnames[138];
+extern boolean nomonsters;
+extern GameMode_t gamemode;
+GameMode_t gamemode = indetermined;
+boolean modifiedgame;"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("gamemode:"));
+    assert!(assembly.contains("modifiedgame:"));
+    assert!(assembly.contains("\t.long 4\n"));
+    assert!(assembly.contains("\t.long 0\n"));
+}
+
+#[test]
 fn compiler_emits_void_functions_with_value_less_return() {
     // given
     let source = "void tick(void) { return; } int main(void) { return 42; }";

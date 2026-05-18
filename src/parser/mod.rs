@@ -24,6 +24,7 @@ pub struct Global {
 pub enum GlobalInitializer {
     Extern(ScalarType),
     Int(i64),
+    IntConstant(String),
     PointerNull,
     UnsignedCharArray(Vec<u8>),
 }
@@ -998,10 +999,7 @@ fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
 }
 
 fn parse_enum_constants(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
-    if !matches!(
-        tokens.first().map(|token| &token.kind),
-        Some(TokenKind::Keyword(Keyword::Enum))
-    ) {
+    if !tokens_start_enum_declaration(tokens) {
         return Ok(Vec::new());
     }
     let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
@@ -1047,6 +1045,22 @@ fn parse_enum_body(tokens: &[Token]) -> CompileResult<Vec<Constant>> {
     Ok(constants)
 }
 
+fn tokens_start_enum_declaration(tokens: &[Token]) -> bool {
+    matches!(
+        tokens.first().map(|token| &token.kind),
+        Some(TokenKind::Keyword(Keyword::Enum))
+    ) || matches!(
+        (
+            tokens.first().map(|token| &token.kind),
+            tokens.get(1).map(|token| &token.kind)
+        ),
+        (
+            Some(TokenKind::Keyword(Keyword::Typedef)),
+            Some(TokenKind::Keyword(Keyword::Enum))
+        )
+    )
+}
+
 fn next_enum_separator(tokens: &[Token], start: usize) -> usize {
     tokens[start..]
         .iter()
@@ -1077,10 +1091,17 @@ fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {
     if ignorable_static_const_char_array(tokens) {
         return false;
     }
+    if declaration_only_extern(tokens) {
+        return false;
+    }
     matches!(
         classify_external_item(tokens),
         Some(ExternalItem::Declaration { .. })
     )
+}
+
+fn declaration_only_extern(tokens: &[Token]) -> bool {
+    token_has_keyword(tokens, Keyword::Extern) && top_level_punctuator_index(tokens, "=").is_none()
 }
 
 fn ignorable_static_const_char_array(tokens: &[Token]) -> bool {
@@ -1184,6 +1205,9 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
         return Ok(None);
     };
     let end_index = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
+    if top_level_punctuator_index(&declaration[..end_index], "[").is_some() {
+        return Ok(None);
+    }
     let Some(name_index) = previous_identifier_index(declaration, end_index) else {
         return Ok(None);
     };
@@ -1212,6 +1236,9 @@ fn parse_global_int(tokens: &[Token]) -> CompileResult<Option<Global>> {
         return Ok(None);
     };
     let end_index = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
+    if top_level_punctuator_index(&declaration[..end_index], "[").is_some() {
+        return Ok(None);
+    }
     let Some(name_index) = previous_identifier_index(declaration, end_index) else {
         return Ok(None);
     };
@@ -1219,20 +1246,14 @@ fn parse_global_int(tokens: &[Token]) -> CompileResult<Option<Global>> {
         return Ok(None);
     }
     let initializer = if end_index == declaration.len() {
-        0
+        GlobalInitializer::Int(0)
     } else {
-        let Ok(value) = parse_integer_initializer(&declaration[end_index + 1..]) else {
-            return Ok(None);
-        };
-        value
+        parse_global_int_initializer(&declaration[end_index + 1..])?
     };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global int name"))?
         .to_owned();
-    Ok(Some(Global {
-        name,
-        initializer: GlobalInitializer::Int(initializer),
-    }))
+    Ok(Some(Global { name, initializer }))
 }
 
 fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
@@ -1318,11 +1339,29 @@ fn global_specifiers_are_int_like(tokens: &[Token], allow_extern: bool) -> bool 
             TokenKind::Keyword(
                 Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Signed,
             ) => {}
-            TokenKind::Keyword(Keyword::Int) => saw_int = true,
+            TokenKind::Keyword(Keyword::Int) | TokenKind::Identifier(_) => saw_int = true,
             _ => return false,
         }
     }
     saw_int
+}
+
+fn parse_global_int_initializer(tokens: &[Token]) -> CompileResult<GlobalInitializer> {
+    if let Ok(value) = parse_integer_initializer(tokens) {
+        return Ok(GlobalInitializer::Int(value));
+    }
+    match tokens {
+        [token] => {
+            let Some(name) = token_identifier(token) else {
+                return Err(CompileError::new("unsupported global integer initializer")
+                    .at(token.line, token.column));
+            };
+            Ok(GlobalInitializer::IntConstant(name.to_owned()))
+        }
+        [first, ..] => Err(CompileError::new("unsupported global integer initializer")
+            .at(first.line, first.column)),
+        [] => Err(CompileError::new("expected global integer initializer")),
+    }
 }
 
 fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
@@ -1375,14 +1414,114 @@ fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
         [minus, token] if token_is_punctuator(minus, "-") => integer_token_value(token)?
             .checked_neg()
             .ok_or_else(|| CompileError::new("integer initializer overflow")),
-        [open, token, close]
+        [open, inner @ .., close]
             if token_is_punctuator(open, "(") && token_is_punctuator(close, ")") =>
         {
-            integer_token_value(token)
+            eval_integer_initializer_expression(inner)
         }
         [first, ..] => Err(CompileError::new("unsupported global integer initializer")
             .at(first.line, first.column)),
         [] => Err(CompileError::new("expected global integer initializer")),
+    }
+}
+
+fn eval_integer_initializer_expression(tokens: &[Token]) -> CompileResult<i64> {
+    let Some((first, rest)) = tokens.split_first() else {
+        return Err(CompileError::new("expected global integer initializer"));
+    };
+    let mut total = 0;
+    let mut pending_additive_op = AdditiveInitializerOp::Add;
+    let mut term = integer_token_value(first)?;
+    let mut chunks = rest.chunks_exact(2);
+    for chunk in chunks.by_ref() {
+        let op = &chunk[0];
+        let right = integer_token_value(&chunk[1])?;
+        match initializer_op(op)? {
+            InitializerOp::Multiplicative(op) => {
+                term = apply_multiplicative_initializer_op(term, op, right)?;
+            }
+            InitializerOp::Additive(op) => {
+                total = apply_additive_initializer_op(total, pending_additive_op, term)?;
+                pending_additive_op = op;
+                term = right;
+            }
+        }
+    }
+    if let Some(token) = chunks.remainder().first() {
+        return Err(CompileError::new("unsupported global integer initializer")
+            .at(token.line, token.column));
+    }
+    apply_additive_initializer_op(total, pending_additive_op, term)
+}
+
+#[derive(Clone, Copy)]
+enum InitializerOp {
+    Additive(AdditiveInitializerOp),
+    Multiplicative(MultiplicativeInitializerOp),
+}
+
+#[derive(Clone, Copy)]
+enum AdditiveInitializerOp {
+    Add,
+    Subtract,
+}
+
+#[derive(Clone, Copy)]
+enum MultiplicativeInitializerOp {
+    Multiply,
+    Divide,
+}
+
+fn initializer_op(token: &Token) -> CompileResult<InitializerOp> {
+    match &token.kind {
+        TokenKind::Punctuator(value) if value == "*" => Ok(InitializerOp::Multiplicative(
+            MultiplicativeInitializerOp::Multiply,
+        )),
+        TokenKind::Punctuator(value) if value == "/" => Ok(InitializerOp::Multiplicative(
+            MultiplicativeInitializerOp::Divide,
+        )),
+        TokenKind::Punctuator(value) if value == "+" => {
+            Ok(InitializerOp::Additive(AdditiveInitializerOp::Add))
+        }
+        TokenKind::Punctuator(value) if value == "-" => {
+            Ok(InitializerOp::Additive(AdditiveInitializerOp::Subtract))
+        }
+        _ => Err(CompileError::new("unsupported global integer initializer")
+            .at(token.line, token.column)),
+    }
+}
+
+fn apply_additive_initializer_op(
+    left: i64,
+    op: AdditiveInitializerOp,
+    right: i64,
+) -> CompileResult<i64> {
+    match op {
+        AdditiveInitializerOp::Add => left
+            .checked_add(right)
+            .ok_or_else(|| CompileError::new("integer initializer overflow")),
+        AdditiveInitializerOp::Subtract => left
+            .checked_sub(right)
+            .ok_or_else(|| CompileError::new("integer initializer overflow")),
+    }
+}
+
+fn apply_multiplicative_initializer_op(
+    left: i64,
+    op: MultiplicativeInitializerOp,
+    right: i64,
+) -> CompileResult<i64> {
+    match op {
+        MultiplicativeInitializerOp::Multiply => left
+            .checked_mul(right)
+            .ok_or_else(|| CompileError::new("integer initializer overflow")),
+        MultiplicativeInitializerOp::Divide => {
+            if right == 0 {
+                return Err(CompileError::new("integer initializer division by zero"));
+            }
+            left.checked_div(right)
+                .ok_or_else(|| CompileError::new("integer initializer overflow"))
+        }
     }
 }
 
