@@ -22,7 +22,7 @@ impl CompileError {
     }
 
     #[must_use]
-    pub fn at(mut self, line: usize, column: usize) -> Self {
+    pub const fn at(mut self, line: usize, column: usize) -> Self {
         self.line = Some(line);
         self.column = Some(column);
         self

@@ -14,7 +14,7 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
-    Block(Vec<Statement>),
+    Block(Vec<Self>),
     Declaration {
         name: String,
         initializer: Option<Expr>,
@@ -25,18 +25,18 @@ pub enum Statement {
     },
     If {
         condition: Expr,
-        then_branch: Box<Statement>,
-        else_branch: Option<Box<Statement>>,
+        then_branch: Box<Self>,
+        else_branch: Option<Box<Self>>,
     },
     While {
         condition: Expr,
-        body: Box<Statement>,
+        body: Box<Self>,
     },
     For {
-        initializer: Option<Box<Statement>>,
+        initializer: Option<Box<Self>>,
         condition: Option<Expr>,
-        post: Option<Box<Statement>>,
-        body: Box<Statement>,
+        post: Option<Box<Self>>,
+        body: Box<Self>,
     },
     Return(Expr),
 }
@@ -50,12 +50,12 @@ pub enum Expr {
     Integer(i64),
     Unary {
         op: UnaryOp,
-        expr: Box<Expr>,
+        expr: Box<Self>,
     },
     Binary {
         op: BinaryOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Box<Self>,
+        right: Box<Self>,
     },
 }
 
@@ -145,11 +145,23 @@ pub enum ExternalItem {
     StructForward { name: String },
 }
 
+/// Parses the supported executable function-body subset.
+///
+/// # Errors
+///
+/// Returns an error when the token stream does not match the currently
+/// supported C subset.
 pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
     let mut parser = Parser { tokens, index: 0 };
     parser.program()
 }
 
+/// Surface-parses a translation unit for Doom-facing frontend audits.
+///
+/// # Errors
+///
+/// Returns an error when external declarations or function-definition
+/// boundaries are structurally unbalanced.
 pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslationUnit> {
     let mut parser = SurfaceParser { tokens, index: 0 };
     parser.translation_unit()
@@ -454,7 +466,7 @@ impl Parser<'_> {
             self.advance();
             return Ok(());
         }
-        self.expected(format!("keyword {expected:?}"))
+        self.expected(&format!("keyword {expected:?}"))
     }
 
     fn expect_identifier(&mut self) -> CompileResult<String> {
@@ -467,7 +479,7 @@ impl Parser<'_> {
             self.advance();
             return Ok(value);
         }
-        self.expected("identifier".to_string())
+        self.expected("identifier")
     }
 
     fn expect_punctuator(&mut self, expected: &str) -> CompileResult<()> {
@@ -475,10 +487,10 @@ impl Parser<'_> {
             self.advance();
             return Ok(());
         }
-        self.expected(format!("punctuator {expected}"))
+        self.expected(&format!("punctuator {expected}"))
     }
 
-    fn expected<T>(&self, expected: String) -> CompileResult<T> {
+    fn expected<T>(&self, expected: &str) -> CompileResult<T> {
         if let Some(token) = self.peek() {
             return Err(
                 CompileError::new(format!("expected {expected}")).at(token.line, token.column)
@@ -509,7 +521,7 @@ impl Parser<'_> {
         self.tokens.get(self.index)
     }
 
-    fn advance(&mut self) {
+    const fn advance(&mut self) {
         self.index += 1;
     }
 }
@@ -627,7 +639,7 @@ impl SurfaceParser<'_> {
         self.tokens.get(self.index)
     }
 
-    fn advance(&mut self) {
+    const fn advance(&mut self) {
         self.index += 1;
     }
 }

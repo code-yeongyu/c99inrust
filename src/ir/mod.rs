@@ -43,15 +43,21 @@ pub enum LoweredExpr {
     Local(usize),
     Unary {
         op: UnaryOp,
-        expr: Box<LoweredExpr>,
+        expr: Box<Self>,
     },
     Binary {
         op: BinaryOp,
-        left: Box<LoweredExpr>,
-        right: Box<LoweredExpr>,
+        left: Box<Self>,
+        right: Box<Self>,
     },
 }
 
+/// Lowers parsed functions into stack-slot IR.
+///
+/// # Errors
+///
+/// Returns an error when a function body uses unsupported semantics such as
+/// undeclared locals or a missing return.
 pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
@@ -60,6 +66,12 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
     Ok(LoweredProgram { functions })
 }
 
+/// Evaluates a constant integer expression.
+///
+/// # Errors
+///
+/// Returns an error when the expression is not constant or overflows the current
+/// checked integer model.
 pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
     match expr {
         Expr::Call { callee } => Err(CompileError::new(format!(
@@ -94,6 +106,12 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
     }
 }
 
+/// Lowers one parsed function into stack-slot IR.
+///
+/// # Errors
+///
+/// Returns an error when lowering detects unsupported semantics such as
+/// undeclared locals, duplicate locals in a scope, or a missing return.
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     let mut context = LoweringContext::new();
     for statement in &function.statements {
@@ -295,7 +313,7 @@ impl LoweringContext {
         Ok(())
     }
 
-    fn fresh_label(&mut self) -> usize {
+    const fn fresh_label(&mut self) -> usize {
         let label = self.next_label;
         self.next_label += 1;
         label

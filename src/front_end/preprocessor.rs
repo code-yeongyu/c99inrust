@@ -39,6 +39,12 @@ impl Preprocessor {
         self
     }
 
+    /// Preprocesses a file and recursively resolves local includes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when source or include files cannot be read, directives
+    /// are malformed, or conditional preprocessing is unbalanced.
     pub fn preprocess_file(&self, path: &Path) -> CompileResult<PreprocessedUnit> {
         let mut macros = self.predefined.clone();
         let mut included_files = Vec::new();
@@ -57,6 +63,12 @@ impl Preprocessor {
         })
     }
 
+    /// Preprocesses source text without an on-disk current directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when directives are malformed or conditional
+    /// preprocessing is unbalanced.
     pub fn preprocess_text(&self, _name: &str, source: &str) -> CompileResult<PreprocessedUnit> {
         let mut macros = self.predefined.clone();
         let mut included_files = Vec::new();
@@ -251,19 +263,29 @@ impl MacroDefinition {
 struct ConditionalFrame {
     parent_active: bool,
     current_active: bool,
-    branch_taken: bool,
-    else_seen: bool,
+    branch_state: BranchState,
 }
 
 impl ConditionalFrame {
-    fn new(parent_active: bool, enabled: bool) -> Self {
+    const fn new(parent_active: bool, enabled: bool) -> Self {
+        let branch_state = if parent_active && enabled {
+            BranchState::Taken
+        } else {
+            BranchState::Available
+        };
         Self {
             parent_active,
             current_active: parent_active && enabled,
-            branch_taken: parent_active && enabled,
-            else_seen: false,
+            branch_state,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BranchState {
+    Available,
+    Taken,
+    ElseSeen,
 }
 
 struct PreprocessState<'a> {
@@ -382,7 +404,7 @@ fn copy_quoted_and_update_position(
     }
 }
 
-fn advance_position(value: char, line: &mut usize, column: &mut usize) {
+const fn advance_position(value: char, line: &mut usize, column: &mut usize) {
     if value == '\n' {
         *line += 1;
         *column = 1;
@@ -470,14 +492,16 @@ fn update_elif(
     let Some(last) = condition_stack.last_mut() else {
         return Err(CompileError::new("unexpected #elif").at(line_number, 1));
     };
-    if last.else_seen {
+    if last.branch_state == BranchState::ElseSeen {
         return Err(CompileError::new("#elif after #else").at(line_number, 1));
     }
-    if last.branch_taken || !last.parent_active {
+    if last.branch_state == BranchState::Taken || !last.parent_active {
         last.current_active = false;
     } else {
         last.current_active = enabled;
-        last.branch_taken = enabled;
+        if enabled {
+            last.branch_state = BranchState::Taken;
+        }
     }
     Ok(())
 }
@@ -486,12 +510,12 @@ fn update_else(condition_stack: &mut [ConditionalFrame], line_number: usize) -> 
     let Some(last) = condition_stack.last_mut() else {
         return Err(CompileError::new("unexpected #else").at(line_number, 1));
     };
-    if last.else_seen {
+    if last.branch_state == BranchState::ElseSeen {
         return Err(CompileError::new("duplicate #else").at(line_number, 1));
     }
-    last.else_seen = true;
-    last.current_active = last.parent_active && !last.branch_taken;
-    last.branch_taken = true;
+    let branch_taken = last.branch_state == BranchState::Taken;
+    last.branch_state = BranchState::ElseSeen;
+    last.current_active = last.parent_active && !branch_taken;
     Ok(())
 }
 
@@ -660,11 +684,11 @@ fn read_identifier(chars: &[char], index: &mut usize) -> String {
     value
 }
 
-fn is_identifier_start(value: char) -> bool {
+const fn is_identifier_start(value: char) -> bool {
     value.is_ascii_alphabetic() || value == '_'
 }
 
-fn is_identifier_continue(value: char) -> bool {
+const fn is_identifier_continue(value: char) -> bool {
     value.is_ascii_alphanumeric() || value == '_'
 }
 
@@ -714,7 +738,7 @@ fn condition_tokens(source: &str, line_number: usize) -> CompileResult<Vec<Condi
                 }
             }
             value if value.is_ascii_digit() => {
-                tokens.push(read_condition_integer(&chars, &mut index, line_number)?)
+                tokens.push(read_condition_integer(&chars, &mut index, line_number)?);
             }
             '/' if chars.get(index + 1) == Some(&'/') => break,
             '/' if chars.get(index + 1) == Some(&'*') => {
@@ -771,10 +795,7 @@ fn read_condition_integer(
     line_number: usize,
 ) -> CompileResult<ConditionToken> {
     let start = *index;
-    while chars
-        .get(*index)
-        .is_some_and(|value| value.is_ascii_digit())
-    {
+    while chars.get(*index).is_some_and(char::is_ascii_digit) {
         *index += 1;
     }
     let value = chars[start..*index].iter().collect::<String>();
@@ -855,7 +876,7 @@ impl ConditionParser<'_> {
             ConditionToken::LParen => {
                 self.index += 1;
                 let value = self.expression()?;
-                self.expect(ConditionToken::RParen)?;
+                self.expect_token(&ConditionToken::RParen)?;
                 Ok(value)
             }
             _ => Err(CompileError::new("expected #if expression").at(self.line_number, 1)),
@@ -865,7 +886,7 @@ impl ConditionParser<'_> {
     fn defined(&mut self) -> CompileResult<bool> {
         if self.matches(&ConditionToken::LParen) {
             let name = self.expect_ident()?;
-            self.expect(ConditionToken::RParen)?;
+            self.expect_token(&ConditionToken::RParen)?;
             return Ok(self.macros.contains_key(&name));
         }
         let name = self.expect_ident()?;
@@ -881,8 +902,8 @@ impl ConditionParser<'_> {
         Ok(name)
     }
 
-    fn expect(&mut self, expected: ConditionToken) -> CompileResult<()> {
-        if self.matches(&expected) {
+    fn expect_token(&mut self, expected: &ConditionToken) -> CompileResult<()> {
+        if self.matches(expected) {
             Ok(())
         } else {
             Err(CompileError::new("unexpected #if expression token").at(self.line_number, 1))

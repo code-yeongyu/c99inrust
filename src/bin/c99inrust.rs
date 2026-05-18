@@ -10,7 +10,8 @@ use c99inrust::ir::lower;
 use c99inrust::parser::{parse, parse_translation_unit};
 
 fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()) {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -19,9 +20,10 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<String>) -> CompileResult<()> {
+fn run(args: &[String]) -> CompileResult<()> {
     let Some(command) = args.first() else {
-        return usage();
+        usage();
+        return Ok(());
     };
     match command.as_str() {
         "lex" => lex_command(&args[1..]),
@@ -29,7 +31,10 @@ fn run(args: Vec<String>) -> CompileResult<()> {
         "parse-check" => parse_check_command(&args[1..]),
         "compile" => compile_command(&args[1..]),
         "doom-audit" => doom_audit_command(&args[1..]),
-        "help" | "--help" | "-h" => usage(),
+        "help" | "--help" | "-h" => {
+            usage();
+            Ok(())
+        }
         _ => Err(CompileError::new(format!("unknown command: {command}"))),
     }
 }
@@ -230,7 +235,7 @@ fn parse_define_arg(value: &str) -> CompileResult<(String, String)> {
     Ok((name.to_string(), replacement.to_string()))
 }
 
-fn usage() -> CompileResult<()> {
+fn usage() {
     println!("c99inrust");
     println!("usage:");
     println!("  c99inrust lex <input.c>");
@@ -240,5 +245,4 @@ fn usage() -> CompileResult<()> {
         "  c99inrust compile [-S] [--target native] [-D NAME[=VALUE]] [-I include] <input.c> -o <out.s>"
     );
     println!("  c99inrust doom-audit <official-doom-checkout>");
-    Ok(())
 }

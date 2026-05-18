@@ -57,6 +57,12 @@ pub struct Token {
     pub column: usize,
 }
 
+/// Lexes C source into frontend tokens.
+///
+/// # Errors
+///
+/// Returns an error when a literal, punctuator, or block comment is malformed
+/// for the supported C surface.
 pub fn lex(source: &str) -> CompileResult<Vec<Token>> {
     let mut lexer = Lexer::new(source);
     let mut tokens = Vec::new();
