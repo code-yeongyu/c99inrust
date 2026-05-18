@@ -38,6 +38,14 @@ This is a frontend milestone only. `parse-check` recognizes Doom-shaped
 top-level declarations and function-definition boundaries, but it does not type
 check, lower, compile, link, or run Doom yet.
 
+## Compile Progress
+
+`compile -S` now accepts full translation units enough to skip top-level
+declarations and prototypes before attempting supported function definitions.
+The current Doom compile scan reaches actual function signatures and bodies, but
+all 62 C files still fail before object generation. Evidence is recorded in
+`docs/qa/2026-05-18-doom-translation-unit.md`.
+
 ## Playability Gate
 
 Future acceptance requires:
