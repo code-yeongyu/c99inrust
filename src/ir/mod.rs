@@ -1462,6 +1462,15 @@ impl LoweringContext {
     }
 
     fn lower_call_expr(&self, callee: &str, args: &[Expr]) -> CompileResult<LoweredExpr> {
+        if self.callee_is_pointer_binding(callee) {
+            return Ok(LoweredExpr::IndirectCall {
+                callee: Box::new(self.lower_identifier_expr(callee)?),
+                args: args
+                    .iter()
+                    .map(|arg| self.lower_expr(arg))
+                    .collect::<CompileResult<Vec<_>>>()?,
+            });
+        }
         Ok(LoweredExpr::Call {
             callee: callee.to_owned(),
             args: args
@@ -1469,6 +1478,16 @@ impl LoweringContext {
                 .map(|arg| self.lower_expr(arg))
                 .collect::<CompileResult<Vec<_>>>()?,
         })
+    }
+
+    fn callee_is_pointer_binding(&self, callee: &str) -> bool {
+        if let Some(LocalBinding::Scalar { scalar_type, .. }) = self.local_binding(callee) {
+            return scalar_type == ScalarType::Pointer;
+        }
+        self.global_bindings
+            .get(callee)
+            .and_then(GlobalBinding::scalar_type)
+            == Some(ScalarType::Pointer)
     }
 
     fn lower_indirect_call_expr(&self, callee: &Expr, args: &[Expr]) -> CompileResult<LoweredExpr> {
@@ -2357,6 +2376,14 @@ impl LoweringContext {
         {
             return Ok(referent.clone());
         }
+        if let Expr::Dereference { pointer } = expr {
+            let referent = self.pointer_referent_for_expr(pointer)?;
+            if let Some(nested) = referent.strip_prefix(POINTER_REFERENT)
+                && !nested.is_empty()
+            {
+                return Ok(nested.to_owned());
+            }
+        }
         if let Expr::Subscript { array, .. } = expr {
             if let Expr::Identifier(name) = array.as_ref()
                 && let Some(GlobalBinding::PointerArray {
@@ -2777,6 +2804,8 @@ fn pointer_referent_byte_size(referent: &str) -> Option<usize> {
         Some(scalar_size(ScalarType::Pointer))
     } else if matches!(referent, "byte" | "char") {
         Some(1)
+    } else if referent == "short" {
+        Some(2)
     } else if referent == "int" {
         Some(scalar_size(ScalarType::Int))
     } else {

@@ -1449,6 +1449,9 @@ fn emit_aarch64_load_pointer_subscript(
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tldrb w0, [x16, w0, sxtw]\n");
     }
+    if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tldrsh w0, [x16, w0, sxtw #1]\n");
+    }
     let Some(shift) = memory_scale_shift_for_byte_size(subscript.element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",
@@ -1725,6 +1728,9 @@ fn emit_aarch64_store_pointer_subscript(
     emit_aarch64_load_temporary(width, value_offset, assembly)?;
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tstrb w0, [x16, w17, sxtw]\n");
+    }
+    if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tstrh w0, [x16, w17, sxtw #1]\n");
     }
     let Some(shift) = memory_scale_shift_for_byte_size(subscript.element_byte_size) else {
         return Err(CompileError::new(
@@ -2894,6 +2900,9 @@ fn emit_x86_64_load_pointer_subscript(
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovzbl (%rcx,%rax,1), %eax\n");
     }
+    if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovswl (%rcx,%rax,2), %eax\n");
+    }
     let Some(scale) = memory_scale_bytes_for_byte_size(subscript.element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",
@@ -3279,6 +3288,9 @@ fn emit_x86_64_store_pointer_subscript(
     emit_x86_64_load_temporary(width, value_offset, assembly)?;
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovb %al, (%rcx,%rdx,1)\n");
+    }
+    if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovw %ax, (%rcx,%rdx,2)\n");
     }
     let Some(scale) = memory_scale_bytes_for_byte_size(subscript.element_byte_size) else {
         return Err(CompileError::new(

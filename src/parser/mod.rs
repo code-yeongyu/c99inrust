@@ -626,6 +626,14 @@ impl Parser<'_> {
         if parameter_is_void(tokens) {
             return Ok(());
         }
+        if let Some(name) = function_pointer_name(tokens) {
+            parameters.push(Parameter {
+                name,
+                scalar_type: ScalarType::Pointer,
+                referent: None,
+            });
+            return Ok(());
+        }
         let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
             return Err(CompileError::new("unsupported function parameter"));
         };
@@ -2048,6 +2056,7 @@ fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
         .find_map(token_identifier)
         .filter(|name| supported_typedef_scalar(name).is_none())
         .map(ToOwned::to_owned)
+        .or_else(|| declaration_base_referent_type(&tokens[..name_index]))
 }
 
 fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
@@ -2062,6 +2071,12 @@ fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Int)))
     {
         return Some("int".to_owned());
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Short)))
+    {
+        return Some("short".to_owned());
     }
     if tokens
         .iter()
@@ -4383,6 +4398,9 @@ fn supported_cast_type_with_typedefs(
     if tokens.is_empty() {
         return None;
     }
+    if cast_type_starts_with_pointer_declarator(tokens) {
+        return None;
+    }
     let mut saw_type = false;
     let mut saw_double = false;
     let mut saw_named_type = false;
@@ -4448,6 +4466,18 @@ fn supported_cast_type_with_typedefs(
     } else {
         Some(ScalarType::LongLong)
     }
+}
+
+fn cast_type_starts_with_pointer_declarator(tokens: &[Token]) -> bool {
+    tokens
+        .iter()
+        .find(|token| {
+            !matches!(
+                token.kind,
+                TokenKind::Keyword(Keyword::Const | Keyword::Restrict | Keyword::Volatile)
+            )
+        })
+        .is_some_and(|token| token_is_punctuator(token, "*"))
 }
 
 fn sizeof_type(tokens: &[Token]) -> Option<usize> {

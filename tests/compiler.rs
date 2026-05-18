@@ -3026,6 +3026,86 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_parenthesized_pointer_member_assignment_slice() {
+    // given
+    let source = r"typedef struct mobj_s {
+    struct mobj_s* bprev;
+} mobj_t;
+int main(void) {
+    mobj_t* thing;
+    mobj_t** link;
+    thing = 0;
+    link = 0;
+    (*link)->bprev = thing;
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq"));
+    assert!(assembly.contains("\tmovq %rax, 0(%rcx)\n"));
+}
+
+#[test]
+fn compiler_accepts_function_pointer_parameter_call_slice() {
+    // given
+    let source = r"typedef int boolean;
+typedef struct {
+    int flags;
+} line_t;
+boolean run(boolean (*func)(line_t*)) {
+    return func(0);
+}
+boolean check(line_t* line) {
+    return 1;
+}
+int main(void) {
+    return run(check);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tcall *%rax\n"));
+    assert!(assembly.contains("\tleaq check(%rip), %rax\n"));
+}
+
+#[test]
+fn compiler_accepts_short_pointer_arithmetic_dereference_slice() {
+    // given
+    let source = r"short* blockmap;
+int main(void) {
+    int offset;
+    offset = 0;
+    blockmap[offset] = 5;
+    return *(blockmap + offset);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("blockmap:"));
+    assert!(assembly.contains("\tmovw %ax, (%rcx,%rdx,2)\n"));
+    assert!(assembly.contains("\tmovswl (%rcx,%rax,2), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_tagged_struct_pointer_referent_slice() {
     // given
     let source = r"typedef struct line_s {
