@@ -1599,6 +1599,65 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `f_wipe.c` Function-Pointer Array Slice
+
+Local function-pointer arrays with function-designator initializers are now
+accepted, block-scope function prototypes are skipped, and dereferenced
+function-pointer callees lower through the indirect-call path. This covers the
+`wipe_ScreenWipe` local table and calls such as `(*wipes[wipeno*3])(...)`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_function_pointer_array_call_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/f_wipe.c \
+  -o /tmp/c99inrust-f_wipe.s
+```
+
+Focused `f_wipe.c` compile now emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779144793`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779144793.txt
+ok=40
+fail=22
+```
+
+Newly green since the previous scan:
+
+```text
+f_wipe.c
+```
+
+Representative remaining blockers:
+
+```text
+FAIL i_video.c
+  error: unsupported function parameter
+FAIL p_setup.c
+  error: assignment to non-pointer subscript targets is not supported
+FAIL r_main.c
+  error: assignment to undeclared local or global: colfunc
+FAIL r_things.c
+  error: assignment to undeclared local or global: colfunc
+FAIL wi_stuff.c
+  error: unsupported global integer initializer
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `d_items.c` Struct Array Declaration Merge
 
 This slice moved `d_items.c` from the conflicting `weaponinfo` declaration

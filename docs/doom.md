@@ -217,17 +217,22 @@ calls through those parameter bindings are accepted. Pointer referents now also
 track `short` as a 2-byte element for pointer arithmetic, with signed halfword
 loads and stores in the native backends. This moves `p_maputl.c` and `r_data.c`
 to assembly generation.
+Local function-pointer arrays with function-designator initializers, such as
+`static int (*wipes[])(int, int, int) = { ... }`, are accepted as stack pointer
+arrays. Block-scope function prototypes are skipped, and `(*funcptr)(...)`
+calls lower through the existing indirect-call path. This moves `f_wipe.c` to
+assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 23
+The current Doom compile scan reaches actual supported function bodies, but 22
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
-`f_finale.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
-`m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`, `p_enemy.c`,
-`p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`, `p_maputl.c`,
-`p_plats.c`, `p_pspr.c`, `p_saveg.c`, `p_sight.c`, `p_spec.c`, `p_telept.c`,
-`p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_plane.c`, `r_segs.c`,
-`r_sky.c`, `st_lib.c`, `tables.c`, and `z_zone.c` currently reach assembly
-generation.
+`f_finale.c`, `f_wipe.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`,
+`m_fixed.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`,
+`p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
+`p_maputl.c`, `p_plats.c`, `p_pspr.c`, `p_saveg.c`, `p_sight.c`, `p_spec.c`,
+`p_telept.c`, `p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_plane.c`,
+`r_segs.c`, `r_sky.c`, `st_lib.c`, `tables.c`, and `z_zone.c` currently reach
+assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -259,16 +264,17 @@ moved past `dirtype_t d[3]` and `PIT_VileCheck`. The former enum typedef
 parameter and action-function pointer blockers in `p_ceilng.c`, `p_doors.c`,
 `p_floor.c`, and `p_plats.c` now reach assembly generation.
 Many remaining files are blocked by old-style function definitions,
-local function-pointer arrays/declarations, typed-pointer gaps, unsupported
-expression forms, and global/declaration gaps.
+function-pointer declarations, typed-pointer gaps, unsupported expression
+forms, and global/declaration gaps.
 The former `p_maputl.c` blockers moved past parenthesized pointer member
 assignment, raw function-pointer parameters, direct calls through function
 pointer parameters, and `short*` pointer arithmetic over `blockmap`.
 The former `r_data.c` blocker moved past `short*` and `unsigned short*`
 pointer-declaration/referent tracking enough for this scan to reach assembly
 generation.
-The current `f_wipe.c` blocker is the local static function-pointer array
-`static int (*wipes[])(int, int, int) = { ... }`.
+The former `f_wipe.c` blocker moved past the local static function-pointer
+array `static int (*wipes[])(int, int, int) = { ... }`, block-scope prototype
+`void V_MarkRect(int, int, int, int);`, and `(*wipes[index])(...)` calls.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
 char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`
