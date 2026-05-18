@@ -64,7 +64,8 @@ translation units that contain only ignorable internal static metadata, covering
 the `doomstat.c` enum-backed global state definitions after declaration-only
 header `extern` arrays, including simple checked enum arithmetic such as
 `(8+16+32)` with C operator precedence for the supported arithmetic operators.
-Pointer returns remain unsupported.
+Unparenthesized numeric scalar global initializers such as `200 - 32` are also
+accepted. Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
 but nine of the 62 C files still fail before object generation. `doomdef.c`,

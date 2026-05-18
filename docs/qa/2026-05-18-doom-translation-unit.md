@@ -920,3 +920,56 @@ FAIL p_inter.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After Scalar Initializer Recheck
+
+`compile -S` now accepts unparenthesized numeric scalar global initializers such
+as the `am_map.c` frame-buffer height definition:
+
+```text
+static int finit_height = 200 - 32;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_unparenthesized_global_integer_initializer_slice
+unparenthesized_global_initializer_matches_host_c_compiler_exit_code
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779106492
+scan=/tmp/c99inrust-doom-scan-1779106492.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779106492.txt
+ok=9
+fail=53
+```
+
+This did not add a new OK translation unit, but it moved `am_map.c` to the next
+initializer blocker:
+
+```text
+before: FAIL am_map.c
+  error: 7052:28: unsupported global integer initializer
+after: FAIL am_map.c
+  error: 7104:29: unsupported global integer initializer
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7104:29: unsupported global integer initializer
+FAIL i_net.c
+  error: 3870:16: unsupported global integer initializer
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL p_inter.c
+  error: unsupported function parameter
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
