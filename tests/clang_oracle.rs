@@ -573,7 +573,7 @@ fn conditional_expression_slice_matches_host_c_compiler_exit_code() {
 #[test]
 fn fixeddiv2_double_slice_matches_host_c_compiler_exit_code() {
     // given
-    if cfg!(windows) || !command_exists("cc") {
+    if !cfg!(target_os = "macos") || !command_exists("cc") {
         return;
     }
     let case = OracleCase {

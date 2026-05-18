@@ -526,7 +526,7 @@ fn compiler_emits_signed_long_long_cast_intermediates() {
         }
         Target::X86_64AppleDarwin | Target::X86_64UnknownLinuxGnu => {
             assert!(assembly.contains("FixedMul:\n") || assembly.contains("_FixedMul:\n"));
-            assert!(assembly.contains("\tmovslq -4(%rbp), %rax\n"));
+            assert!(assembly.contains("\tmovl -4(%rbp), %eax\n\tcltq\n"));
             assert!(assembly.contains("\timulq %rcx, %rax\n"));
             assert!(assembly.contains("\tsarq %cl, %rax\n"));
         }
