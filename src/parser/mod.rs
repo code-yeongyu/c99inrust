@@ -1250,6 +1250,12 @@ fn parse_global_int(tokens: &[Token]) -> CompileResult<Option<Global>> {
     if !global_specifiers_are_int(&declaration[..name_index]) {
         return Ok(None);
     }
+    if declaration
+        .get(end_index + 1)
+        .is_some_and(|token| token_is_punctuator(token, "{"))
+    {
+        return Ok(None);
+    }
     let initializer = if end_index == declaration.len() {
         GlobalInitializer::Int(0)
     } else {

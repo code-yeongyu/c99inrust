@@ -821,6 +821,43 @@ fn fixed_point_global_initializer_matches_host_c_compiler_exit_code() {
 }
 
 #[test]
+fn aggregate_global_initializer_slice_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "aggregate_global_initializer_slice",
+        source: r"typedef struct {
+    unsigned char *sequence;
+    unsigned char *p;
+} cheatseq_t;
+static unsigned char cheat_amap_seq[] = { 0xb2, 0x26, 0xff };
+static cheatseq_t cheat_amap = { cheat_amap_seq, 0 };
+int main(void) { return 42; }
+",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
 fn m_random_global_array_slice_matches_host_c_compiler_exit_code() {
     // given
     if cfg!(windows) || !command_exists("cc") {

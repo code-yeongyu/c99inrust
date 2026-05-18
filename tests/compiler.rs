@@ -507,6 +507,31 @@ fn compiler_accepts_fixed_point_global_initializer_slice() {
 }
 
 #[test]
+fn compiler_skips_aggregate_global_initializer_before_supported_function() {
+    // given
+    let source = r"typedef struct {
+    unsigned char *sequence;
+    unsigned char *p;
+} cheatseq_t;
+static unsigned char cheat_amap_seq[] = { 0xb2, 0x26, 0xff };
+static cheatseq_t cheat_amap = { cheat_amap_seq, 0 };
+int main(void) { return 42; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("cheat_amap_seq:"));
+    assert!(!assembly.contains("cheat_amap:"));
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("movl $42, %eax"));
+}
+
+#[test]
 fn compiler_emits_void_functions_with_value_less_return() {
     // given
     let source = "void tick(void) { return; } int main(void) { return 42; }";
