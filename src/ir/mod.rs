@@ -25,7 +25,9 @@ pub enum LoweredGlobalInitializer {
     Int(i32),
     IntArray(Vec<i32>),
     PointerNull,
+    PointerString(String),
     PointerArray(usize),
+    PointerStringArray(Vec<String>),
     ZeroBytes(usize),
     UnsignedCharArray(Vec<u8>),
 }
@@ -268,7 +270,9 @@ fn lower_extern_global_binding(
             referent: referent.clone(),
         },
         GlobalInitializer::ExternIntArray => GlobalBinding::IntArray,
-        GlobalInitializer::ExternPointerArray => GlobalBinding::PointerArray,
+        GlobalInitializer::ExternPointerArray { referent } => GlobalBinding::PointerArray {
+            referent: referent.clone(),
+        },
         GlobalInitializer::ExternStructArray { struct_name } => {
             let layout = structs.get(struct_name).ok_or_else(|| {
                 CompileError::new(format!("unknown struct-array type: {struct_name}"))
@@ -283,7 +287,9 @@ fn lower_extern_global_binding(
         | GlobalInitializer::IntArray(_)
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::PointerNull { .. }
-        | GlobalInitializer::PointerArray(_)
+        | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerArray { .. }
+        | GlobalInitializer::PointerStringArray { .. }
         | GlobalInitializer::StructObject { .. }
         | GlobalInitializer::StructArray { .. }
         | GlobalInitializer::UnsignedCharArray(_) => return Ok(None),
@@ -319,9 +325,23 @@ fn lower_defined_global_initializer(
                 referent: referent.clone(),
             },
         )),
-        GlobalInitializer::PointerArray(length) => Ok((
+        GlobalInitializer::PointerString { referent, value } => Ok((
+            LoweredGlobalInitializer::PointerString(value.clone()),
+            GlobalBinding::Pointer {
+                referent: referent.clone(),
+            },
+        )),
+        GlobalInitializer::PointerArray { referent, length } => Ok((
             LoweredGlobalInitializer::PointerArray(*length),
-            GlobalBinding::PointerArray,
+            GlobalBinding::PointerArray {
+                referent: referent.clone(),
+            },
+        )),
+        GlobalInitializer::PointerStringArray { referent, values } => Ok((
+            LoweredGlobalInitializer::PointerStringArray(values.clone()),
+            GlobalBinding::PointerArray {
+                referent: referent.clone(),
+            },
         )),
         GlobalInitializer::StructObject { struct_name } => {
             lower_struct_object_global(struct_name, structs)
@@ -337,7 +357,7 @@ fn lower_defined_global_initializer(
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
-        | GlobalInitializer::ExternPointerArray
+        | GlobalInitializer::ExternPointerArray { .. }
         | GlobalInitializer::ExternStructArray { .. } => Err(CompileError::new(
             "internal error: extern global reached definition lowering",
         )),
@@ -652,7 +672,9 @@ enum GlobalBinding {
     Pointer {
         referent: Option<String>,
     },
-    PointerArray,
+    PointerArray {
+        referent: Option<String>,
+    },
     StructObject {
         struct_name: String,
         byte_size: usize,
@@ -681,7 +703,7 @@ impl GlobalBinding {
             Self::Int => Some(ScalarType::Int),
             Self::Pointer { .. } => Some(ScalarType::Pointer),
             Self::IntArray
-            | Self::PointerArray
+            | Self::PointerArray { .. }
             | Self::StructObject { .. }
             | Self::StructArray { .. }
             | Self::UnsignedCharArray => None,
@@ -692,7 +714,7 @@ impl GlobalBinding {
         matches!(
             self,
             Self::IntArray
-                | Self::PointerArray
+                | Self::PointerArray { .. }
                 | Self::StructArray { .. }
                 | Self::UnsignedCharArray
         )
@@ -1659,7 +1681,10 @@ impl LoweringContext {
             });
         }
         if let Expr::Identifier(name) = array
-            && self.global_bindings.get(name) == Some(&GlobalBinding::PointerArray)
+            && matches!(
+                self.global_bindings.get(name),
+                Some(GlobalBinding::PointerArray { .. })
+            )
         {
             return Ok(LoweredExpr::GlobalPointerSubscript {
                 name: name.clone(),
@@ -1726,7 +1751,10 @@ impl LoweringContext {
             });
         }
         if let Expr::Identifier(name) = array
-            && self.global_bindings.get(name) == Some(&GlobalBinding::PointerArray)
+            && matches!(
+                self.global_bindings.get(name),
+                Some(GlobalBinding::PointerArray { .. })
+            )
         {
             return Ok(LoweredLValue::GlobalPointerSubscript {
                 name: name.clone(),
@@ -2207,6 +2235,13 @@ impl LoweringContext {
             return Ok(referent.clone());
         }
         if let Expr::Subscript { array, .. } = expr {
+            if let Expr::Identifier(name) = array.as_ref()
+                && let Some(GlobalBinding::PointerArray {
+                    referent: Some(referent),
+                }) = self.global_bindings.get(name)
+            {
+                return Ok(referent.clone());
+            }
             let referent = self.pointer_referent_for_expr(array)?;
             if let Some(nested) = referent.strip_prefix(POINTER_REFERENT)
                 && !nested.is_empty()

@@ -265,6 +265,9 @@ fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 assembly.push_str("\t.quad 0\n");
             }
+            LoweredGlobalInitializer::PointerString(value) => {
+                emit_pointer_string_global(&global.name, value, target, assembly)?;
+            }
             LoweredGlobalInitializer::PointerArray(length) => {
                 let byte_len = length
                     .checked_mul(8)
@@ -272,6 +275,9 @@ fn emit_globals(
                 assembly.push_str(".p2align 3\n");
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.zero {byte_len}\n")?;
+            }
+            LoweredGlobalInitializer::PointerStringArray(values) => {
+                emit_pointer_string_array_global(&global.name, values, target, assembly)?;
             }
             LoweredGlobalInitializer::ZeroBytes(byte_len) => {
                 assembly.push_str(".p2align 3\n");
@@ -283,6 +289,40 @@ fn emit_globals(
                 emit_byte_values(values, assembly)?;
             }
         }
+    }
+    Ok(())
+}
+
+fn emit_pointer_string_global(
+    name: &str,
+    value: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let string_label = global_string_label(name, 0, target);
+    let label = label_name(name, target);
+    assembly.push_str(".p2align 3\n");
+    write_assembly!(assembly, "{label}:\n")?;
+    write_assembly!(assembly, "\t.quad {string_label}\n")?;
+    emit_string_literal_data_returning_to(&string_label, value, target, ".data\n", assembly)
+}
+
+fn emit_pointer_string_array_global(
+    name: &str,
+    values: &[String],
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    assembly.push_str(".p2align 3\n");
+    write_assembly!(assembly, "{label}:\n")?;
+    for (index, _) in values.iter().enumerate() {
+        let string_label = global_string_label(name, index, target);
+        write_assembly!(assembly, "\t.quad {string_label}\n")?;
+    }
+    for (index, value) in values.iter().enumerate() {
+        let string_label = global_string_label(name, index, target);
+        emit_string_literal_data_returning_to(&string_label, value, target, ".data\n", assembly)?;
     }
     Ok(())
 }
@@ -3858,6 +3898,16 @@ fn emit_string_literal_data(
     target: Target,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    emit_string_literal_data_returning_to(label, value, target, ".text\n", assembly)
+}
+
+fn emit_string_literal_data_returning_to(
+    label: &str,
+    value: &str,
+    target: Target,
+    return_section: &str,
+    assembly: &mut String,
+) -> CompileResult<()> {
     match target {
         Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => {
             assembly.push_str("\t.section __TEXT,__cstring,cstring_literals\n");
@@ -3878,7 +3928,7 @@ fn emit_string_literal_data(
         write_assembly!(assembly, "{byte}")?;
     }
     assembly.push('\n');
-    assembly.push_str(".text\n");
+    assembly.push_str(return_section);
     Ok(())
 }
 
@@ -3930,6 +3980,15 @@ fn label_name(name: &str, target: Target) -> String {
     match target {
         Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => format!("_{name}"),
         Target::X86_64UnknownLinuxGnu => name.to_string(),
+    }
+}
+
+fn global_string_label(name: &str, index: usize, target: Target) -> String {
+    match target {
+        Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => {
+            format!("L{name}_str{index}")
+        }
+        Target::X86_64UnknownLinuxGnu => format!(".L{name}_str{index}"),
     }
 }
 

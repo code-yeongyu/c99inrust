@@ -55,17 +55,41 @@ pub struct Global {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalInitializer {
     Extern(ScalarType),
-    ExternPointer { referent: Option<String> },
+    ExternPointer {
+        referent: Option<String>,
+    },
     ExternIntArray,
-    ExternPointerArray,
-    ExternStructArray { struct_name: String },
+    ExternPointerArray {
+        referent: Option<String>,
+    },
+    ExternStructArray {
+        struct_name: String,
+    },
     Int(i64),
     IntArray(Vec<i32>),
     IntConstant(String),
-    PointerNull { referent: Option<String> },
-    PointerArray(usize),
-    StructObject { struct_name: String },
-    StructArray { struct_name: String, length: usize },
+    PointerNull {
+        referent: Option<String>,
+    },
+    PointerString {
+        referent: Option<String>,
+        value: String,
+    },
+    PointerArray {
+        referent: Option<String>,
+        length: usize,
+    },
+    PointerStringArray {
+        referent: Option<String>,
+        values: Vec<String>,
+    },
+    StructObject {
+        struct_name: String,
+    },
+    StructArray {
+        struct_name: String,
+        length: usize,
+    },
     UnsignedCharArray(Vec<u8>),
 }
 
@@ -76,7 +100,7 @@ impl GlobalInitializer {
             Self::Extern(_)
                 | Self::ExternPointer { .. }
                 | Self::ExternIntArray
-                | Self::ExternPointerArray
+                | Self::ExternPointerArray { .. }
                 | Self::ExternStructArray { .. }
         )
     }
@@ -1988,8 +2012,11 @@ fn parse_struct_typedef(
     tokens: &[Token],
     known_structs: &[StructLayout],
 ) -> CompileResult<Option<StructLayout>> {
-    if !token_has_keyword(tokens, Keyword::Typedef) || !token_has_keyword(tokens, Keyword::Struct) {
+    if !token_has_keyword(tokens, Keyword::Typedef) {
         return Ok(None);
+    }
+    if !token_has_keyword(tokens, Keyword::Struct) {
+        return Ok(parse_struct_alias_typedef(tokens, known_structs));
     }
     let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
         return Ok(None);
@@ -2006,6 +2033,27 @@ fn parse_struct_typedef(
         return Ok(None);
     };
     Ok(Some(StructLayout { name, fields, size }))
+}
+
+fn parse_struct_alias_typedef(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+) -> Option<StructLayout> {
+    let names = tokens
+        .iter()
+        .filter_map(token_identifier)
+        .collect::<Vec<_>>();
+    let [source, alias] = names.as_slice() else {
+        return None;
+    };
+    known_structs
+        .iter()
+        .find(|layout| layout.name == *source)
+        .map(|layout| StructLayout {
+            name: (*alias).to_owned(),
+            fields: layout.fields.clone(),
+            size: layout.size,
+        })
 }
 
 fn parse_struct_fields(
@@ -2314,6 +2362,9 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_unsigned_char_array(tokens)? {
         return Ok(Some(global));
     }
+    if let Some(global) = parse_global_pointer_string_array(tokens)? {
+        return Ok(Some(global));
+    }
     if let Some(global) = parse_global_pointer_array(tokens)? {
         return Ok(Some(global));
     }
@@ -2489,9 +2540,49 @@ fn parse_global_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>>
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
         .to_owned();
+    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     Ok(Some(Global {
         name,
-        initializer: GlobalInitializer::PointerArray(length),
+        initializer: GlobalInitializer::PointerArray { referent, length },
+    }))
+}
+
+fn parse_global_pointer_string_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_pointer(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated global pointer-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    let Some(assign_index) = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+    else {
+        return Ok(None);
+    };
+    let assign_index = close_bracket + 1 + assign_index;
+    let Ok(values) = parse_string_array_initializer(&declaration[assign_index + 1..]) else {
+        return Ok(None);
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
+        .to_owned();
+    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::PointerStringArray { referent, values },
     }))
 }
 
@@ -2522,9 +2613,10 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected extern global pointer-array name"))?
         .to_owned();
+    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     Ok(Some(Global {
         name,
-        initializer: GlobalInitializer::ExternPointerArray,
+        initializer: GlobalInitializer::ExternPointerArray { referent },
     }))
 }
 
@@ -2760,18 +2852,25 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
     if !global_specifiers_are_pointer(&declaration[..name_index]) {
         return Ok(None);
     }
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global pointer name"))?
+        .to_owned();
+    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     if end_index != declaration.len() {
-        let Ok(value) = parse_integer_initializer(&declaration[end_index + 1..]) else {
+        let initializer = &declaration[end_index + 1..];
+        if let Ok(value) = parse_string_initializer(initializer) {
+            return Ok(Some(Global {
+                name,
+                initializer: GlobalInitializer::PointerString { referent, value },
+            }));
+        }
+        let Ok(value) = parse_integer_initializer(initializer) else {
             return Ok(None);
         };
         if value != 0 {
             return Ok(None);
         }
     }
-    let name = token_identifier(&declaration[name_index])
-        .ok_or_else(|| CompileError::new("expected global pointer name"))?
-        .to_owned();
-    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     Ok(Some(Global {
         name,
         initializer: GlobalInitializer::PointerNull { referent },
@@ -3067,6 +3166,72 @@ fn parse_int_array_initializer(tokens: &[Token], length: usize) -> CompileResult
     }
     values.resize(length, 0);
     Ok(values)
+}
+
+fn parse_string_array_initializer(tokens: &[Token]) -> CompileResult<Vec<String>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new(
+            "expected global pointer-array initializer",
+        ));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(
+            CompileError::new("expected global pointer-array initializer")
+                .at(first.line, first.column),
+        );
+    }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+        return Err(
+            CompileError::new("unterminated global pointer-array initializer")
+                .at(first.line, first.column),
+        );
+    };
+    if let Some(token) = tokens.get(close_brace + 1) {
+        return Err(
+            CompileError::new("unsupported global pointer-array initializer")
+                .at(token.line, token.column),
+        );
+    }
+
+    let mut values = Vec::new();
+    let mut start = 1usize;
+    while start < close_brace {
+        let item = &tokens[start..close_brace];
+        let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
+        if item_len == 0 {
+            return Err(
+                CompileError::new("expected global pointer-array initializer value")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        }
+        values.push(parse_string_initializer(&item[..item_len])?);
+        start += item_len;
+        if start < close_brace {
+            start += 1;
+        }
+    }
+    Ok(values)
+}
+
+fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {
+    if tokens.is_empty() {
+        return Err(CompileError::new("expected global string initializer"));
+    }
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        known_structs: &[],
+    };
+    let expr = parser.expression()?;
+    if let Some(token) = parser.peek() {
+        return Err(
+            CompileError::new("unsupported global string initializer").at(token.line, token.column)
+        );
+    }
+    let Expr::StringLiteral(value) = expr else {
+        return Err(CompileError::new("expected global string initializer"));
+    };
+    Ok(value)
 }
 
 fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
