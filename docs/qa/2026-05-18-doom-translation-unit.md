@@ -1966,3 +1966,67 @@ FAIL r_draw.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Unsigned Parameter Slice
+
+`compile -S` now accepts plain `unsigned` parameters as integer parameters.
+This covers the previous focused `r_draw.c` blocker:
+
+```c
+void
+R_VideoErase
+( unsigned ofs,
+  int count )
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_unsigned_parameter_slice
+unsigned_parameter_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+```
+
+Focused `r_draw.c` compile now reaches lowering and stops at:
+
+```text
+error: unknown local or global: ylookup
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779117824`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779117824.txt
+ok=10
+fail=52
+```
+
+Representative moved blockers:
+
+```text
+FAIL r_draw.c
+  before unsigned parameter slice:
+    error: unsupported function parameter
+  after unsigned parameter slice:
+    error: unknown local or global: ylookup
+FAIL r_things.c
+  after unsigned parameter slice:
+    error: 5564:3: expected punctuator ,
+FAIL tables.c
+  after unsigned parameter slice:
+    error: 178:5: expected expression
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
