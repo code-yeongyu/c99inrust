@@ -234,13 +234,20 @@ fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.long {value}\n")?;
             }
-            LoweredGlobalInitializer::IntArray(length) => {
-                let byte_len = length
-                    .checked_mul(4)
-                    .ok_or_else(|| CompileError::new("global int-array size overflow"))?;
+            LoweredGlobalInitializer::IntArray(values) => {
+                if values.iter().all(|value| *value == 0) {
+                    let byte_len = values
+                        .len()
+                        .checked_mul(4)
+                        .ok_or_else(|| CompileError::new("global int-array size overflow"))?;
+                    assembly.push_str(".p2align 2\n");
+                    write_assembly!(assembly, "{label}:\n")?;
+                    write_assembly!(assembly, "\t.zero {byte_len}\n")?;
+                    continue;
+                }
                 assembly.push_str(".p2align 2\n");
                 write_assembly!(assembly, "{label}:\n")?;
-                write_assembly!(assembly, "\t.zero {byte_len}\n")?;
+                emit_int_values(values, assembly)?;
             }
             LoweredGlobalInitializer::PointerNull => {
                 assembly.push_str(".p2align 3\n");
@@ -261,6 +268,21 @@ fn emit_globals(
             }
         }
     }
+    Ok(())
+}
+
+fn emit_int_values(values: &[i32], assembly: &mut String) -> CompileResult<()> {
+    assembly.push_str("\t.long ");
+    let mut first = true;
+    for value in values {
+        if first {
+            first = false;
+        } else {
+            assembly.push(',');
+        }
+        write_assembly!(assembly, "{value}")?;
+    }
+    assembly.push('\n');
     Ok(())
 }
 

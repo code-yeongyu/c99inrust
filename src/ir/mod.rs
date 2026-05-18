@@ -21,7 +21,7 @@ pub struct LoweredGlobal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredGlobalInitializer {
     Int(i32),
-    IntArray(usize),
+    IntArray(Vec<i32>),
     PointerNull,
     PointerArray(usize),
     UnsignedCharArray(Vec<u8>),
@@ -224,8 +224,8 @@ fn lower_globals(
                 })?),
                 GlobalBinding::Int,
             ),
-            GlobalInitializer::IntArray(length) => (
-                LoweredGlobalInitializer::IntArray(*length),
+            GlobalInitializer::IntArray(values) => (
+                LoweredGlobalInitializer::IntArray(values.clone()),
                 GlobalBinding::IntArray,
             ),
             GlobalInitializer::IntConstant(name) => {

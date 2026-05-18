@@ -660,7 +660,7 @@ fn compiler_accepts_ignorable_static_metadata_translation_unit() {
 #[test]
 fn compiler_rejects_unsupported_data_only_translation_unit() {
     // given
-    let source = "typedef int weaponinfo_t; weaponinfo_t weaponinfo[2] = { 1, 2 };";
+    let source = "typedef int weaponinfo_t; weaponinfo_t* weaponinfo[2] = { 0, 0 };";
 
     // when
     let tokens = lex(source).expect("lexer should succeed");
@@ -1119,6 +1119,27 @@ int main(void) {
     assert!(assembly.contains("columnofs:"));
     assert!(assembly.contains("\t.zero 16\n"));
     assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_initialized_global_int_array_slice() {
+    // given
+    let source = r"int fuzzoffset[4] = { 320, -320, (320), -(320) };
+int main(void) {
+    return fuzzoffset[0] + fuzzoffset[1] + fuzzoffset[2] + fuzzoffset[3];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("fuzzoffset:"));
+    assert!(assembly.contains("\t.long 320,-320,320,-320\n"));
     assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
 }
 

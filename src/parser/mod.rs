@@ -46,7 +46,7 @@ pub struct Global {
 pub enum GlobalInitializer {
     Extern(ScalarType),
     Int(i64),
-    IntArray(usize),
+    IntArray(Vec<i32>),
     IntConstant(String),
     PointerNull,
     PointerArray(usize),
@@ -1760,16 +1760,21 @@ fn parse_global_int_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
             ),
         );
     };
-    if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
-        return Ok(None);
-    }
     let length = parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket])?;
+    let values = if let Some(assign_index) =
+        top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+    {
+        let assign_index = close_bracket + 1 + assign_index;
+        parse_int_array_initializer(&declaration[assign_index + 1..], length)?
+    } else {
+        vec![0; length]
+    };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global int-array name"))?
         .to_owned();
     Ok(Some(Global {
         name,
-        initializer: GlobalInitializer::IntArray(length),
+        initializer: GlobalInitializer::IntArray(values),
     }))
 }
 
@@ -1969,6 +1974,57 @@ fn parse_global_int_initializer(tokens: &[Token]) -> CompileResult<GlobalInitial
             .at(first.line, first.column)),
         [] => Err(CompileError::new("expected global integer initializer")),
     }
+}
+
+fn parse_int_array_initializer(tokens: &[Token], length: usize) -> CompileResult<Vec<i32>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new("expected global int array initializer"));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(
+            CompileError::new("expected global int array initializer").at(first.line, first.column)
+        );
+    }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+        return Err(
+            CompileError::new("unterminated global int array initializer")
+                .at(first.line, first.column),
+        );
+    };
+    if let Some(token) = tokens.get(close_brace + 1) {
+        return Err(
+            CompileError::new("unsupported global int array initializer")
+                .at(token.line, token.column),
+        );
+    }
+
+    let mut values = Vec::new();
+    let mut start = 1usize;
+    while start < close_brace {
+        let item = &tokens[start..close_brace];
+        let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
+        if item_len == 0 {
+            return Err(
+                CompileError::new("expected global int array initializer value")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        }
+        let value = parse_integer_initializer(&item[..item_len])?;
+        values.push(i32::try_from(value).map_err(|_| {
+            CompileError::new("global int array initializer does not fit i32")
+                .at(tokens[start].line, tokens[start].column)
+        })?);
+        start += item_len;
+        if start < close_brace {
+            start += 1;
+        }
+    }
+    if values.len() > length {
+        return Err(CompileError::new("too many global int array initializers")
+            .at(first.line, first.column));
+    }
+    values.resize(length, 0);
+    Ok(values)
 }
 
 fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
