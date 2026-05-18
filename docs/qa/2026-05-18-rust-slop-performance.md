@@ -288,6 +288,55 @@ This keeps the stricter performance gate open. Completion still requires a
 current proof that the chosen build-time gate beats local Clang, plus the full
 public Doom compile/link/run/play evidence.
 
+## FixedDiv2 Double And values.h Slice Recheck
+
+Date: 2026-05-18
+Scope: `src/parser/mod.rs`, `src/ir/mod.rs`, `src/codegen/mod.rs`,
+`src/front_end/preprocessor.rs`, `tests/compiler.rs`,
+`tests/clang_oracle.rs`, `tests/front_end.rs`
+
+Commands run locally after the Doom `FixedDiv2` double slice and Linux
+`<values.h>` integer-limit support:
+
+```text
+rustup run stable cargo fmt --all -- --check
+rustup run stable cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
+bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src/parser/mod.rs src/ir/mod.rs src/codegen/mod.rs src/front_end/preprocessor.rs tests/compiler.rs tests/clang_oracle.rs tests/front_end.rs
+LSP diagnostics on the changed Rust files
+rustup run stable cargo test --all-targets --all-features
+cargo nextest run --all-targets --all-features
+cargo machete
+cargo deny check
+cargo audit
+```
+
+Results:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+no-excuse: PASS for 7 files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test: PASS, 54 tests
+nextest: PASS, 54 tests
+cargo machete: PASS, no unused dependencies
+cargo deny: PASS, advisories/bans/licenses/sources ok
+cargo audit: PASS, 1 crate scanned
+unsafe/miri: N/A; crate has unsafe_code = "forbid" and #![forbid(unsafe_code)]
+remove-ai-slops scan: PASS for this slice; no debug leftovers, dead code, warning suppressions, unsafe blocks, or needless behavior-changing cleanup found
+```
+
+Manual tmux QA:
+
+```text
+tmux_session=c99-doom-values-qa
+scan=/tmp/c99inrust-doom-compile-scan-after-values.txt
+ok=2
+fail=60
+OK m_fixed.c
+OK m_swap.c
+```
+
 ## Scalar Return Slice Recheck
 
 Date: 2026-05-18

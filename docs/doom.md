@@ -46,14 +46,15 @@ It also accepts `int` and `void` function return types, binds supported integer
 parameters into ABI-backed local slots, emits terminal returns for `void`
 functions that can fall through, treats supported scalar/typedef return
 specifiers such as `fixed_t`, `boolean`, `char`, and `unsigned short` as the
-current integer return ABI, and emits signed integer expression slices for
-`long long` casts, function call arguments, and `?:` conditionals. Pointer
-returns remain unsupported.
+current integer return ABI, emits signed integer expression slices for
+`long long` casts, function call arguments, and `?:` conditionals, and now
+covers the Doom `FixedDiv2` double-expression slice plus the Linux
+`<values.h>` integer limit macros used by `doomtype.h`. Pointer returns remain
+unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but one of the 62 C files still fail before object generation. `m_swap.c`
-currently reaches assembly generation. `m_fixed.c` now gets through `FixedMul`
-and stops in the active `FixedDiv2` floating-point path. Evidence is recorded in
+but two of the 62 C files still fail before object generation. `m_swap.c` and
+`m_fixed.c` currently reach assembly generation. Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
 ## Playability Gate

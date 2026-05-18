@@ -392,3 +392,77 @@ FAIL p_maputl.c
 The next high-value blocker for `m_fixed.c` is the active `FixedDiv2` floating
 path: `double` local declarations, double casts/arithmetic/comparisons, string
 arguments, and call statements. Full Doom compile/link/run remains incomplete.
+
+## Compile Scan After FixedDiv2 Double Slice
+
+The compiler now parses, lowers, emits, assembles, and runs the isolated Doom
+`FixedDiv2` double-expression slice against the host C compiler oracle. Coverage
+added in this slice:
+
+```text
+double local declarations
+double literals and `(double)` casts
+double arithmetic and comparisons
+string literals as pointer call arguments
+expression statements for calls such as `I_Error(...)`
+```
+
+The first full Doom scan after double support moved `m_fixed.c` from the
+`double c;` parse blocker to the Linux `<values.h>` constant blocker:
+
+```text
+tmux_session=c99-doom-double-qa
+scan=/tmp/c99inrust-doom-compile-scan-after-double.txt
+ok=1
+fail=61
+FAIL m_fixed.c
+  error: unknown local: MININT
+OK m_swap.c
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_fixeddiv2_double_slice
+fixeddiv2_double_slice_matches_host_c_compiler_exit_code
+```
+
+## Compile Scan After values.h Integer Limits
+
+For the public Linux Doom target, `doomtype.h` includes `<values.h>` under
+`LINUX` and expects `MININT`/`MAXINT` to be available. The preprocessor now
+preserves the system include line while injecting the Doom-era integer limit
+macros needed by the current target slice.
+
+Regression coverage added:
+
+```text
+preprocessor_provides_doom_values_h_integer_limits
+```
+
+Current compile scan:
+
+```text
+tmux_session=c99-doom-values-qa
+scan=/tmp/c99inrust-doom-compile-scan-after-values.txt
+ok=2
+fail=60
+OK m_fixed.c
+OK m_swap.c
+```
+
+Representative next blockers:
+
+```text
+FAIL m_random.c
+  error: 60:20: expected punctuator ;
+FAIL m_bbox.c
+  error: 131:8: expected punctuator ;
+FAIL i_main.c
+  error: assignment to undeclared local: myargc
+FAIL r_sky.c
+  error: assignment to undeclared local: skytexturemid
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
