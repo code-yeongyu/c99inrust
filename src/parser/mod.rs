@@ -27,7 +27,7 @@ pub struct StructField {
 pub enum FieldType {
     Scalar(ScalarType),
     Struct(String),
-    Pointer,
+    Pointer { referent: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +49,7 @@ pub enum GlobalInitializer {
     Int(i64),
     IntArray(Vec<i32>),
     IntConstant(String),
-    PointerNull,
+    PointerNull { referent: Option<String> },
     PointerArray(usize),
     UnsignedCharArray(Vec<u8>),
 }
@@ -1809,7 +1809,7 @@ fn parse_struct_field_declaration(
         return Ok(false);
     };
     let first = &tokens[first_start..first_end];
-    let Some(first_name_index) = previous_identifier_index(first, first.len()) else {
+    let Some(first_name_index) = declarator_name_index(first) else {
         return Ok(false);
     };
     let base_specifiers = &first[..first_name_index];
@@ -1818,7 +1818,7 @@ fn parse_struct_field_declaration(
     };
     for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
         let segment = &tokens[start..end];
-        let Some(name_index) = previous_identifier_index(segment, segment.len()) else {
+        let Some(name_index) = declarator_name_index(segment) else {
             return Ok(false);
         };
         let Some(name) = token_identifier(&segment[name_index]) else {
@@ -1830,7 +1830,9 @@ fn parse_struct_field_declaration(
             .iter()
             .any(|token| token_is_punctuator(token, "*"))
         {
-            FieldType::Pointer
+            FieldType::Pointer {
+                referent: pointer_referent_from_specifiers(&segment[..name_index]),
+            }
         } else {
             base_type.clone()
         };
@@ -1863,9 +1865,16 @@ fn top_level_comma_ranges(tokens: &[Token]) -> Vec<(usize, usize)> {
     ranges
 }
 
+fn declarator_name_index(tokens: &[Token]) -> Option<usize> {
+    let before = top_level_punctuator_index(tokens, "[").unwrap_or(tokens.len());
+    previous_identifier_index(tokens, before)
+}
+
 fn struct_field_type(tokens: &[Token], known_structs: &[StructLayout]) -> Option<FieldType> {
     if tokens.iter().any(|token| token_is_punctuator(token, "*")) {
-        return Some(FieldType::Pointer);
+        return Some(FieldType::Pointer {
+            referent: pointer_referent_from_specifiers(tokens),
+        });
     }
     if let Some(scalar_type) = integer_parameter_type(tokens) {
         return Some(FieldType::Scalar(scalar_type));
@@ -1874,13 +1883,15 @@ fn struct_field_type(tokens: &[Token], known_structs: &[StructLayout]) -> Option
     if known_structs.iter().any(|layout| layout.name == name) {
         return Some(FieldType::Struct(name.to_owned()));
     }
-    supported_typedef_scalar(name).map(FieldType::Scalar)
+    Some(FieldType::Scalar(
+        supported_typedef_scalar(name).unwrap_or(ScalarType::Int),
+    ))
 }
 
 fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> CompileResult<usize> {
     match field_type {
         FieldType::Scalar(scalar_type) => Ok(scalar_size_for_layout(*scalar_type)),
-        FieldType::Pointer => Ok(8),
+        FieldType::Pointer { .. } => Ok(8),
         FieldType::Struct(name) => known_structs
             .iter()
             .find(|layout| layout.name == *name)
@@ -2306,9 +2317,10 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global pointer name"))?
         .to_owned();
+    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     Ok(Some(Global {
         name,
-        initializer: GlobalInitializer::PointerNull,
+        initializer: GlobalInitializer::PointerNull { referent },
     }))
 }
 
@@ -2448,18 +2460,25 @@ fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> b
             ) => {}
             TokenKind::Keyword(
                 Keyword::Char | Keyword::Int | Keyword::Long | Keyword::Short | Keyword::Void,
-            ) => saw_type = true,
-            TokenKind::Identifier(name) => {
-                if supported_typedef_scalar(name).is_none() {
-                    return false;
-                }
-                saw_type = true;
-            }
+            )
+            | TokenKind::Identifier(_) => saw_type = true,
             TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
             _ => return false,
         }
     }
     saw_type && saw_pointer
+}
+
+fn pointer_referent_from_specifiers(tokens: &[Token]) -> Option<String> {
+    if !tokens.iter().any(|token| token_is_punctuator(token, "*")) {
+        return None;
+    }
+    tokens
+        .iter()
+        .rev()
+        .find_map(token_identifier)
+        .filter(|name| supported_typedef_scalar(name).is_none())
+        .map(ToOwned::to_owned)
 }
 
 fn global_specifiers_are_int(tokens: &[Token], known_structs: &[StructLayout]) -> bool {

@@ -261,9 +261,11 @@ fn lower_globals(
                     GlobalBinding::Int,
                 )
             }
-            GlobalInitializer::PointerNull => (
+            GlobalInitializer::PointerNull { referent } => (
                 LoweredGlobalInitializer::PointerNull,
-                GlobalBinding::Pointer,
+                GlobalBinding::Pointer {
+                    referent: referent.clone(),
+                },
             ),
             GlobalInitializer::PointerArray(length) => (
                 LoweredGlobalInitializer::PointerArray(*length),
@@ -474,11 +476,11 @@ enum LocalBinding {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum GlobalBinding {
     Int,
     IntArray,
-    Pointer,
+    Pointer { referent: Option<String> },
     PointerArray,
     UnsignedCharArray,
 }
@@ -487,17 +489,17 @@ impl GlobalBinding {
     fn from_scalar_type(scalar_type: ScalarType) -> CompileResult<Self> {
         match scalar_type {
             ScalarType::Int => Ok(Self::Int),
-            ScalarType::Pointer => Ok(Self::Pointer),
+            ScalarType::Pointer => Ok(Self::Pointer { referent: None }),
             ScalarType::LongLong | ScalarType::Double => {
                 Err(CompileError::new("unsupported extern global scalar type"))
             }
         }
     }
 
-    const fn scalar_type(self) -> Option<ScalarType> {
+    const fn scalar_type(&self) -> Option<ScalarType> {
         match self {
             Self::Int => Some(ScalarType::Int),
-            Self::Pointer => Some(ScalarType::Pointer),
+            Self::Pointer { .. } => Some(ScalarType::Pointer),
             Self::IntArray | Self::PointerArray | Self::UnsignedCharArray => None,
         }
     }
@@ -1055,7 +1057,7 @@ impl LoweringContext {
                 if let Some(scalar_type) = self
                     .global_bindings
                     .get(name)
-                    .and_then(|binding| binding.scalar_type())
+                    .and_then(GlobalBinding::scalar_type)
                 {
                     return Ok(LoweredExpr::Global {
                         name: name.clone(),
@@ -1157,7 +1159,7 @@ impl LoweringContext {
                 if let Some(scalar_type) = self
                     .global_bindings
                     .get(name)
-                    .and_then(|binding| binding.scalar_type())
+                    .and_then(GlobalBinding::scalar_type)
                 {
                     return Ok(LoweredLValue::Global {
                         name: name.clone(),
@@ -1373,7 +1375,7 @@ impl LoweringContext {
         let member = self.resolve_member_access(base, field, dereference)?;
         let scalar_type = match member.field_type {
             FieldType::Scalar(scalar_type) => scalar_type,
-            FieldType::Pointer => ScalarType::Pointer,
+            FieldType::Pointer { .. } => ScalarType::Pointer,
             FieldType::Struct(_) => {
                 return Err(CompileError::new("struct member value is not supported"));
             }
@@ -1394,7 +1396,7 @@ impl LoweringContext {
         let member = self.resolve_member_access(base, field, dereference)?;
         let scalar_type = match member.field_type {
             FieldType::Scalar(scalar_type) => scalar_type,
-            FieldType::Pointer => ScalarType::Pointer,
+            FieldType::Pointer { .. } => ScalarType::Pointer,
             FieldType::Struct(_) => {
                 return Err(CompileError::new(
                     "assignment to struct member is not supported",
@@ -1497,6 +1499,27 @@ impl LoweringContext {
         {
             return Ok(referent);
         }
+        if let Expr::Identifier(name) = expr
+            && let Some(GlobalBinding::Pointer {
+                referent: Some(referent),
+            }) = self.global_bindings.get(name)
+        {
+            return Ok(referent.clone());
+        }
+        if let Expr::Member {
+            base,
+            field,
+            dereference,
+        } = expr
+        {
+            let member = self.resolve_member_access(base, field, *dereference)?;
+            if let FieldType::Pointer {
+                referent: Some(referent),
+            } = member.field_type
+            {
+                return Ok(referent);
+            }
+        }
         Err(CompileError::new(
             "pointer member access requires a typed pointer",
         ))
@@ -1558,7 +1581,7 @@ impl LoweringContext {
                     source_offset,
                     scalar_type,
                 ),
-                FieldType::Pointer => self.push_struct_scalar_copy(
+                FieldType::Pointer { .. } => self.push_struct_scalar_copy(
                     target,
                     source,
                     target_offset,

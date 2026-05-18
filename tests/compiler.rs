@@ -1360,6 +1360,85 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_typed_global_struct_pointer_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+} point_t;
+static point_t *cursor;
+int main(void) {
+    return cursor->x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("cursor:"));
+    assert!(assembly.contains("\tmovq cursor(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_fields_with_typedef_and_array_slice() {
+    // given
+    let source = r"typedef int state_t;
+typedef struct {
+    state_t state;
+    int powers[4];
+    int x;
+} player_t;
+static player_t *plr;
+int main(void) {
+    return plr->x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("plr:"));
+    assert!(assembly.contains("\tmovq plr(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovl 8(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_nested_typed_pointer_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+} mobj_t;
+typedef struct {
+    mobj_t* mo;
+} player_t;
+static player_t *plr;
+int main(void) {
+    return plr->mo->x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("plr:"));
+    assert!(assembly.contains("\tmovq plr(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_extern_global_pointer_array_slice() {
     // given
     let source = r"typedef unsigned char byte;
