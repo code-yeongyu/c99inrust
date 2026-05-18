@@ -2318,3 +2318,67 @@ expression forms.
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Struct Aggregate Array Skip
+
+The parser now rejects known struct typedefs from the global integer-array
+classifier. That keeps aggregate data such as:
+
+```c
+mline_t player_arrow[] = { ... };
+```
+
+out of the integer-array storage path, so supported functions later in the same
+translation unit can still be parsed.
+
+Regression coverage added:
+
+```text
+compiler_skips_struct_array_initializer_before_supported_function
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+```
+
+Focused `am_map.c` compile now reaches the expected local static aggregate
+blocker:
+
+```text
+error: 7290:5: expected expression
+```
+
+That line is:
+
+```c
+static event_t st_notify = { ev_keyup, AM_MSGENTERED };
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779122912`, then that session was closed with `exit`
+without `tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779122912.txt
+ok=11
+fail=51
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before struct aggregate array skip:
+    error: expected unsigned char array length
+  after struct aggregate array skip:
+    error: 7290:5: expected expression
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

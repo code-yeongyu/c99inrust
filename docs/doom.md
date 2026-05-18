@@ -111,6 +111,8 @@ Extern global pointer arrays such as `extern byte* screens[5]` and
 storage.
 Local pointers to typedef'd structs such as `patch_t* patch` are accepted in
 function bodies that have already seen the struct typedef.
+Top-level arrays of known struct typedefs with aggregate initializers are
+skipped instead of being misclassified as integer arrays.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
