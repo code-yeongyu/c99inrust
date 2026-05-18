@@ -207,13 +207,17 @@ Bare function designators that name known functions now lower to symbol
 addresses as callback arguments, moving the `P_BlockThingsIterator(...,
 PIT_VileCheck)` shape in `p_enemy.c` to assembly generation and moving
 `p_map.c` to its next `intercept_t` struct-typing blocker.
+Named inner aggregate fields such as `union { ... } d;` now get nested struct
+layouts, and top-level struct/union detection ignores nested aggregate keywords.
+This moves `intercept_t` member chains such as `in->d.line` and `in->d.thing`
+in `p_map.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 26
+The current Doom compile scan reaches actual supported function bodies, but 25
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
 `m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`, `p_enemy.c`,
-`p_floor.c`, `p_inter.c`, `p_lights.c`, `p_plats.c`, `p_pspr.c`,
+`p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`, `p_plats.c`, `p_pspr.c`,
 `p_saveg.c`, `p_sight.c`, `p_spec.c`, `p_telept.c`, `p_tick.c`,
 `p_user.c`, `r_draw.c`, `r_plane.c`, `r_segs.c`, `r_sky.c`, `st_lib.c`,
 `tables.c`, and `z_zone.c` currently reach assembly generation.
@@ -249,7 +253,7 @@ parameter and action-function pointer blockers in `p_ceilng.c`, `p_doors.c`,
 `p_floor.c`, and `p_plats.c` now reach assembly generation.
 Many remaining files are blocked by old-style function definitions,
 function-pointer declarations, typed-pointer gaps, unsupported expression
-forms, and typed struct alias gaps such as `intercept_t`.
+forms, and typed pointer gaps.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first

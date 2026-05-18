@@ -1472,6 +1472,65 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After Doom Named Inner Union Slice
+
+Struct typedef parsing now handles named inner aggregate fields such as
+`union { ... } d;` and records a nested layout for the field. The top-level
+struct/union decision also only looks at the aggregate keyword before the
+top-level `{`, so a struct containing a nested union is no longer laid out as if
+the whole parent were a union.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doom_named_inner_union_member_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_map.c \
+  -o /tmp/c99inrust-p_map.s
+```
+
+`p_map.c` now reaches assembly generation after moving past `intercept_t` member
+chains such as `in->d.line` and `in->d.thing`.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779143073`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779143073.txt
+ok=37
+fail=25
+```
+
+Newly green since the previous scan:
+
+```text
+p_map.c
+```
+
+Representative remaining blockers:
+
+```text
+FAIL p_maputl.c
+  error: 5810:10: expected expression
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL r_main.c
+  error: assignment to undeclared local or global: colfunc
+FAIL r_things.c
+  error: assignment to undeclared local or global: colfunc
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `d_items.c` Struct Array Declaration Merge
 
 This slice moved `d_items.c` from the conflicting `weaponinfo` declaration
