@@ -2086,3 +2086,59 @@ FAIL r_draw.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Global Int Array Slice
+
+`compile -S` now accepts zero-initialized global int arrays and supports
+loading and storing individual int elements. This covers the previous focused
+`r_draw.c` blocker:
+
+```c
+int columnofs[MAXWIDTH];
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_global_int_array_slice
+global_int_array_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_draw.c \
+  -o /tmp/c99inrust-r_draw.s
+```
+
+Focused `r_draw.c` compile now reaches the next global:
+
+```text
+error: unknown local or global: dc_colormap
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779119769`, then that session was closed with `exit`
+without `tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779119769.txt
+ok=10
+fail=52
+```
+
+Representative moved blocker:
+
+```text
+FAIL r_draw.c
+  before global int array slice:
+    error: unknown local or global: columnofs
+  after global int array slice:
+    error: unknown local or global: dc_colormap
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

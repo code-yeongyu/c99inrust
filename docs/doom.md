@@ -100,6 +100,8 @@ pointer locals initialized from string-literal storage.
 Plain `unsigned` parameters are accepted as integer parameters.
 Global pointer arrays such as `byte* ylookup[MAXHEIGHT]` are emitted as
 zero-filled pointer storage and support pointer element loads/stores.
+Global int arrays such as `int columnofs[MAXWIDTH]` are emitted as zero-filled
+integer storage and support int element loads/stores.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -114,8 +116,8 @@ The current `f_wipe.c` blocker is the local static function-pointer array
 The current `r_draw.c` blocker has moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, and the
 local char-array string initializers in `R_FillBackScreen`, and the
-`unsigned ofs` parameter in `R_VideoErase`. It is now the global int-array
-declaration/use of `columnofs`.
+`unsigned ofs` parameter in `R_VideoErase`, and the global arrays `ylookup` and
+`columnofs`. It is now the global pointer/scalar `dc_colormap`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
