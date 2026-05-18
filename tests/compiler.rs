@@ -2248,6 +2248,27 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_extern_short_array_slice() {
+    // given
+    let source = r"extern short ceilingclip[2];
+int main(void) {
+    return ceilingclip[1];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("ceilingclip:\n"));
+    assert!(assembly.contains("\tleaq ceilingclip(%rip), %rcx\n"));
+    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_global_pointer_string_initializer_slice() {
     // given
     let source = r#"char* e1text = "E1";

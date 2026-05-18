@@ -249,6 +249,10 @@ impl Preprocessor {
 fn define_builtin_system_macros(include_path: &str, macros: &mut HashMap<String, MacroDefinition>) {
     let definitions = match include_path {
         "values.h" => &[
+            ("MAXCHAR", "127"),
+            ("MINCHAR", "(-128)"),
+            ("MAXSHORT", "32767"),
+            ("MINSHORT", "(-32768)"),
             ("MAXINT", "2147483647"),
             ("MININT", "(-2147483647 - 1)"),
             ("MAXLONG", "2147483647"),

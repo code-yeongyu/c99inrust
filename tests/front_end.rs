@@ -121,7 +121,7 @@ fn preprocessor_expands_file_and_line_builtins_after_macros() {
 #[test]
 fn preprocessor_provides_doom_values_h_integer_limits() {
     // given
-    let source = "#include <values.h>\nint lo = MININT;\nint hi = MAXINT;\n";
+    let source = "#include <values.h>\nint lo = MININT;\nint hi = MAXINT;\nint sh = MAXSHORT;\n";
 
     // when
     let unit = Preprocessor::new()
@@ -132,6 +132,7 @@ fn preprocessor_provides_doom_values_h_integer_limits() {
     assert!(unit.source.contains("#include <values.h>"));
     assert!(unit.source.contains("int lo = (-2147483647 - 1);"));
     assert!(unit.source.contains("int hi = 2147483647;"));
+    assert!(unit.source.contains("int sh = 32767;"));
 }
 
 #[test]

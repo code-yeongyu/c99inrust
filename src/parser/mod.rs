@@ -3086,7 +3086,7 @@ fn global_specifiers_are_int_like(
             TokenKind::Keyword(
                 Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Signed,
             ) => {}
-            TokenKind::Keyword(Keyword::Int) => saw_int = true,
+            TokenKind::Keyword(Keyword::Int | Keyword::Short) => saw_int = true,
             TokenKind::Identifier(name) => {
                 if known_structs.iter().any(|layout| layout.name == *name) {
                     return false;
