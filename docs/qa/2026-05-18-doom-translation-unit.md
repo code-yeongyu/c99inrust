@@ -1220,3 +1220,83 @@ FAIL p_inter.c
 
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
+
+## Compile Scan After Member Access And Compound Assignment Slice
+
+`compile -S` now records simple anonymous `typedef struct { ... } name;`
+layouts, including comma-separated scalar fields and nested known struct fields.
+Typed pointer parameters retain their struct referent so nested Doom member
+expressions can lower to fixed byte-offset loads and stores. This covers the
+`AM_getIslope` slice:
+
+```c
+dy = ml->a.y - ml->b.y;
+dx = ml->b.x - ml->a.x;
+is->islp = dx + dy;
+```
+
+Compound assignment operators are also parsed into the existing assignment IR
+for scalar lvalues. This moved `am_map.c` past `m_x += m_w/2` and `m_x -= m_w/2`
+in `AM_activateNewScale`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doom_member_access_slice
+doom_member_access_slice_matches_host_c_compiler_exit_code
+compiler_accepts_compound_assignment_slice
+compound_assignment_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+error: 7290:5: expected expression
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779109827`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779109827.txt
+ok=9
+fail=53
+```
+
+The files still reaching assembly generation are unchanged:
+
+```text
+doomdef.c
+doomstat.c
+i_main.c
+m_argv.c
+m_bbox.c
+m_fixed.c
+m_random.c
+m_swap.c
+r_sky.c
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before member access slice: 7144:12: expected punctuator ;
+  before compound assignment slice: 7158:9: expected punctuator ;
+  after this slice: 7290:5: expected expression
+```
+
+The next `am_map.c` blocker is a local static aggregate declaration:
+
+```c
+static event_t st_notify = { ev_keyup, ((('a'<<24)+('m'<<16)) | ('e'<<8)) };
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

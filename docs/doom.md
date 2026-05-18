@@ -71,13 +71,20 @@ constant for `<netinet/in.h>`. Decimal fixed-point global initializers such as
 Unsupported brace-initialized aggregate globals are skipped before supported
 function bodies, so Doom typedef structs such as `cheatseq_t` no longer get
 misclassified as scalar integer globals. Local comma-separated integer
-declarations such as `int dx, dy;` are accepted.
+declarations such as `int dx, dy;` are accepted. Typed pointer parameters can
+now drive scalar member loads and stores through nested Doom typedef structs,
+covering the `AM_getIslope` shape `ml->a.y`, `ml->b.x`, and `is->islp`.
+Compound scalar assignments such as `m_x += m_w/2` and `m_x -= m_w/2` are also
+parsed and lowered through the existing assignment path.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
 but nine of the 62 C files still fail before object generation. `doomdef.c`,
 `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_fixed.c`, `m_random.c`,
 `m_swap.c`, and `r_sky.c` currently reach assembly generation.
+The current `am_map.c` blocker is the local static aggregate declaration
+`static event_t st_notify = { ... }` in `AM_initVariables`, not the earlier
+`AM_getIslope` member expressions.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
