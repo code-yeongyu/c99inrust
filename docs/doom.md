@@ -181,6 +181,11 @@ integer-array compile path, moving `r_segs.c` to assembly generation.
 Global array bounds now accept integer initializer expressions such as
 `320*64`, and pointer-returning function signatures lower return values through
 the current scalar backend, moving `r_plane.c` to assembly generation.
+Enum constants now feed global and local array lengths, global integer array
+initializer values, and unsized enum-typed global arrays with aggregate
+initializers. This moves `NUMSFX`, `NUMAMMO`, `NUMCARDS`, `sfx_pldeth`,
+`mus_e3m4`, and `dirtype_t opposite[]` blockers to later parser/lowering
+gaps, although the total scan count remains unchanged.
 
 The current Doom compile scan reaches actual supported function bodies, but 41
 of the 62 C files still fail before object generation. `am_map.c`,
@@ -211,8 +216,12 @@ array declarations such as `ceilingclip[SCREENWIDTH]`.
 The former `r_plane.c` blockers moved past expression-sized global arrays such
 as `short openings[320*64]` and pointer-returning signatures such as
 `visplane_t* R_FindPlane(...)`.
-Many remaining files are blocked by enum-sized arrays, old-style function
-definitions, function-pointer declarations, and unsupported expression forms.
+The former enum-constant blockers in `i_sound.c`, `p_inter.c`, `m_menu.c`,
+`p_enemy.c`, `s_sound.c`, `sounds.c`, and `st_stuff.c` now reach later
+unsupported expression, struct, pointer, or old-style declaration forms.
+Many remaining files are blocked by old-style function definitions,
+function-pointer declarations, typed-pointer gaps, and unsupported expression
+forms.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first

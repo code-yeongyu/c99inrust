@@ -3228,3 +3228,88 @@ function-pointer assignments, and old-style function definitions.
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Enum Constant Array Slice
+
+This slice lets enum constants participate in global and local array lengths,
+global integer array initializer values, and unsized enum-typed global arrays
+with initializer-derived lengths. The scan count is unchanged, but the enum
+blockers now move to later unsupported forms.
+
+Regression coverage added:
+
+```text
+compiler_accepts_global_enum_sized_int_array_slice
+compiler_accepts_global_enum_sized_pointer_array_slice
+compiler_accepts_local_int_array_global_enum_initializers_slice
+compiler_accepts_unsized_global_enum_int_array_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/i_sound.c \
+  -o /tmp/c99inrust-i_sound.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_enemy.c \
+  -o /tmp/c99inrust-p_enemy.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/s_sound.c \
+  -o /tmp/c99inrust-s_sound.s
+```
+
+Focused compiles still fail, but now fail after their enum constant blockers.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779138676`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779138676.txt
+ok=21
+fail=41
+```
+
+Representative moved blockers:
+
+```text
+FAIL i_sound.c
+  before this slice:
+    error: identifier NUMSFX is not an integer initializer
+  after this slice:
+    error: 4750:43: expected expression
+
+FAIL p_inter.c
+  before this slice:
+    error: identifier NUMAMMO is not an integer initializer
+  after this slice:
+    error: unknown struct: player_s
+
+FAIL p_enemy.c
+  before this slice:
+    error: expected unsigned char array length
+  after this slice:
+    error: 7052:15: expected punctuator ;
+
+FAIL s_sound.c
+  before this slice:
+    error: identifier mus_e3m4 is not an integer initializer
+  after this slice:
+    error: pointer member access requires a typed pointer
+
+FAIL st_stuff.c
+  before this slice:
+    error: identifier NUMCARDS is not an integer initializer
+  after this slice:
+    error: assignment to undeclared local or global: st_clock
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
