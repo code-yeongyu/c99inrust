@@ -233,9 +233,7 @@ impl Parser<'_> {
     }
 
     fn function(&mut self) -> CompileResult<Function> {
-        let return_type = self.return_type()?;
-        let name = self.expect_identifier()?;
-        self.expect_punctuator("(")?;
+        let (return_type, name) = self.function_signature()?;
         self.skip_parameter_list()?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
@@ -250,16 +248,21 @@ impl Parser<'_> {
         })
     }
 
-    fn return_type(&mut self) -> CompileResult<ReturnType> {
-        if self.check_keyword(Keyword::Int) {
-            self.advance();
-            return Ok(ReturnType::Int);
-        }
-        if self.check_keyword(Keyword::Void) {
-            self.advance();
-            return Ok(ReturnType::Void);
-        }
-        self.expected("supported function return type")
+    fn function_signature(&mut self) -> CompileResult<(ReturnType, String)> {
+        let tokens = &self.tokens[self.index..];
+        let Some(open_index) = top_level_function_open_paren(tokens) else {
+            return self.expected("function parameter list");
+        };
+        let Some(name_index) = previous_identifier_index(tokens, open_index) else {
+            return self.expected("function name");
+        };
+        let return_type = supported_return_type(&tokens[..name_index])
+            .ok_or_else(|| CompileError::new("unsupported function return type"))?;
+        let name = token_identifier(&tokens[name_index])
+            .ok_or_else(|| CompileError::new("expected function name"))?
+            .to_owned();
+        self.index += open_index + 1;
+        Ok((return_type, name))
     }
 
     fn skip_parameter_list(&mut self) -> CompileResult<()> {
@@ -770,27 +773,13 @@ fn function_definition_name(tokens: &[Token]) -> Option<String> {
 }
 
 fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
-    let Some(Token {
-        kind: TokenKind::Keyword(Keyword::Int | Keyword::Void),
-        ..
-    }) = tokens.first()
-    else {
+    let Some(open_index) = top_level_function_open_paren(tokens) else {
         return false;
     };
-    let Some(Token {
-        kind: TokenKind::Identifier(_),
-        ..
-    }) = tokens.get(1)
-    else {
+    let Some(name_index) = previous_identifier_index(tokens, open_index) else {
         return false;
     };
-    let Some(open_index) = tokens
-        .iter()
-        .position(|token| token_is_punctuator(token, "("))
-    else {
-        return false;
-    };
-    if open_index != 2 {
+    if supported_return_type(&tokens[..name_index]).is_none() {
         return false;
     }
     let mut paren_depth = 0usize;
@@ -870,6 +859,11 @@ fn function_pointer_name(tokens: &[Token]) -> Option<String> {
 }
 
 fn normal_function_name(tokens: &[Token]) -> Option<String> {
+    let open_index = top_level_function_open_paren(tokens)?;
+    previous_identifier(tokens, open_index).map(ToOwned::to_owned)
+}
+
+fn top_level_function_open_paren(tokens: &[Token]) -> Option<usize> {
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
     let mut brace_depth = 0usize;
@@ -880,7 +874,7 @@ fn normal_function_name(tokens: &[Token]) -> Option<String> {
                 saw_assignment = true;
             }
             if !saw_assignment && token_is_punctuator(token, "(") {
-                return previous_identifier(tokens, index).map(ToOwned::to_owned);
+                return Some(index);
             }
         }
         update_depths(
@@ -891,6 +885,45 @@ fn normal_function_name(tokens: &[Token]) -> Option<String> {
         );
     }
     None
+}
+
+fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
+    let mut saw_void = false;
+    let mut saw_non_void_type = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Identifier(_) => saw_non_void_type = true,
+            TokenKind::Keyword(keyword) => match keyword {
+                Keyword::Auto
+                | Keyword::Const
+                | Keyword::Extern
+                | Keyword::Inline
+                | Keyword::Register
+                | Keyword::Static
+                | Keyword::Volatile => {}
+                Keyword::Void => saw_void = true,
+                Keyword::Bool
+                | Keyword::Char
+                | Keyword::Enum
+                | Keyword::Int
+                | Keyword::Long
+                | Keyword::Short
+                | Keyword::Signed
+                | Keyword::Unsigned => saw_non_void_type = true,
+                _ => return None,
+            },
+            TokenKind::Punctuator(value) if value == "*" => return None,
+            TokenKind::Punctuator(_) | TokenKind::Integer(_) | TokenKind::CharLiteral(_) => {
+                return None;
+            }
+            TokenKind::StringLiteral(_) | TokenKind::End => return None,
+        }
+    }
+    match (saw_void, saw_non_void_type) {
+        (true, false) => Some(ReturnType::Void),
+        (false, true) => Some(ReturnType::Int),
+        (true, true) | (false, false) => None,
+    }
 }
 
 fn array_declarator_name(tokens: &[Token]) -> Option<String> {
@@ -944,6 +977,15 @@ fn previous_identifier(tokens: &[Token], before: usize) -> Option<&str> {
         .iter()
         .rev()
         .find_map(token_identifier)
+}
+
+fn previous_identifier_index(tokens: &[Token], before: usize) -> Option<usize> {
+    tokens
+        .get(..before)?
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, token)| token_identifier(token).map(|_name| index))
 }
 
 fn token_has_keyword(tokens: &[Token], keyword: Keyword) -> bool {
