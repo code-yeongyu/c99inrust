@@ -2997,6 +2997,29 @@ boolean P_BlockThingsIterator(int x, int y, thing_checker_t checker) {
 }
 
 #[test]
+fn compiler_accepts_prototype_function_designator_assignment_slice() {
+    // given
+    let source = r"void R_DrawColumn(void);
+void (*colfunc)(void);
+void (*basecolfunc)(void);
+void setup(void) {
+    colfunc = basecolfunc = R_DrawColumn;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tleaq R_DrawColumn(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq %rax, basecolfunc(%rip)\n"));
+    assert!(assembly.contains("\tmovq %rax, colfunc(%rip)\n"));
+}
+
+#[test]
 fn compiler_accepts_member_access_on_pointer_return_call_slice() {
     // given
     let source = r"typedef struct {
@@ -3220,6 +3243,33 @@ int main(void) {
     assert!(assembly.contains("blockmap:"));
     assert!(assembly.contains("\tmovw %ax, (%rcx,%rdx,2)\n"));
     assert!(assembly.contains("\tmovswl (%rcx,%rax,2), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_pointer_arithmetic_member_slice() {
+    // given
+    let source = r"typedef struct vissprite_s {
+    struct vissprite_s* next;
+} vissprite_t;
+vissprite_t items[4];
+vissprite_t* ptr;
+void link(void) {
+    ptr = items;
+    (ptr - 1)->next = &items[0];
+    ptr = ptr + 1;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tleaq (%rcx,%rax,8), %rax\n"));
+    assert!(assembly.contains("\tmovq %rax, 0(%rcx)\n"));
+    assert!(assembly.contains("\tmovq %rax, ptr(%rip)\n"));
 }
 
 #[test]

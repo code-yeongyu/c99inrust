@@ -223,8 +223,7 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
     let (globals, global_bindings) = lower_globals(&program.globals, &constants, &structs)?;
     let pointer_return_functions =
         lower_pointer_return_functions(&program.pointer_return_functions);
-    let function_names =
-        lower_function_names(&program.functions, &program.pointer_return_functions);
+    let function_names = lower_function_names(&program.functions, &program.function_prototypes);
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
         functions.push(lower_function_with_globals(
@@ -538,18 +537,11 @@ fn lower_pointer_return_functions(
         .collect()
 }
 
-fn lower_function_names(
-    functions: &[Function],
-    pointer_return_functions: &[PointerReturnFunction],
-) -> HashSet<String> {
+fn lower_function_names(functions: &[Function], function_prototypes: &[String]) -> HashSet<String> {
     functions
         .iter()
         .map(|function| function.name.clone())
-        .chain(
-            pointer_return_functions
-                .iter()
-                .map(|function| function.name.clone()),
-        )
+        .chain(function_prototypes.iter().cloned())
         .collect()
 }
 
@@ -1672,10 +1664,54 @@ impl LoweringContext {
         left: &Expr,
         right: &Expr,
     ) -> CompileResult<LoweredExpr> {
+        let left_referent = self.pointer_referent_for_expr(left).ok();
+        let right_referent = self.pointer_referent_for_expr(right).ok();
+        if op == BinaryOp::Add {
+            if let Some(referent) = left_referent.as_deref()
+                && right_referent.is_none()
+            {
+                return self.lower_pointer_offset_expr(left, right, referent, false);
+            }
+            if let Some(referent) = right_referent.as_deref()
+                && left_referent.is_none()
+            {
+                return self.lower_pointer_offset_expr(right, left, referent, false);
+            }
+        }
+        if op == BinaryOp::Sub
+            && let Some(referent) = left_referent.as_deref()
+            && right_referent.is_none()
+        {
+            return self.lower_pointer_offset_expr(left, right, referent, true);
+        }
         Ok(LoweredExpr::Binary {
             op,
             left: Box::new(self.lower_expr(left)?),
             right: Box::new(self.lower_expr(right)?),
+        })
+    }
+
+    fn lower_pointer_offset_expr(
+        &self,
+        pointer: &Expr,
+        index: &Expr,
+        referent: &str,
+        subtract: bool,
+    ) -> CompileResult<LoweredExpr> {
+        let byte_size = self.pointer_referent_stride(referent)?;
+        let index = self.lower_expr(index)?;
+        let index = if subtract {
+            LoweredExpr::Unary {
+                op: UnaryOp::Minus,
+                expr: Box::new(index),
+            }
+        } else {
+            index
+        };
+        Ok(LoweredExpr::PointerOffset {
+            pointer: Box::new(self.lower_expr(pointer)?),
+            index: Box::new(index),
+            byte_size,
         })
     }
 
@@ -2497,6 +2533,12 @@ impl LoweringContext {
         Err(CompileError::new(
             "pointer member access requires a typed pointer",
         ))
+    }
+
+    fn pointer_referent_stride(&self, referent: &str) -> CompileResult<usize> {
+        pointer_referent_byte_size(referent)
+            .or_else(|| self.structs.get(referent).map(|layout| layout.size))
+            .ok_or_else(|| CompileError::new("unknown pointer arithmetic referent"))
     }
 
     fn expr_is_pointer_return_call(&self, expr: &Expr) -> bool {

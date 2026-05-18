@@ -7,6 +7,7 @@ pub struct Program {
     pub constants: Vec<Constant>,
     pub globals: Vec<Global>,
     pub pointer_return_functions: Vec<PointerReturnFunction>,
+    pub function_prototypes: Vec<String>,
     pub functions: Vec<Function>,
 }
 
@@ -444,6 +445,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let mut pointer_typedefs = Vec::new();
     let mut globals = Vec::new();
     let mut pointer_return_functions = Vec::new();
+    let mut function_prototypes = Vec::new();
     let mut functions = Vec::new();
     let mut unsupported_data_declaration = false;
     for item_tokens in &external_items {
@@ -453,6 +455,10 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         }
         if let Some(function) = pointer_return_function(item_tokens) {
             pointer_return_functions.push(function);
+        }
+        if let Some(name) = function_prototype_name(item_tokens) {
+            function_prototypes.push(name);
+            continue;
         }
         if let Some(layouts) =
             parse_struct_typedef(item_tokens, &structs, &constants, &pointer_typedefs)?
@@ -528,6 +534,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         constants,
         globals,
         pointer_return_functions,
+        function_prototypes,
         functions,
     })
 }
@@ -552,6 +559,7 @@ impl Parser<'_> {
             constants: Vec::new(),
             globals: Vec::new(),
             pointer_return_functions: Vec::new(),
+            function_prototypes: Vec::new(),
             functions,
         })
     }
@@ -4439,6 +4447,16 @@ fn function_definition_name(tokens: &[Token]) -> Option<String> {
         return normal_function_name(tokens);
     }
     None
+}
+
+fn function_prototype_name(tokens: &[Token]) -> Option<String> {
+    if last_token_is_punctuator(tokens, "}") || function_pointer_name(tokens).is_some() {
+        return None;
+    }
+    let open_index = top_level_function_open_paren(tokens)?;
+    let name_index = previous_identifier_index(tokens, open_index)?;
+    supported_return_type(&tokens[..name_index])?;
+    token_identifier(&tokens[name_index]).map(ToOwned::to_owned)
 }
 
 fn pointer_return_function(tokens: &[Token]) -> Option<PointerReturnFunction> {
