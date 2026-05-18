@@ -14,6 +14,7 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
+    Block(Vec<Statement>),
     Declaration {
         name: String,
         initializer: Option<Expr>,
@@ -21,6 +22,11 @@ pub enum Statement {
     Assignment {
         name: String,
         value: Expr,
+    },
+    If {
+        condition: Expr,
+        then_branch: Box<Statement>,
+        else_branch: Option<Box<Statement>>,
     },
     Return(Expr),
 }
@@ -57,6 +63,12 @@ pub enum BinaryOp {
     Sub,
     ShiftLeft,
     ShiftRight,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Equal,
+    NotEqual,
     BitAnd,
     BitXor,
     BitOr,
@@ -160,8 +172,14 @@ impl Parser<'_> {
     }
 
     fn statement(&mut self) -> CompileResult<Statement> {
+        if self.check_punctuator("{") {
+            return Ok(Statement::Block(self.block_items()?));
+        }
         if self.check_keyword(Keyword::Int) {
             return self.declaration_statement();
+        }
+        if self.check_keyword(Keyword::If) {
+            return self.if_statement();
         }
         if self.check_keyword(Keyword::Return) {
             self.advance();
@@ -189,6 +207,35 @@ impl Parser<'_> {
         Ok(Statement::Declaration { name, initializer })
     }
 
+    fn if_statement(&mut self) -> CompileResult<Statement> {
+        self.expect_keyword(Keyword::If)?;
+        self.expect_punctuator("(")?;
+        let condition = self.expression()?;
+        self.expect_punctuator(")")?;
+        let then_branch = Box::new(self.statement()?);
+        let else_branch = if self.check_keyword(Keyword::Else) {
+            self.advance();
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+        Ok(Statement::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
+    }
+
+    fn block_items(&mut self) -> CompileResult<Vec<Statement>> {
+        self.expect_punctuator("{")?;
+        let mut statements = Vec::new();
+        while !self.check_punctuator("}") {
+            statements.push(self.statement()?);
+        }
+        self.expect_punctuator("}")?;
+        Ok(statements)
+    }
+
     fn expression(&mut self) -> CompileResult<Expr> {
         self.bit_or()
     }
@@ -202,7 +249,26 @@ impl Parser<'_> {
     }
 
     fn bit_and(&mut self) -> CompileResult<Expr> {
-        self.left_associative(Self::shift, &[("&", BinaryOp::BitAnd)])
+        self.left_associative(Self::equality, &[("&", BinaryOp::BitAnd)])
+    }
+
+    fn equality(&mut self) -> CompileResult<Expr> {
+        self.left_associative(
+            Self::relational,
+            &[("==", BinaryOp::Equal), ("!=", BinaryOp::NotEqual)],
+        )
+    }
+
+    fn relational(&mut self) -> CompileResult<Expr> {
+        self.left_associative(
+            Self::shift,
+            &[
+                ("<", BinaryOp::Less),
+                ("<=", BinaryOp::LessEqual),
+                (">", BinaryOp::Greater),
+                (">=", BinaryOp::GreaterEqual),
+            ],
+        )
     }
 
     fn shift(&mut self) -> CompileResult<Expr> {

@@ -79,6 +79,26 @@ fn emit_aarch64_function(
                 emit_aarch64_expr(value, temporary_base, 0, assembly)?;
                 assembly.push_str(&format!("\tstr w0, [sp, #{}]\n", local_offset(*slot)));
             }
+            Instruction::JumpIfZero { condition, label } => {
+                emit_aarch64_expr(condition, temporary_base, 0, assembly)?;
+                assembly.push_str("\tcmp w0, #0\n");
+                assembly.push_str(&format!(
+                    "\tb.eq {}\n",
+                    branch_label(&function.name, *label, target)
+                ));
+            }
+            Instruction::Jump { label } => {
+                assembly.push_str(&format!(
+                    "\tb {}\n",
+                    branch_label(&function.name, *label, target)
+                ));
+            }
+            Instruction::Label { label } => {
+                assembly.push_str(&format!(
+                    "{}:\n",
+                    branch_label(&function.name, *label, target)
+                ));
+            }
             Instruction::Return(expr) => {
                 emit_aarch64_expr(expr, temporary_base, 0, assembly)?;
                 if stack_bytes > 0 {
@@ -110,6 +130,26 @@ fn emit_x86_64_function(
             Instruction::StoreLocal { slot, value } => {
                 emit_x86_64_expr(value, assembly)?;
                 assembly.push_str(&format!("\tmovl %eax, {}(%rbp)\n", x86_local_offset(*slot)));
+            }
+            Instruction::JumpIfZero { condition, label } => {
+                emit_x86_64_expr(condition, assembly)?;
+                assembly.push_str("\tcmpl $0, %eax\n");
+                assembly.push_str(&format!(
+                    "\tje {}\n",
+                    branch_label(&function.name, *label, target)
+                ));
+            }
+            Instruction::Jump { label } => {
+                assembly.push_str(&format!(
+                    "\tjmp {}\n",
+                    branch_label(&function.name, *label, target)
+                ));
+            }
+            Instruction::Label { label } => {
+                assembly.push_str(&format!(
+                    "{}:\n",
+                    branch_label(&function.name, *label, target)
+                ));
             }
             Instruction::Return(expr) => {
                 emit_x86_64_expr(expr, assembly)?;
@@ -164,6 +204,12 @@ fn emit_aarch64_expr(
                 BinaryOp::Sub => assembly.push_str("\tsub w0, w0, w1\n"),
                 BinaryOp::ShiftLeft => assembly.push_str("\tlsl w0, w0, w1\n"),
                 BinaryOp::ShiftRight => assembly.push_str("\tasr w0, w0, w1\n"),
+                BinaryOp::Less => emit_aarch64_comparison("lt", assembly),
+                BinaryOp::LessEqual => emit_aarch64_comparison("le", assembly),
+                BinaryOp::Greater => emit_aarch64_comparison("gt", assembly),
+                BinaryOp::GreaterEqual => emit_aarch64_comparison("ge", assembly),
+                BinaryOp::Equal => emit_aarch64_comparison("eq", assembly),
+                BinaryOp::NotEqual => emit_aarch64_comparison("ne", assembly),
                 BinaryOp::BitAnd => assembly.push_str("\tand w0, w0, w1\n"),
                 BinaryOp::BitXor => assembly.push_str("\teor w0, w0, w1\n"),
                 BinaryOp::BitOr => assembly.push_str("\torr w0, w0, w1\n"),
@@ -220,6 +266,12 @@ fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<
                 BinaryOp::Sub => assembly.push_str("\tsubl %ecx, %eax\n"),
                 BinaryOp::ShiftLeft => assembly.push_str("\tsall %cl, %eax\n"),
                 BinaryOp::ShiftRight => assembly.push_str("\tsarl %cl, %eax\n"),
+                BinaryOp::Less => emit_x86_64_comparison("setl", assembly),
+                BinaryOp::LessEqual => emit_x86_64_comparison("setle", assembly),
+                BinaryOp::Greater => emit_x86_64_comparison("setg", assembly),
+                BinaryOp::GreaterEqual => emit_x86_64_comparison("setge", assembly),
+                BinaryOp::Equal => emit_x86_64_comparison("sete", assembly),
+                BinaryOp::NotEqual => emit_x86_64_comparison("setne", assembly),
                 BinaryOp::BitAnd => assembly.push_str("\tandl %ecx, %eax\n"),
                 BinaryOp::BitXor => assembly.push_str("\txorl %ecx, %eax\n"),
                 BinaryOp::BitOr => assembly.push_str("\torl %ecx, %eax\n"),
@@ -227,6 +279,17 @@ fn emit_x86_64_expr(expr: &LoweredExpr, assembly: &mut String) -> CompileResult<
             Ok(())
         }
     }
+}
+
+fn emit_aarch64_comparison(condition: &str, assembly: &mut String) {
+    assembly.push_str("\tcmp w0, w1\n");
+    assembly.push_str(&format!("\tcset w0, {condition}\n"));
+}
+
+fn emit_x86_64_comparison(instruction: &str, assembly: &mut String) {
+    assembly.push_str("\tcmpl %ecx, %eax\n");
+    assembly.push_str(&format!("\t{instruction} %al\n"));
+    assembly.push_str("\tmovzbl %al, %eax\n");
 }
 
 fn emit_aarch64_i32(value: i64, assembly: &mut String) -> CompileResult<()> {
@@ -245,6 +308,8 @@ fn emit_aarch64_i32(value: i64, assembly: &mut String) -> CompileResult<()> {
 fn instruction_depth(instruction: &Instruction) -> usize {
     match instruction {
         Instruction::StoreLocal { value, .. } | Instruction::Return(value) => expr_depth(value),
+        Instruction::JumpIfZero { condition, .. } => expr_depth(condition),
+        Instruction::Jump { .. } | Instruction::Label { .. } => 0,
     }
 }
 
@@ -277,5 +342,12 @@ fn label_name(name: &str, target: Target) -> String {
     match target {
         Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => format!("_{name}"),
         Target::X86_64UnknownLinuxGnu => name.to_string(),
+    }
+}
+
+fn branch_label(function: &str, label: usize, target: Target) -> String {
+    match target {
+        Target::Aarch64AppleDarwin | Target::X86_64AppleDarwin => format!("L{function}_{label}"),
+        Target::X86_64UnknownLinuxGnu => format!(".L{function}_{label}"),
     }
 }

@@ -17,7 +17,20 @@ pub struct LoweredFunction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {
-    StoreLocal { slot: usize, value: LoweredExpr },
+    StoreLocal {
+        slot: usize,
+        value: LoweredExpr,
+    },
+    JumpIfZero {
+        condition: LoweredExpr,
+        label: usize,
+    },
+    Jump {
+        label: usize,
+    },
+    Label {
+        label: usize,
+    },
     Return(LoweredExpr),
 }
 
@@ -70,44 +83,11 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 }
 
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
-    let mut locals = HashMap::new();
-    let mut instructions = Vec::new();
-    let mut has_return = false;
+    let mut context = LoweringContext::new();
     for statement in &function.statements {
-        match statement {
-            Statement::Declaration { name, initializer } => {
-                if locals.contains_key(name) {
-                    return Err(CompileError::new(format!(
-                        "duplicate local declaration: {name}"
-                    )));
-                }
-                let slot = locals.len();
-                locals.insert(name.clone(), slot);
-                let value = initializer
-                    .as_ref()
-                    .map_or(Ok(LoweredExpr::Integer(0)), |expr| {
-                        lower_expr(expr, &locals)
-                    })?;
-                instructions.push(Instruction::StoreLocal { slot, value });
-            }
-            Statement::Assignment { name, value } => {
-                let Some(slot) = locals.get(name).copied() else {
-                    return Err(CompileError::new(format!(
-                        "assignment to undeclared local: {name}"
-                    )));
-                };
-                instructions.push(Instruction::StoreLocal {
-                    slot,
-                    value: lower_expr(value, &locals)?,
-                });
-            }
-            Statement::Return(expr) => {
-                instructions.push(Instruction::Return(lower_expr(expr, &locals)?));
-                has_return = true;
-            }
-        }
+        context.lower_statement(statement)?;
     }
-    if !has_return {
+    if !context.has_return {
         return Err(CompileError::new(format!(
             "function {} has no return statement",
             function.name
@@ -115,29 +95,163 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     }
     Ok(LoweredFunction {
         name: function.name.clone(),
-        local_count: locals.len(),
-        instructions,
+        local_count: context.local_count,
+        instructions: context.instructions,
     })
 }
 
-fn lower_expr(expr: &Expr, locals: &HashMap<String, usize>) -> CompileResult<LoweredExpr> {
-    match expr {
-        Expr::Identifier(name) => {
-            let Some(slot) = locals.get(name).copied() else {
-                return Err(CompileError::new(format!("unknown local: {name}")));
-            };
-            Ok(LoweredExpr::Local(slot))
+struct LoweringContext {
+    scopes: Vec<HashMap<String, usize>>,
+    local_count: usize,
+    instructions: Vec<Instruction>,
+    next_label: usize,
+    has_return: bool,
+}
+
+impl LoweringContext {
+    fn new() -> Self {
+        Self {
+            scopes: vec![HashMap::new()],
+            local_count: 0,
+            instructions: Vec::new(),
+            next_label: 0,
+            has_return: false,
         }
-        Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
-        Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
-            op: *op,
-            expr: Box::new(lower_expr(expr, locals)?),
-        }),
-        Expr::Binary { op, left, right } => Ok(LoweredExpr::Binary {
-            op: *op,
-            left: Box::new(lower_expr(left, locals)?),
-            right: Box::new(lower_expr(right, locals)?),
-        }),
+    }
+
+    fn lower_statement(&mut self, statement: &Statement) -> CompileResult<()> {
+        match statement {
+            Statement::Block(statements) => self.lower_block(statements),
+            Statement::Declaration { name, initializer } => {
+                let slot = self.declare_local(name)?;
+                let value = initializer
+                    .as_ref()
+                    .map_or(Ok(LoweredExpr::Integer(0)), |expr| self.lower_expr(expr))?;
+                self.instructions
+                    .push(Instruction::StoreLocal { slot, value });
+                Ok(())
+            }
+            Statement::Assignment { name, value } => {
+                let Some(slot) = self.local_slot(name) else {
+                    return Err(CompileError::new(format!(
+                        "assignment to undeclared local: {name}"
+                    )));
+                };
+                let value = self.lower_expr(value)?;
+                self.instructions
+                    .push(Instruction::StoreLocal { slot, value });
+                Ok(())
+            }
+            Statement::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.lower_if(condition, then_branch, else_branch.as_deref()),
+            Statement::Return(expr) => {
+                let value = self.lower_expr(expr)?;
+                self.instructions.push(Instruction::Return(value));
+                self.has_return = true;
+                Ok(())
+            }
+        }
+    }
+
+    fn lower_block(&mut self, statements: &[Statement]) -> CompileResult<()> {
+        self.scopes.push(HashMap::new());
+        for statement in statements {
+            self.lower_statement(statement)?;
+        }
+        self.pop_scope()
+    }
+
+    fn lower_if(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Statement,
+        else_branch: Option<&Statement>,
+    ) -> CompileResult<()> {
+        let else_label = self.fresh_label();
+        let end_label = self.fresh_label();
+        let condition = self.lower_expr(condition)?;
+        self.instructions.push(Instruction::JumpIfZero {
+            condition,
+            label: else_label,
+        });
+        self.lower_branch(then_branch)?;
+        if else_branch.is_some() {
+            self.instructions
+                .push(Instruction::Jump { label: end_label });
+        }
+        self.instructions
+            .push(Instruction::Label { label: else_label });
+        if let Some(statement) = else_branch {
+            self.lower_branch(statement)?;
+            self.instructions
+                .push(Instruction::Label { label: end_label });
+        }
+        Ok(())
+    }
+
+    fn lower_branch(&mut self, statement: &Statement) -> CompileResult<()> {
+        self.scopes.push(HashMap::new());
+        self.lower_statement(statement)?;
+        self.pop_scope()
+    }
+
+    fn declare_local(&mut self, name: &str) -> CompileResult<usize> {
+        let Some(scope) = self.scopes.last_mut() else {
+            return Err(CompileError::new("internal error: no local scope"));
+        };
+        if scope.contains_key(name) {
+            return Err(CompileError::new(format!(
+                "duplicate local declaration: {name}"
+            )));
+        }
+        let slot = self.local_count;
+        self.local_count += 1;
+        scope.insert(name.to_string(), slot);
+        Ok(slot)
+    }
+
+    fn pop_scope(&mut self) -> CompileResult<()> {
+        if self.scopes.pop().is_none() {
+            return Err(CompileError::new("internal error: no local scope to pop"));
+        }
+        Ok(())
+    }
+
+    fn fresh_label(&mut self) -> usize {
+        let label = self.next_label;
+        self.next_label += 1;
+        label
+    }
+
+    fn local_slot(&self, name: &str) -> Option<usize> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+    }
+
+    fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
+        match expr {
+            Expr::Identifier(name) => {
+                let Some(slot) = self.local_slot(name) else {
+                    return Err(CompileError::new(format!("unknown local: {name}")));
+                };
+                Ok(LoweredExpr::Local(slot))
+            }
+            Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
+            Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
+                op: *op,
+                expr: Box::new(self.lower_expr(expr)?),
+            }),
+            Expr::Binary { op, left, right } => Ok(LoweredExpr::Binary {
+                op: *op,
+                left: Box::new(self.lower_expr(left)?),
+                right: Box::new(self.lower_expr(right)?),
+            }),
+        }
     }
 }
 
@@ -174,6 +288,12 @@ fn eval_binary(op: BinaryOp, left: i64, right: i64) -> CompileResult<i64> {
             left.checked_shr(count)
                 .ok_or_else(|| CompileError::new("integer overflow in right shift"))
         }),
+        BinaryOp::Less => Ok(i64::from(left < right)),
+        BinaryOp::LessEqual => Ok(i64::from(left <= right)),
+        BinaryOp::Greater => Ok(i64::from(left > right)),
+        BinaryOp::GreaterEqual => Ok(i64::from(left >= right)),
+        BinaryOp::Equal => Ok(i64::from(left == right)),
+        BinaryOp::NotEqual => Ok(i64::from(left != right)),
         BinaryOp::BitAnd => Ok(left & right),
         BinaryOp::BitXor => Ok(left ^ right),
         BinaryOp::BitOr => Ok(left | right),

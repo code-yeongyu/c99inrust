@@ -82,3 +82,39 @@ fn compiler_marks_linux_assembly_stack_non_executable() {
     assert!(linux_assembly.contains(".section .note.GNU-stack,\"\",@progbits"));
     assert!(!apple_assembly.contains(".note.GNU-stack"));
 }
+
+#[test]
+fn compiler_emits_branches_for_if_else_comparisons() {
+    // given
+    let source =
+        "int main(void) { int x = 3; if (x >= 3) { x = 9; } else { x = 1; } return x == 9; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let target = Target::native();
+    let assembly = emit_assembly(&lowered, target).expect("assembly should emit");
+
+    // then
+    match target {
+        Target::Aarch64AppleDarwin => {
+            assert!(assembly.contains("cmp w0, w1"));
+            assert!(assembly.contains("cset w0, ge"));
+            assert!(assembly.contains("b.eq Lmain_"));
+            assert!(assembly.contains("cset w0, eq"));
+        }
+        Target::X86_64AppleDarwin => {
+            assert!(assembly.contains("cmpl %ecx, %eax"));
+            assert!(assembly.contains("setge %al"));
+            assert!(assembly.contains("je Lmain_"));
+            assert!(assembly.contains("sete %al"));
+        }
+        Target::X86_64UnknownLinuxGnu => {
+            assert!(assembly.contains("cmpl %ecx, %eax"));
+            assert!(assembly.contains("setge %al"));
+            assert!(assembly.contains("je .Lmain_"));
+            assert!(assembly.contains("sete %al"));
+        }
+    }
+}
