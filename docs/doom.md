@@ -70,7 +70,8 @@ constant for `<netinet/in.h>`. Decimal fixed-point global initializers such as
 `(.2*(1<<16))` are folded into integer storage for the `am_map.c` scale slice.
 Unsupported brace-initialized aggregate globals are skipped before supported
 function bodies, so Doom typedef structs such as `cheatseq_t` no longer get
-misclassified as scalar integer globals.
+misclassified as scalar integer globals. Local comma-separated integer
+declarations such as `int dx, dy;` are accepted.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
