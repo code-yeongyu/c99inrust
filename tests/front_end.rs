@@ -86,6 +86,22 @@ fn preprocessor_expands_function_macros_and_spliced_lines() {
 }
 
 #[test]
+fn preprocessor_provides_doom_values_h_integer_limits() {
+    // given
+    let source = "#include <values.h>\nint lo = MININT;\nint hi = MAXINT;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-values.c", source)
+        .expect("preprocessor should provide Doom-era values.h integer limits");
+
+    // then
+    assert!(unit.source.contains("#include <values.h>"));
+    assert!(unit.source.contains("int lo = (-2147483647 - 1);"));
+    assert!(unit.source.contains("int hi = 2147483647;"));
+}
+
+#[test]
 fn preprocessor_removes_comments_before_macro_expansion() {
     // given
     let source = "#define HU_FONTSTART '!'\t// the first font character\n#define HU_FONTSIZE ('_' - HU_FONTSTART + 1)\nextern int hu_font[HU_FONTSIZE];\n";

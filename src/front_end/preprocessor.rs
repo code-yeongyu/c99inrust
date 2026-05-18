@@ -156,6 +156,7 @@ impl Preprocessor {
                         }
                     }
                     Include::System(include_path) => {
+                        define_builtin_system_macros(&include_path, state.macros);
                         state.output.push_str("#include <");
                         state.output.push_str(&include_path);
                         state.output.push_str(">\n");
@@ -235,6 +236,25 @@ impl Preprocessor {
         Err(CompileError::new(format!(
             "include not found: {include_path}"
         )))
+    }
+}
+
+fn define_builtin_system_macros(include_path: &str, macros: &mut HashMap<String, MacroDefinition>) {
+    if include_path != "values.h" {
+        return;
+    }
+    for (name, replacement) in [
+        ("MAXINT", "2147483647"),
+        ("MININT", "(-2147483647 - 1)"),
+        ("MAXLONG", "2147483647"),
+        ("MINLONG", "(-2147483647 - 1)"),
+    ] {
+        macros.insert(
+            name.to_string(),
+            MacroDefinition::Object {
+                replacement: replacement.to_string(),
+            },
+        );
     }
 }
 
