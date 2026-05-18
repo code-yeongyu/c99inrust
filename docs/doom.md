@@ -49,7 +49,9 @@ specifiers such as `fixed_t`, `boolean`, `char`, and `unsigned short` as the
 current integer return ABI. Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-62 C files still fail before object generation. Evidence is recorded in
+but one of the 62 C files still fail before object generation. `m_swap.c`
+currently reaches assembly generation after parameter binding support. Evidence
+is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
 ## Playability Gate

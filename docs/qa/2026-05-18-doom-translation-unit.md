@@ -250,3 +250,69 @@ FAIL p_maputl.c
 The next high-value blocker is parameter binding plus ABI prologue stores.
 `m_swap.c` now reaches `SwapSHORT`'s body and fails because parameter `x` is not
 registered as a local yet.
+
+## Compile Scan After Parameter Binding Slice
+
+Function parameter names are now captured from supported signatures, registered
+as the first local slots, and initialized from the current integer ABI registers
+in each function prologue.
+
+Regression coverage added:
+
+```text
+compiler_binds_parameters_as_local_slots_on_aarch64
+compiler_binds_parameters_as_local_slots_on_x86_64
+parameter_binding_slice_matches_host_c_compiler_exit_code
+```
+
+Current compile scan:
+
+```text
+scan=/tmp/c99inrust-doom-compile-scan-after-parameter-binding.txt
+ok=1
+fail=61
+OK m_swap.c
+```
+
+Manual CLI QA was run inside tmux session `c99paramqa` with
+`target/debug/c99inrust`:
+
+```text
+tmux_session=c99paramqa
+argc_exit=1
+	str w0, [sp, #0]
+parameter_store=PASS
+manual_qa=PASS
+```
+
+Local Rust/slop gate for the parameter binding slice:
+
+```text
+fmt: PASS
+strict clippy: PASS, no warnings
+rust-programmer no-excuse: PASS for 5 changed files
+LSP diagnostics: PASS, 0 diagnostics
+cargo test --all-targets --all-features: PASS, 45 tests
+cargo nextest run --all-targets --all-features: PASS, 45 tests
+cargo machete: PASS
+cargo deny check: PASS
+cargo audit: PASS
+unsafe/miri: N/A; unsafe code is forbidden in Cargo.toml and src/lib.rs
+remove-ai-slops: PASS for this slice; no debug leftovers, warning suppressions,
+dead code, or needless behavior-changing cleanup found
+```
+
+Representative next blockers:
+
+```text
+FAIL m_fixed.c
+  error: 434:14: expected expression
+FAIL p_maputl.c
+  error: 5456:14: expected punctuator )
+FAIL r_sky.c
+  error: assignment to undeclared local: skytexturemid
+```
+
+The next high-value blockers are cast expressions, call arguments, and broader
+declarator parsing. `m_swap.c` is the first public Doom C translation unit to
+reach assembly generation in this workspace baseline.
