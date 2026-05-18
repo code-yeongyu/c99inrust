@@ -26,17 +26,18 @@ The native target is detected at compile time. On this workstation it is
 
 ## Doom Milestone Gap
 
-The preprocessor now handles the official `linuxdoom-1.10` source tree under the
-Linux build defines used by the upstream Makefile:
+The frontend now handles the official `linuxdoom-1.10` source tree through
+preprocessing, lexing, and surface parse-check under the Linux build defines used
+by the upstream Makefile:
 
 - `-D NORMALUNIX`
 - `-D LINUX`
 
-That proves include traversal, line splicing, conditional directives, and
-Doom-shaped macros across all 124 C/header files. Compiling official Doom still
-requires more than preprocessing:
+That proves include traversal, line splicing, comment removal before macro
+expansion, conditional directives, Doom-shaped macros, typedef/declaration
+surface recognition, and function-body boundary scanning across all 124 C/header
+files. Compiling official Doom still requires more than surface parsing:
 
-- declarations and declarators
 - typedef names
 - struct, union, and enum layout
 - pointers and arrays

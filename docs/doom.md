@@ -22,20 +22,21 @@ Expected today:
 - confirms the Makefile exists
 - reports that full Doom compilation is still a future milestone
 
-## Preprocessor Gate
+## Frontend Surface Gate
 
-The current compiler can preprocess all official `linuxdoom-1.10` C/header
-files with the upstream Linux build defines:
+The current compiler can preprocess, lex, and surface-parse all official
+`linuxdoom-1.10` C/header files with the upstream Linux build defines:
 
 ```bash
 doom=/path/to/DOOM/linuxdoom-1.10
 for file in "$doom"/*.[ch]; do
-  cargo run --quiet -- preprocess -D NORMALUNIX -D LINUX -I "$doom" "$file" >/tmp/doom.pp
+  cargo run --quiet -- parse-check -D NORMALUNIX -D LINUX -I "$doom" "$file"
 done
 ```
 
-This is a frontend milestone only. It does not parse, compile, link, or run
-Doom yet.
+This is a frontend milestone only. `parse-check` recognizes Doom-shaped
+top-level declarations and function-definition boundaries, but it does not type
+check, lower, compile, link, or run Doom yet.
 
 ## Playability Gate
 

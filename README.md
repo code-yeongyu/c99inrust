@@ -13,7 +13,7 @@ This repository currently ships the first verified vertical slice:
 | ------- | ------ |
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
 | Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
-| Parser | `int name(void) { return <constant-expression>; }` |
+| Parser | constant-return compile slice plus Doom-shaped surface declarations |
 | IR | checked constant evaluation |
 | Codegen | native macOS ARM64 assembly, plus modeled x86_64 Darwin/Linux assembly |
 | Doom | official source audit command and QA plan |
@@ -64,11 +64,11 @@ git clone https://github.com/id-Software/DOOM /tmp/DOOM
 cargo run -- doom-audit /tmp/DOOM
 ```
 
-Current Doom-facing evidence: the preprocessor can run across all 124 official
-`linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX` defined. The next
-compiler milestone is parsing that preprocessed C: typedefs, structs, enums,
-pointers, arrays, declarations, function calls, variadic declarations, and the
-Linux SysV ABI.
+Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
+124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX`
+defined. `parse-check` is a surface parser gate for top-level typedefs,
+declarations, prototypes, and function-definition boundaries; it is not yet full
+semantic C parsing or code generation.
 
 ## Development
 
