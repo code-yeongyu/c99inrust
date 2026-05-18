@@ -1123,6 +1123,31 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_lighttable_pointer_global_slice() {
+    // given
+    let source = r"typedef unsigned char byte;
+typedef byte lighttable_t;
+lighttable_t* dc_colormap;
+int main(void) {
+    dc_colormap = 0;
+    return dc_colormap ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("dc_colormap:"));
+    assert!(assembly.contains("\t.quad 0\n"));
+    assert!(assembly.contains("\tmovq %rax, dc_colormap(%rip)\n"));
+    assert!(assembly.contains("\tmovq dc_colormap(%rip), %rax\n"));
+}
+
+#[test]
 fn compiler_accepts_m_cheat_xlate_table_slice() {
     // given
     let source = r"static unsigned char cheat_xlate_table[256];

@@ -2753,7 +2753,7 @@ fn sizeof_type(tokens: &[Token]) -> Option<usize> {
 
 fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
     match name {
-        "boolean" | "byte" | "fixed_t" => Some(ScalarType::Int),
+        "boolean" | "byte" | "fixed_t" | "lighttable_t" => Some(ScalarType::Int),
         _ => None,
     }
 }
