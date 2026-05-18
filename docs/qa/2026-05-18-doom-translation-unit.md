@@ -1300,3 +1300,81 @@ static event_t st_notify = { ev_keyup, ((('a'<<24)+('m'<<16)) | ('e'<<8)) };
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Pointer Walk Expression Slice
+
+`compile -S` now accepts the pointer-walk expression forms used by the middle of
+`f_wipe.c`:
+
+```c
+short* dest;
+dest = (short*) Z_Malloc(width*height*2, 1, 0);
+if (*w != *e) { ... }
+while (ticks--) { ... }
+y = (int *) Z_Malloc(width*sizeof(int), 1, 0);
+s = &((short *)wipe_scr_end)[i*height+y[i]];
+```
+
+The implementation keeps this intentionally narrow: local `*` declarators lower
+as pointer locals, pointer casts lower through the existing cast path,
+dereference lowers as pointer subscript index zero, `sizeof(type)` folds to a
+constant, post-decrement parses through assignment expression machinery, and
+address-of-subscript lowers as pointer plus index.
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_pointer_declaration_slice
+local_pointer_declaration_matches_host_c_compiler_exit_code
+compiler_accepts_pointer_dereference_slice
+pointer_dereference_slice_matches_host_c_compiler_exit_code
+compiler_accepts_sizeof_type_slice
+sizeof_type_slice_matches_host_c_compiler_exit_code
+compiler_accepts_post_decrement_condition_slice
+post_decrement_condition_slice_matches_host_c_compiler_exit_code
+compiler_accepts_address_of_subscript_slice
+address_of_subscript_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/f_wipe.c \
+  -o /tmp/c99inrust-f_wipe.s
+error: 4486:5: expected expression
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779111285`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779111285.txt
+ok=9
+fail=53
+```
+
+Representative moved blocker:
+
+```text
+FAIL f_wipe.c
+  before pointer declaration slice: 4273:5: expected expression
+  after pointer declaration slice: 4314:6: expected expression
+  after sizeof/post--/address-of slice: 4486:5: expected expression
+```
+
+The next `f_wipe.c` blocker is a local static function-pointer array:
+
+```c
+static int (*wipes[])(int, int, int) =
+{
+    wipe_initColorXForm, wipe_doColorXForm, wipe_exitColorXForm,
+    wipe_initMelt, wipe_doMelt, wipe_exitMelt
+};
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

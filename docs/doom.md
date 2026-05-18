@@ -75,7 +75,10 @@ declarations such as `int dx, dy;` are accepted. Typed pointer parameters can
 now drive scalar member loads and stores through nested Doom typedef structs,
 covering the `AM_getIslope` shape `ml->a.y`, `ml->b.x`, and `is->islp`.
 Compound scalar assignments such as `m_x += m_w/2` and `m_x -= m_w/2` are also
-parsed and lowered through the existing assignment path.
+parsed and lowered through the existing assignment path. Local pointer
+declarators, pointer casts, unary pointer dereference, pointer post-decrement
+conditions, `sizeof(type)`, and address-of-subscript expressions are accepted
+for the `f_wipe.c` pointer-walk slice.
 Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
@@ -85,6 +88,8 @@ but nine of the 62 C files still fail before object generation. `doomdef.c`,
 The current `am_map.c` blocker is the local static aggregate declaration
 `static event_t st_notify = { ... }` in `AM_initVariables`, not the earlier
 `AM_getIslope` member expressions.
+The current `f_wipe.c` blocker is the local static function-pointer array
+`static int (*wipes[])(int, int, int) = { ... }`.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
