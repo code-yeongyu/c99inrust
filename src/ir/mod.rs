@@ -410,15 +410,57 @@ fn insert_global_binding(
     name: &str,
     binding: GlobalBinding,
 ) -> CompileResult<()> {
-    if let Some(existing) = bindings.get(name)
-        && *existing != binding
-    {
-        return Err(CompileError::new(format!(
-            "conflicting global declaration: {name}"
-        )));
+    if let Some(existing) = bindings.get(name) {
+        let Some(merged) = merge_global_binding(existing, &binding) else {
+            return Err(CompileError::new(format!(
+                "conflicting global declaration: {name}"
+            )));
+        };
+        bindings.insert(name.to_owned(), merged);
+        return Ok(());
     }
     bindings.insert(name.to_owned(), binding);
     Ok(())
+}
+
+fn merge_global_binding(
+    existing: &GlobalBinding,
+    incoming: &GlobalBinding,
+) -> Option<GlobalBinding> {
+    if existing == incoming {
+        return Some(existing.clone());
+    }
+    match (existing, incoming) {
+        (
+            GlobalBinding::StructArray {
+                struct_name,
+                byte_size,
+                length,
+            },
+            GlobalBinding::StructArray {
+                struct_name: incoming_name,
+                byte_size: incoming_byte_size,
+                length: incoming_length,
+            },
+        ) if struct_name == incoming_name && byte_size == incoming_byte_size => {
+            let merged_length = match (*length, *incoming_length) {
+                (Some(existing_length), Some(new_length)) if existing_length == new_length => {
+                    Some(existing_length)
+                }
+                (Some(existing_length), None) | (None, Some(existing_length)) => {
+                    Some(existing_length)
+                }
+                (None, None) => None,
+                (Some(_), Some(_)) => return None,
+            };
+            Some(GlobalBinding::StructArray {
+                struct_name: struct_name.clone(),
+                byte_size: *byte_size,
+                length: merged_length,
+            })
+        }
+        _ => None,
+    }
 }
 
 fn lower_constants(constants: &[Constant]) -> CompileResult<HashMap<String, i64>> {

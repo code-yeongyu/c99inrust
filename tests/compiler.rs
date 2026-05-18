@@ -1083,6 +1083,36 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_extern_struct_array_before_definition_slice() {
+    // given
+    let source = r"typedef struct {
+    int ammo;
+    int upstate;
+} weaponinfo_t;
+extern weaponinfo_t weaponinfo[NUMWEAPONS];
+weaponinfo_t weaponinfo[NUMWEAPONS] = {
+    { 1, 2 },
+    { 3, 4 },
+    { 5, 6 }
+};
+int main(void) {
+    return sizeof(weaponinfo);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert_eq!(assembly.matches("weaponinfo:\n").count(), 1);
+    assert!(assembly.contains("\t.zero 24\n"));
+    assert!(assembly.contains("\tmovl $24, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_multi_declarator_local_int_slice() {
     // given
     let source = "int main(void) { int dx, dy; dx = 40; dy = 2; return dx + dy; }";
