@@ -131,6 +131,38 @@ fn preprocessor_provides_doom_netinet_port_base() {
 }
 
 #[test]
+fn preprocessor_provides_doom_stdio_seek_constants() {
+    // given
+    let source = "#include <stdio.h>\nint end = SEEK_END;\nint set = SEEK_SET;\nint nil = NULL;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-stdio.c", source)
+        .expect("preprocessor should provide Doom-era stdio seek constants");
+
+    // then
+    assert!(unit.source.contains("#include <stdio.h>"));
+    assert!(unit.source.contains("int end = 2;"));
+    assert!(unit.source.contains("int set = 0;"));
+    assert!(unit.source.contains("int nil = 0;"));
+}
+
+#[test]
+fn preprocessor_provides_doom_unistd_access_constant() {
+    // given
+    let source = "#include <unistd.h>\nint readable = R_OK;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-unistd.c", source)
+        .expect("preprocessor should provide Doom-era unistd access constants");
+
+    // then
+    assert!(unit.source.contains("#include <unistd.h>"));
+    assert!(unit.source.contains("int readable = 4;"));
+}
+
+#[test]
 fn preprocessor_removes_comments_before_macro_expansion() {
     // given
     let source = "#define HU_FONTSTART '!'\t// the first font character\n#define HU_FONTSIZE ('_' - HU_FONTSTART + 1)\nextern int hu_font[HU_FONTSIZE];\n";

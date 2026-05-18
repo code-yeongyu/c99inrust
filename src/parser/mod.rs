@@ -65,6 +65,19 @@ pub enum GlobalInitializer {
     UnsignedCharArray(Vec<u8>),
 }
 
+impl GlobalInitializer {
+    const fn is_extern(&self) -> bool {
+        matches!(
+            self,
+            Self::Extern(_)
+                | Self::ExternPointer { .. }
+                | Self::ExternIntArray
+                | Self::ExternPointerArray
+                | Self::ExternStructArray { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
@@ -100,6 +113,8 @@ pub enum ScalarType {
     Pointer,
 }
 
+const POINTER_REFERENT: &str = "*";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Statement {
     Empty,
@@ -115,10 +130,20 @@ pub enum Statement {
         length: usize,
         initializer: Option<String>,
     },
+    LocalCharMatrix {
+        name: String,
+        rows: usize,
+        columns: usize,
+        initializer: Option<Vec<String>>,
+    },
     LocalIntArray {
         name: String,
         length: usize,
         initializer: Option<Vec<i32>>,
+    },
+    LocalPointerArray {
+        name: String,
+        length: usize,
     },
     LocalStruct {
         name: String,
@@ -126,6 +151,8 @@ pub enum Statement {
     },
     LocalConstants(Vec<Constant>),
     DeclarationList(Vec<Self>),
+    ExpressionList(Vec<Self>),
+    ExternGlobal(Global),
     Assignment {
         target: LValue,
         value: Expr,
@@ -535,6 +562,9 @@ impl Parser<'_> {
         if self.check_punctuator("{") {
             return Ok(Statement::Block(self.block_items()?));
         }
+        if let Some(statement) = self.block_extern_declaration()? {
+            return Ok(statement);
+        }
         if let Some(statement) = self.static_aggregate_declaration()? {
             return Ok(statement);
         }
@@ -622,13 +652,15 @@ impl Parser<'_> {
         let mut declarations = Vec::new();
         loop {
             let mut scalar_type = base_type;
+            let mut pointer_depth = 0usize;
             while self.check_punctuator("*") {
                 self.advance();
+                pointer_depth += 1;
                 scalar_type = ScalarType::Pointer;
             }
             let name = self.expect_identifier()?;
             let referent = if scalar_type == ScalarType::Pointer {
-                base_referent.clone()
+                pointer_referent_for_depth(pointer_depth, base_referent.as_deref())
             } else {
                 None
             };
@@ -671,11 +703,6 @@ impl Parser<'_> {
         scalar_type: ScalarType,
         name: String,
     ) -> CompileResult<Statement> {
-        if scalar_type != ScalarType::Int {
-            return Err(CompileError::new(
-                "only local int and char arrays are supported",
-            ));
-        }
         self.advance();
         let explicit_length = if self.check_punctuator("]") {
             None
@@ -683,6 +710,17 @@ impl Parser<'_> {
             Some(local_array_length(&self.expression()?)?)
         };
         self.expect_punctuator("]")?;
+        if scalar_type == ScalarType::Pointer {
+            return self.local_pointer_array_declaration(name, explicit_length);
+        }
+        if scalar_type != ScalarType::Int {
+            return Err(CompileError::new(
+                "only local int, char, and pointer arrays are supported",
+            ));
+        }
+        if type_includes_char && self.check_punctuator("[") {
+            return self.local_char_matrix_declaration(name, explicit_length);
+        }
         if type_includes_char {
             return self.local_char_array_declaration(name, explicit_length);
         }
@@ -725,6 +763,58 @@ impl Parser<'_> {
         })
     }
 
+    fn local_char_matrix_declaration(
+        &mut self,
+        name: String,
+        explicit_rows: Option<usize>,
+    ) -> CompileResult<Statement> {
+        let Some(rows) = explicit_rows else {
+            return Err(CompileError::new("local char matrix rows require a size"));
+        };
+        self.expect_punctuator("[")?;
+        let columns = local_array_length(&self.expression()?)?;
+        self.expect_punctuator("]")?;
+        let initializer = if self.check_punctuator("=") {
+            self.advance();
+            Some(self.local_string_list_initializer(columns)?)
+        } else {
+            None
+        };
+        Ok(Statement::LocalCharMatrix {
+            name,
+            rows,
+            columns,
+            initializer,
+        })
+    }
+
+    fn local_string_list_initializer(&mut self, columns: usize) -> CompileResult<Vec<String>> {
+        self.expect_punctuator("{")?;
+        let mut values = Vec::new();
+        if self.check_punctuator("}") {
+            self.advance();
+            return Ok(values);
+        }
+        loop {
+            let Expr::StringLiteral(value) = self.expression()? else {
+                return Err(CompileError::new(
+                    "local char matrix initializers require string literals",
+                ));
+            };
+            validate_local_char_array_initializer(&value, columns)?;
+            values.push(value);
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+            self.expect_punctuator(",")?;
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+        }
+    }
+
     fn local_int_array_declaration(
         &mut self,
         name: String,
@@ -761,6 +851,42 @@ impl Parser<'_> {
             length,
             initializer,
         })
+    }
+
+    fn local_pointer_array_declaration(
+        &self,
+        name: String,
+        explicit_length: Option<usize>,
+    ) -> CompileResult<Statement> {
+        if self.check_punctuator("=") {
+            return Err(CompileError::new(
+                "local pointer array initializers are not supported",
+            ));
+        }
+        let Some(length) = explicit_length else {
+            return Err(CompileError::new("local pointer arrays require a size"));
+        };
+        Ok(Statement::LocalPointerArray { name, length })
+    }
+
+    fn block_extern_declaration(&mut self) -> CompileResult<Option<Statement>> {
+        if !self.check_keyword(Keyword::Extern) {
+            return Ok(None);
+        }
+        let tokens = &self.tokens[self.index..];
+        let Some(semicolon_index) = top_level_punctuator_index(tokens, ";") else {
+            return Err(CompileError::new("unterminated extern declaration"));
+        };
+        let declaration = &tokens[..=semicolon_index];
+        let Some(global) = parse_supported_global_declaration(declaration, self.known_structs)?
+        else {
+            return Ok(None);
+        };
+        if !global.initializer.is_extern() {
+            return Ok(None);
+        }
+        self.index += semicolon_index + 1;
+        Ok(Some(Statement::ExternGlobal(global)))
     }
 
     fn local_struct_declaration(&mut self) -> CompileResult<Option<Statement>> {
@@ -971,7 +1097,9 @@ impl Parser<'_> {
         } else if let Some(scalar_type) = self.declaration_type_at_current() {
             Some(Box::new(self.declaration_statement(scalar_type)?))
         } else {
-            Some(Box::new(self.expression_statement(true)?))
+            let initializer = self.comma_expression_statement()?;
+            self.expect_punctuator(";")?;
+            Some(Box::new(initializer))
         };
         let condition = if self.check_punctuator(";") {
             None
@@ -982,7 +1110,7 @@ impl Parser<'_> {
         let post = if self.check_punctuator(")") {
             None
         } else {
-            Some(Box::new(self.expression_statement(false)?))
+            Some(Box::new(self.comma_expression_statement()?))
         };
         self.expect_punctuator(")")?;
         let body = Box::new(self.statement()?);
@@ -1059,6 +1187,19 @@ impl Parser<'_> {
             self.expect_punctuator(";")?;
         }
         Ok(statement_from_expression(expr))
+    }
+
+    fn comma_expression_statement(&mut self) -> CompileResult<Statement> {
+        let mut statements = vec![self.expression_statement(false)?];
+        while self.check_punctuator(",") {
+            self.advance();
+            statements.push(self.expression_statement(false)?);
+        }
+        if statements.len() == 1 {
+            Ok(statements.remove(0))
+        } else {
+            Ok(Statement::ExpressionList(statements))
+        }
     }
 
     fn expression(&mut self) -> CompileResult<Expr> {
@@ -1735,6 +1876,24 @@ fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
 }
 
 fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)))
+    {
+        return Some("char".to_owned());
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Int)))
+    {
+        return Some("int".to_owned());
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Void)))
+    {
+        return Some("void".to_owned());
+    }
     tokens
         .iter()
         .rev()
@@ -2651,17 +2810,18 @@ fn parse_global_int_declarator_list(
 }
 
 fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
-    let mut saw_unsigned = false;
     let mut saw_char = false;
     for token in tokens {
         match &token.kind {
-            TokenKind::Keyword(Keyword::Static | Keyword::Const | Keyword::Volatile) => {}
-            TokenKind::Keyword(Keyword::Unsigned) => saw_unsigned = true,
+            TokenKind::Keyword(
+                Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Unsigned,
+            ) => {}
             TokenKind::Keyword(Keyword::Char) => saw_char = true,
+            TokenKind::Identifier(name) if name == "byte" => saw_char = true,
             _ => return false,
         }
     }
-    saw_unsigned && saw_char
+    saw_char
 }
 
 fn global_specifiers_are_static_const_char(tokens: &[Token]) -> bool {
@@ -2713,15 +2873,31 @@ fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> b
 }
 
 fn pointer_referent_from_specifiers(tokens: &[Token]) -> Option<String> {
-    if !tokens.iter().any(|token| token_is_punctuator(token, "*")) {
+    let pointer_depth = tokens
+        .iter()
+        .filter(|token| token_is_punctuator(token, "*"))
+        .count();
+    if pointer_depth == 0 {
         return None;
     }
-    tokens
-        .iter()
-        .rev()
-        .find_map(token_identifier)
-        .filter(|name| supported_typedef_scalar(name).is_none())
-        .map(ToOwned::to_owned)
+    pointer_referent_for_depth(
+        pointer_depth,
+        declaration_base_referent_type(tokens).as_deref(),
+    )
+}
+
+fn pointer_referent_for_depth(pointer_depth: usize, base_referent: Option<&str>) -> Option<String> {
+    match pointer_depth {
+        0 => None,
+        1 => base_referent.map(ToOwned::to_owned),
+        depth => {
+            let mut referent = POINTER_REFERENT.repeat(depth - 1);
+            if let Some(base) = base_referent {
+                referent.push_str(base);
+            }
+            Some(referent)
+        }
+    }
 }
 
 fn global_struct_specifier_name(
@@ -3636,7 +3812,13 @@ fn sizeof_type(tokens: &[Token]) -> Option<usize> {
 
 fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
     match name {
-        "angle_t" | "boolean" | "byte" | "fixed_t" | "lighttable_t" => Some(ScalarType::Int),
+        "FILE" | "GameMission_t" | "GameMode_t" | "Language_t" | "ammotype_t" | "angle_t"
+        | "boolean" | "buttoncode_t" | "byte" | "card_t" | "cheat_t" | "command_t" | "evtype_t"
+        | "fixed_t" | "gameaction_t" | "gamestate_t" | "lighttable_t" | "mobjflag_t"
+        | "mobjtype_t" | "playerstate_t" | "powerduration_t" | "powertype_t" | "psprnum_t"
+        | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t" | "weapontype_t" => {
+            Some(ScalarType::Int)
+        }
         _ => None,
     }
 }

@@ -48,6 +48,7 @@ struct PointerSubscriptExpr<'a> {
     pointer: &'a LoweredExpr,
     index: &'a LoweredExpr,
     element_type: ScalarType,
+    element_byte_size: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -850,11 +851,13 @@ fn emit_aarch64_memory_expr(
             pointer,
             index,
             element_type,
+            element_byte_size,
         } => emit_aarch64_load_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
+                element_byte_size: *element_byte_size,
             },
             temporary_base,
             depth,
@@ -1345,11 +1348,19 @@ fn emit_aarch64_load_pointer_subscript(
         assembly,
     )?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tldrb w0, [x16, w0, sxtw]\n");
+    }
+    let Some(shift) = memory_scale_shift_for_byte_size(subscript.element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
     write_assembly!(
         assembly,
         "\tldr {}, [x16, w0, sxtw #{}]\n",
         aarch64_result_register(width),
-        memory_scale_shift(width)
+        shift
     )
 }
 
@@ -1448,11 +1459,13 @@ fn emit_aarch64_assign(
             pointer,
             index,
             element_type,
+            element_byte_size,
         } => emit_aarch64_store_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
+                element_byte_size: *element_byte_size,
             },
             value,
             temporary_base,
@@ -1612,11 +1625,19 @@ fn emit_aarch64_store_pointer_subscript(
     assembly.push_str("\tmov w17, w0\n");
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
     emit_aarch64_load_temporary(width, value_offset, assembly)?;
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tstrb w0, [x16, w17, sxtw]\n");
+    }
+    let Some(shift) = memory_scale_shift_for_byte_size(subscript.element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
     write_assembly!(
         assembly,
         "\tstr {}, [x16, w17, sxtw #{}]\n",
         aarch64_result_register(width),
-        memory_scale_shift(width)
+        shift
     )
 }
 
@@ -2157,11 +2178,13 @@ fn emit_x86_64_global_or_assignment_expr(
             pointer,
             index,
             element_type,
+            element_byte_size,
         } => emit_x86_64_load_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
+                element_byte_size: *element_byte_size,
             },
             temporary_base,
             depth,
@@ -2695,11 +2718,19 @@ fn emit_x86_64_load_pointer_subscript(
     )?;
     assembly.push_str("\tcltq\n");
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovzbl (%rcx,%rax,1), %eax\n");
+    }
+    let Some(scale) = memory_scale_bytes_for_byte_size(subscript.element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
     write_assembly!(
         assembly,
         "\tmov{} (%rcx,%rax,{}), {}\n",
         x86_64_instruction_suffix(width),
-        memory_scale_bytes(width),
+        scale,
         x86_64_result_register(width)
     )
 }
@@ -2887,11 +2918,13 @@ fn emit_x86_64_assign(
             pointer,
             index,
             element_type,
+            element_byte_size,
         } => emit_x86_64_store_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
+                element_byte_size: *element_byte_size,
             },
             value,
             temporary_base,
@@ -3071,12 +3104,20 @@ fn emit_x86_64_store_pointer_subscript(
     assembly.push_str("\tmovq %rax, %rdx\n");
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
     emit_x86_64_load_temporary(width, value_offset, assembly)?;
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovb %al, (%rcx,%rdx,1)\n");
+    }
+    let Some(scale) = memory_scale_bytes_for_byte_size(subscript.element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
     write_assembly!(
         assembly,
         "\tmov{} {}, (%rcx,%rdx,{})\n",
         x86_64_instruction_suffix(width),
         x86_64_result_register(width),
-        memory_scale_bytes(width)
+        scale
     )
 }
 
@@ -3858,13 +3899,6 @@ const fn width_bytes(width: ValueWidth) -> usize {
     }
 }
 
-const fn memory_scale_shift(width: ValueWidth) -> u8 {
-    match width {
-        ValueWidth::I32 => 2,
-        ValueWidth::I64 | ValueWidth::F64 => 3,
-    }
-}
-
 const fn memory_scale_shift_for_byte_size(byte_size: usize) -> Option<u8> {
     match byte_size {
         1 => Some(0),
@@ -3872,13 +3906,6 @@ const fn memory_scale_shift_for_byte_size(byte_size: usize) -> Option<u8> {
         4 => Some(2),
         8 => Some(3),
         _ => None,
-    }
-}
-
-const fn memory_scale_bytes(width: ValueWidth) -> u8 {
-    match width {
-        ValueWidth::I32 => 4,
-        ValueWidth::I64 | ValueWidth::F64 => 8,
     }
 }
 

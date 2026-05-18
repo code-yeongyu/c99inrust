@@ -516,6 +516,33 @@ fn compiler_emits_for_loop_back_edges() {
 }
 
 #[test]
+fn compiler_accepts_for_comma_expression_slice() {
+    // given
+    let source = r"int main(void) {
+    int index;
+    int k;
+    int total;
+    total = 0;
+    for (index = 0, k = 1; k < 4; index++, k++) {
+        total += index;
+    }
+    return total;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\taddl"));
+    assert!(assembly.contains("\tjmp .Lmain_"));
+}
+
+#[test]
 fn compiler_accepts_break_statement_slice() {
     // given
     let source = r"int main(void) {
@@ -569,6 +596,35 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_doom_enum_typedef_scalar_slice() {
+    // given
+    let source = r"typedef enum {
+    GS_LEVEL,
+    GS_DEMOSCREEN
+} gamestate_t;
+typedef enum {
+    sk_baby,
+    sk_nightmare
+} skill_t;
+int display(skill_t skill) {
+    static gamestate_t oldgamestate = -1;
+    return oldgamestate + skill;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("display:"));
+    assert!(assembly.contains("\tnegl %eax\n\tmovl %eax, -"));
+    assert!(assembly.contains("\taddl"));
+}
+
+#[test]
 fn compiler_accepts_local_int_array_sizeof_slice() {
     // given
     let source = r"int main(void) {
@@ -593,6 +649,58 @@ fn compiler_accepts_local_int_array_sizeof_slice() {
     assert!(assembly.contains("\tmovl $4, -8(%rbp)\n"));
     assert!(assembly.contains("\tmovl $7, -4(%rbp)\n"));
     assert!(assembly.contains("\tmovl $12, %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_local_pointer_array_slice() {
+    // given
+    let source = r#"void use(char* value);
+int main(void) {
+    char *moreargs[20];
+    moreargs[0] = "abc";
+    use(moreargs[0]);
+    return sizeof(moreargs);
+}"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\t.byte 97,98,99,0\n"));
+    assert!(assembly.contains("\tcall use\n"));
+    assert!(assembly.contains("\tmovl $160, %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_local_char_matrix_row_decay_slice() {
+    // given
+    let source = r#"void use(char* value);
+int main(void) {
+    char name[3][8] = {
+        "e2m1",
+        "dphoof",
+        "spida1"
+    };
+    int i = 1;
+    use(name[i]);
+    return sizeof(name);
+}"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovb $101,"));
+    assert!(assembly.contains("\tcall use\n"));
+    assert!(assembly.contains("\tmovl $24, %eax\n"));
 }
 
 #[test]
@@ -1157,6 +1265,29 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_global_char_array_decay_slice() {
+    // given
+    let source = r"char basedefault[1024];
+void use(char* value);
+int main(void) {
+    use(basedefault);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("basedefault:"));
+    assert!(assembly.contains("\t.byte 0"));
+    assert!(assembly.contains("\tleaq basedefault(%rip), %rax\n"));
+}
+
+#[test]
 fn compiler_accepts_mixed_pointer_scalar_local_declaration_slice() {
     // given
     let source = "int main(void) { unsigned char *p, c; p = 0; c = 7; return c; }";
@@ -1669,6 +1800,34 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_nested_extern_struct_array_address_slice() {
+    // given
+    let source = r"typedef struct {
+    int forwardmove;
+} ticcmd_t;
+extern ticcmd_t netcmds[MAXPLAYERS][BACKUPTICS];
+void build(ticcmd_t* cmd);
+int main(void) {
+    int player = 0;
+    int tic = 1;
+    build(&netcmds[player][tic]);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("netcmds:\n"));
+    assert!(assembly.contains("\tleaq netcmds(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall build\n"));
+}
+
+#[test]
 fn compiler_accepts_extern_int_array_slice() {
     // given
     let source = r"extern int playeringame[MAXPLAYERS];
@@ -1688,6 +1847,117 @@ int main(void) {
     assert!(!assembly.contains("playeringame:\n"));
     assert!(assembly.contains("\tleaq playeringame(%rip), %rcx\n"));
     assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_block_extern_int_array_slice() {
+    // given
+    let source = r"int main(void) {
+    extern int forwardmove[2];
+    int scale = 2;
+    forwardmove[0] = forwardmove[0] * scale;
+    return forwardmove[0];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("forwardmove:\n"));
+    assert!(assembly.contains("\tleaq forwardmove(%rip), %rcx\n"));
+    assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+}
+
+#[test]
+fn compiler_accepts_pointer_to_pointer_subscript_address_slice() {
+    // given
+    let source = r"extern char** myargv;
+void use(char* value);
+int main(void) {
+    int i = 0;
+    use(&myargv[i][1]);
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq myargv(%rip), %rax\n"));
+    assert!(assembly.contains("\tcall use\n"));
+}
+
+#[test]
+fn compiler_emits_byte_access_for_char_pointer_dereference_slice() {
+    // given
+    let source = r#"int main(void) {
+    char* infile;
+    int k;
+    infile = "az";
+    k = 1;
+    *(infile+k) = 0;
+    return *(infile+k);
+}"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovb %al, (%rcx,%rdx,1)\n"));
+    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+}
+
+#[test]
+fn compiler_emits_byte_access_for_char_pointer_nested_subscript_slice() {
+    // given
+    let source = r"extern char** myargv;
+int main(void) {
+    return myargv[1][0];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovq myargv(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_opaque_file_pointer_local_slice() {
+    // given
+    let source = r"int main(void) {
+    FILE* handle;
+    handle = 0;
+    return handle == 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovq %rax, -8(%rbp)\n"));
 }
 
 #[test]

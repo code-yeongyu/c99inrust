@@ -6,6 +6,8 @@ use crate::parser::{
     ReturnType, ScalarType, Statement, StructLayout, SwitchCase, UnaryOp,
 };
 
+const POINTER_REFERENT: &str = "*";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredProgram {
     pub globals: Vec<LoweredGlobal>,
@@ -111,6 +113,7 @@ pub enum LoweredExpr {
         pointer: Box<Self>,
         index: Box<Self>,
         element_type: ScalarType,
+        element_byte_size: usize,
     },
     PointerOffset {
         pointer: Box<Self>,
@@ -188,6 +191,7 @@ pub enum LoweredLValue {
         pointer: Box<LoweredExpr>,
         index: Box<LoweredExpr>,
         element_type: ScalarType,
+        element_byte_size: usize,
     },
     PointerField {
         pointer: Box<LoweredExpr>,
@@ -621,7 +625,16 @@ enum LocalBinding {
         slot: usize,
         length: usize,
     },
+    CharMatrix {
+        slot: usize,
+        rows: usize,
+        columns: usize,
+    },
     IntArray {
+        slot: usize,
+        length: usize,
+    },
+    PointerArray {
         slot: usize,
         length: usize,
     },
@@ -751,11 +764,20 @@ impl LoweringContext {
                 length,
                 initializer,
             } => self.lower_local_char_array(name, *length, initializer.as_deref()),
+            Statement::LocalCharMatrix {
+                name,
+                rows,
+                columns,
+                initializer,
+            } => self.lower_local_char_matrix(name, *rows, *columns, initializer.as_deref()),
             Statement::LocalIntArray {
                 name,
                 length,
                 initializer,
             } => self.lower_local_int_array(name, *length, initializer.as_deref()),
+            Statement::LocalPointerArray { name, length } => {
+                self.lower_local_pointer_array(name, *length)
+            }
             Statement::LocalStruct { name, struct_name } => {
                 self.lower_local_struct_object(name, struct_name)
             }
@@ -765,12 +787,10 @@ impl LoweringContext {
                 }
                 Ok(())
             }
-            Statement::DeclarationList(declarations) => {
-                for declaration in declarations {
-                    self.lower_statement(declaration)?;
-                }
-                Ok(())
+            Statement::DeclarationList(declarations) | Statement::ExpressionList(declarations) => {
+                self.lower_statement_list(declarations)
             }
+            Statement::ExternGlobal(global) => self.lower_extern_global(global),
             Statement::Assignment { target, value } => self.lower_assignment(target, value),
             Statement::If {
                 condition,
@@ -798,45 +818,60 @@ impl LoweringContext {
             Statement::Expression(Expr::PostIncrement { target }) => {
                 self.lower_post_increment_statement(target)
             }
-            Statement::Expression(expr) => {
-                let expr = self.lower_expr(expr)?;
-                self.instructions.push(Instruction::Eval(expr));
-                Ok(())
+            Statement::Expression(expr) => self.lower_expression_statement(expr),
+            Statement::Break => self.lower_break(),
+            Statement::Continue => self.lower_continue(),
+            Statement::Return(expr) => self.lower_return(expr.as_ref()),
+        }
+    }
+
+    fn lower_statement_list(&mut self, statements: &[Statement]) -> CompileResult<()> {
+        for statement in statements {
+            self.lower_statement(statement)?;
+        }
+        Ok(())
+    }
+
+    fn lower_expression_statement(&mut self, expr: &Expr) -> CompileResult<()> {
+        let expr = self.lower_expr(expr)?;
+        self.instructions.push(Instruction::Eval(expr));
+        Ok(())
+    }
+
+    fn lower_break(&mut self) -> CompileResult<()> {
+        let Some(label) = self.break_labels.last() else {
+            return Err(CompileError::new("break statement outside loop"));
+        };
+        self.instructions.push(Instruction::Jump { label: *label });
+        Ok(())
+    }
+
+    fn lower_continue(&mut self) -> CompileResult<()> {
+        let Some(label) = self.continue_labels.last() else {
+            return Err(CompileError::new("continue statement outside loop"));
+        };
+        self.instructions.push(Instruction::Jump { label: *label });
+        Ok(())
+    }
+
+    fn lower_return(&mut self, expr: Option<&Expr>) -> CompileResult<()> {
+        match (self.return_type, expr) {
+            (ReturnType::Int, Some(expr)) => {
+                let value = self.lower_expr(expr)?;
+                self.instructions.push(Instruction::Return(Some(value)));
             }
-            Statement::Break => {
-                let Some(label) = self.break_labels.last() else {
-                    return Err(CompileError::new("break statement outside loop"));
-                };
-                self.instructions.push(Instruction::Jump { label: *label });
-                Ok(())
+            (ReturnType::Int, None) => {
+                return Err(CompileError::new("int function must return a value"));
             }
-            Statement::Continue => {
-                let Some(label) = self.continue_labels.last() else {
-                    return Err(CompileError::new("continue statement outside loop"));
-                };
-                self.instructions.push(Instruction::Jump { label: *label });
-                Ok(())
+            (ReturnType::Void, Some(_)) => {
+                return Err(CompileError::new("void function cannot return a value"));
             }
-            Statement::Return(expr) => {
-                match (self.return_type, expr) {
-                    (ReturnType::Int, Some(expr)) => {
-                        let value = self.lower_expr(expr)?;
-                        self.instructions.push(Instruction::Return(Some(value)));
-                    }
-                    (ReturnType::Int, None) => {
-                        return Err(CompileError::new("int function must return a value"));
-                    }
-                    (ReturnType::Void, Some(_)) => {
-                        return Err(CompileError::new("void function cannot return a value"));
-                    }
-                    (ReturnType::Void, None) => {
-                        self.instructions.push(Instruction::Return(None));
-                    }
-                }
-                self.has_return = true;
-                Ok(())
+            (ReturnType::Void, None) => {
+                self.instructions.push(Instruction::Return(None));
             }
         }
+        self.has_return = true;
+        Ok(())
     }
 
     fn lower_declaration(
@@ -876,6 +911,23 @@ impl LoweringContext {
         Ok(())
     }
 
+    fn lower_local_char_matrix(
+        &mut self,
+        name: &str,
+        rows: usize,
+        columns: usize,
+        initializer: Option<&[String]>,
+    ) -> CompileResult<()> {
+        let slot = self.declare_char_matrix(name, rows, columns)?;
+        if let Some(values) = initializer {
+            self.instructions.push(Instruction::InitLocalBytes {
+                offset: self.local_offset(slot)?,
+                values: local_char_matrix_initializer_values(values, rows, columns)?,
+            });
+        }
+        Ok(())
+    }
+
     fn lower_local_int_array(
         &mut self,
         name: &str,
@@ -890,6 +942,19 @@ impl LoweringContext {
             });
         }
         Ok(())
+    }
+
+    fn lower_local_pointer_array(&mut self, name: &str, length: usize) -> CompileResult<()> {
+        self.declare_pointer_array(name, length).map(|_| ())
+    }
+
+    fn lower_extern_global(&mut self, global: &Global) -> CompileResult<()> {
+        let Some(binding) = lower_extern_global_binding(&global.initializer, &self.structs)? else {
+            return Err(CompileError::new(
+                "internal error: non-extern block global declaration",
+            ));
+        };
+        insert_global_binding(&mut self.global_bindings, &global.name, binding)
     }
 
     fn lower_local_struct_object(&mut self, name: &str, struct_name: &str) -> CompileResult<()> {
@@ -1110,6 +1175,26 @@ impl LoweringContext {
         )
     }
 
+    fn declare_char_matrix(
+        &mut self,
+        name: &str,
+        rows: usize,
+        columns: usize,
+    ) -> CompileResult<usize> {
+        let byte_size = local_char_matrix_byte_size(rows, columns)?;
+        self.declare_slot(
+            name,
+            ScalarType::Int,
+            byte_size,
+            1,
+            LocalBinding::CharMatrix {
+                slot: self.local_slots.len(),
+                rows,
+                columns,
+            },
+        )
+    }
+
     fn declare_int_array(&mut self, name: &str, length: usize) -> CompileResult<usize> {
         let byte_size = local_int_array_byte_size(length)?;
         self.declare_slot(
@@ -1118,6 +1203,20 @@ impl LoweringContext {
             byte_size,
             scalar_size(ScalarType::Int),
             LocalBinding::IntArray {
+                slot: self.local_slots.len(),
+                length,
+            },
+        )
+    }
+
+    fn declare_pointer_array(&mut self, name: &str, length: usize) -> CompileResult<usize> {
+        let byte_size = local_pointer_array_byte_size(length)?;
+        self.declare_slot(
+            name,
+            ScalarType::Pointer,
+            byte_size,
+            scalar_size(ScalarType::Pointer),
+            LocalBinding::PointerArray {
                 slot: self.local_slots.len(),
                 length,
             },
@@ -1205,62 +1304,8 @@ impl LoweringContext {
 
     fn lower_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
         match expr {
-            Expr::Call { callee, args } => Ok(LoweredExpr::Call {
-                callee: callee.clone(),
-                args: args
-                    .iter()
-                    .map(|arg| self.lower_expr(arg))
-                    .collect::<CompileResult<Vec<_>>>()?,
-            }),
-            Expr::Identifier(name) => {
-                if let Some(binding) = self.local_binding(name) {
-                    return match binding {
-                        LocalBinding::Scalar {
-                            slot, scalar_type, ..
-                        } => Ok(LoweredExpr::Local {
-                            offset: self.local_offset(slot)?,
-                            scalar_type,
-                        }),
-                        LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
-                            offset: self.local_offset(slot)?,
-                            byte_size: length,
-                        }),
-                        LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
-                            offset: self.local_offset(slot)?,
-                            byte_size: local_int_array_byte_size(length)?,
-                        }),
-                        LocalBinding::StructObject {
-                            slot, byte_size, ..
-                        } => Ok(LoweredExpr::LocalAddress {
-                            offset: self.local_offset(slot)?,
-                            byte_size,
-                        }),
-                    };
-                }
-                if let Some(scalar_type) = self
-                    .global_bindings
-                    .get(name)
-                    .and_then(GlobalBinding::scalar_type)
-                {
-                    return Ok(LoweredExpr::Global {
-                        name: name.clone(),
-                        scalar_type,
-                    });
-                }
-                if self
-                    .global_bindings
-                    .get(name)
-                    .is_some_and(GlobalBinding::is_addressable_array)
-                {
-                    return Ok(LoweredExpr::GlobalAddress { name: name.clone() });
-                }
-                if let Some(value) = self.constants.get(name) {
-                    return Ok(LoweredExpr::Integer(*value));
-                }
-                Err(CompileError::new(format!(
-                    "unknown local or global: {name}"
-                )))
-            }
+            Expr::Call { callee, args } => self.lower_call_expr(callee, args),
+            Expr::Identifier(name) => self.lower_identifier_expr(name),
             Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
             Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
@@ -1273,13 +1318,7 @@ impl LoweringContext {
             Expr::Dereference { pointer } => self.lower_subscript(pointer, &Expr::Integer(0)),
             Expr::AddressOf { target } => self.lower_address_of(target),
             Expr::Subscript { array, index } => self.lower_subscript(array, index),
-            Expr::Assignment { target, value } => {
-                let target = self.lower_lvalue(target)?;
-                Ok(LoweredExpr::Assign {
-                    target,
-                    value: Box::new(self.lower_expr(value)?),
-                })
-            }
+            Expr::Assignment { target, value } => self.lower_assignment_expr(target, value),
             Expr::PostIncrement { target } => self.lower_post_increment_expr(target),
             Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
                 op: *op,
@@ -1293,17 +1332,121 @@ impl LoweringContext {
                 condition,
                 then_expr,
                 else_expr,
-            } => Ok(LoweredExpr::Conditional {
-                condition: Box::new(self.lower_expr(condition)?),
-                then_expr: Box::new(self.lower_expr(then_expr)?),
-                else_expr: Box::new(self.lower_expr(else_expr)?),
+            } => self.lower_conditional_expr(condition, then_expr, else_expr),
+            Expr::Binary { op, left, right } => self.lower_binary_expr(*op, left, right),
+        }
+    }
+
+    fn lower_call_expr(&self, callee: &str, args: &[Expr]) -> CompileResult<LoweredExpr> {
+        Ok(LoweredExpr::Call {
+            callee: callee.to_owned(),
+            args: args
+                .iter()
+                .map(|arg| self.lower_expr(arg))
+                .collect::<CompileResult<Vec<_>>>()?,
+        })
+    }
+
+    fn lower_identifier_expr(&self, name: &str) -> CompileResult<LoweredExpr> {
+        if let Some(binding) = self.local_binding(name) {
+            return self.lower_local_identifier_expr(&binding);
+        }
+        if let Some(scalar_type) = self
+            .global_bindings
+            .get(name)
+            .and_then(GlobalBinding::scalar_type)
+        {
+            return Ok(LoweredExpr::Global {
+                name: name.to_owned(),
+                scalar_type,
+            });
+        }
+        if self
+            .global_bindings
+            .get(name)
+            .is_some_and(GlobalBinding::is_addressable_array)
+        {
+            return Ok(LoweredExpr::GlobalAddress {
+                name: name.to_owned(),
+            });
+        }
+        if let Some(value) = self.constants.get(name) {
+            return Ok(LoweredExpr::Integer(*value));
+        }
+        Err(CompileError::new(format!(
+            "unknown local or global: {name}"
+        )))
+    }
+
+    fn lower_local_identifier_expr(&self, binding: &LocalBinding) -> CompileResult<LoweredExpr> {
+        match binding {
+            LocalBinding::Scalar {
+                slot, scalar_type, ..
+            } => Ok(LoweredExpr::Local {
+                offset: self.local_offset(*slot)?,
+                scalar_type: *scalar_type,
             }),
-            Expr::Binary { op, left, right } => Ok(LoweredExpr::Binary {
-                op: *op,
-                left: Box::new(self.lower_expr(left)?),
-                right: Box::new(self.lower_expr(right)?),
+            LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: *length,
+            }),
+            LocalBinding::CharMatrix {
+                slot,
+                rows,
+                columns,
+            } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: local_char_matrix_byte_size(*rows, *columns)?,
+            }),
+            LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: local_int_array_byte_size(*length)?,
+            }),
+            LocalBinding::PointerArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: local_pointer_array_byte_size(*length)?,
+            }),
+            LocalBinding::StructObject {
+                slot, byte_size, ..
+            } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: *byte_size,
             }),
         }
+    }
+
+    fn lower_assignment_expr(&self, target: &LValue, value: &Expr) -> CompileResult<LoweredExpr> {
+        let target = self.lower_lvalue(target)?;
+        Ok(LoweredExpr::Assign {
+            target,
+            value: Box::new(self.lower_expr(value)?),
+        })
+    }
+
+    fn lower_conditional_expr(
+        &self,
+        condition: &Expr,
+        then_expr: &Expr,
+        else_expr: &Expr,
+    ) -> CompileResult<LoweredExpr> {
+        Ok(LoweredExpr::Conditional {
+            condition: Box::new(self.lower_expr(condition)?),
+            then_expr: Box::new(self.lower_expr(then_expr)?),
+            else_expr: Box::new(self.lower_expr(else_expr)?),
+        })
+    }
+
+    fn lower_binary_expr(
+        &self,
+        op: BinaryOp,
+        left: &Expr,
+        right: &Expr,
+    ) -> CompileResult<LoweredExpr> {
+        Ok(LoweredExpr::Binary {
+            op,
+            left: Box::new(self.lower_expr(left)?),
+            right: Box::new(self.lower_expr(right)?),
+        })
     }
 
     fn lower_assignment(&mut self, target: &LValue, value: &Expr) -> CompileResult<()> {
@@ -1333,9 +1476,14 @@ impl LoweringContext {
                             offset: self.local_offset(slot)?,
                             scalar_type,
                         }),
-                        LocalBinding::CharArray { .. } | LocalBinding::IntArray { .. } => Err(
-                            CompileError::new("assignment to local array is not supported"),
-                        ),
+                        LocalBinding::CharArray { .. }
+                        | LocalBinding::CharMatrix { .. }
+                        | LocalBinding::IntArray { .. } => Err(CompileError::new(
+                            "assignment to local array is not supported",
+                        )),
+                        LocalBinding::PointerArray { .. } => Err(CompileError::new(
+                            "assignment to local pointer array is not supported",
+                        )),
                         LocalBinding::StructObject { .. } => Err(CompileError::new(
                             "direct assignment to local struct object is not supported",
                         )),
@@ -1413,7 +1561,11 @@ impl LoweringContext {
             let size = match binding {
                 LocalBinding::Scalar { scalar_type, .. } => scalar_size(scalar_type),
                 LocalBinding::CharArray { length, .. } => length,
+                LocalBinding::CharMatrix { rows, columns, .. } => {
+                    local_char_matrix_byte_size(rows, columns)?
+                }
                 LocalBinding::IntArray { length, .. } => local_int_array_byte_size(length)?,
+                LocalBinding::PointerArray { length, .. } => local_pointer_array_byte_size(length)?,
                 LocalBinding::StructObject { byte_size, .. } => byte_size,
             };
             return i64::try_from(size)
@@ -1466,24 +1618,45 @@ impl LoweringContext {
                 index: Box::new(self.lower_expr(index)?),
             });
         }
-        if let Some((pointer, element_type)) = self.resolve_array_field_subscript(array)? {
+        if let Some((pointer, element_type, element_byte_size)) =
+            self.resolve_array_field_subscript(array)?
+        {
             return Ok(LoweredExpr::PointerSubscript {
                 pointer: Box::new(pointer),
                 index: Box::new(self.lower_expr(index)?),
                 element_type,
+                element_byte_size,
+            });
+        }
+        if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
+            return Ok(address.pointer);
+        }
+        if let Some(pointer) = self.resolve_local_char_matrix_row(array, index)? {
+            return Ok(pointer);
+        }
+        if let Some(pointer) = self.resolve_local_pointer_array(array)? {
+            return Ok(LoweredExpr::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                element_type: ScalarType::Pointer,
+                element_byte_size: scalar_size(ScalarType::Pointer),
             });
         }
 
         let pointer = self.lower_expr(array)?;
-        if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
+        if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer)
+            && self.pointer_referent_for_expr(array).is_err()
+        {
             return Err(CompileError::new(
                 "only pointer and global byte-array subscripts are supported",
             ));
         }
+        let (element_type, element_byte_size) = self.pointer_subscript_layout(array);
         Ok(LoweredExpr::PointerSubscript {
             pointer: Box::new(pointer),
             index: Box::new(self.lower_expr(index)?),
-            element_type: ScalarType::Int,
+            element_type,
+            element_byte_size,
         })
     }
 
@@ -1512,25 +1685,61 @@ impl LoweringContext {
                 index: Box::new(self.lower_expr(index)?),
             });
         }
-        if let Some((pointer, element_type)) = self.resolve_array_field_subscript(array)? {
+        if let Some((pointer, element_type, element_byte_size)) =
+            self.resolve_array_field_subscript(array)?
+        {
             return Ok(LoweredLValue::PointerSubscript {
                 pointer: Box::new(pointer),
                 index: Box::new(self.lower_expr(index)?),
                 element_type,
+                element_byte_size,
+            });
+        }
+        if let Some(pointer) = self.resolve_local_pointer_array(array)? {
+            return Ok(LoweredLValue::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                element_type: ScalarType::Pointer,
+                element_byte_size: scalar_size(ScalarType::Pointer),
             });
         }
 
         let pointer = self.lower_expr(array)?;
-        if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer) {
+        if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer)
+            && self.pointer_referent_for_expr(array).is_err()
+        {
             return Err(CompileError::new(
                 "assignment to non-pointer subscript targets is not supported",
             ));
         }
+        let (element_type, element_byte_size) = self.pointer_subscript_layout(array);
         Ok(LoweredLValue::PointerSubscript {
             pointer: Box::new(pointer),
             index: Box::new(self.lower_expr(index)?),
-            element_type: ScalarType::Int,
+            element_type,
+            element_byte_size,
         })
+    }
+
+    fn pointer_subscript_layout(&self, array: &Expr) -> (ScalarType, usize) {
+        let element_type = self.pointer_subscript_element_type(array);
+        let element_byte_size = self
+            .pointer_referent_for_expr(array)
+            .ok()
+            .and_then(|referent| pointer_referent_byte_size(&referent))
+            .unwrap_or_else(|| scalar_size(element_type));
+        (element_type, element_byte_size)
+    }
+
+    fn pointer_subscript_element_type(&self, array: &Expr) -> ScalarType {
+        if self
+            .pointer_referent_for_expr(array)
+            .is_ok_and(|referent| pointer_referent_is_pointer(&referent))
+        {
+            ScalarType::Pointer
+        } else {
+            ScalarType::Int
+        }
     }
 
     fn lower_address_of(&self, target: &LValue) -> CompileResult<LoweredExpr> {
@@ -1575,6 +1784,18 @@ impl LoweringContext {
                     LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
                         offset: self.local_offset(slot)?,
                         byte_size: local_int_array_byte_size(length)?,
+                    }),
+                    LocalBinding::CharMatrix {
+                        slot,
+                        rows,
+                        columns,
+                    } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size: local_char_matrix_byte_size(rows, columns)?,
+                    }),
+                    LocalBinding::PointerArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size: local_pointer_array_byte_size(length)?,
                     }),
                     LocalBinding::StructObject {
                         slot, byte_size, ..
@@ -1693,7 +1914,7 @@ impl LoweringContext {
     fn resolve_array_field_subscript(
         &self,
         array: &Expr,
-    ) -> CompileResult<Option<(LoweredExpr, ScalarType)>> {
+    ) -> CompileResult<Option<(LoweredExpr, ScalarType, usize)>> {
         let Expr::Member {
             base,
             field,
@@ -1709,7 +1930,47 @@ impl LoweringContext {
         Ok(Some((
             pointer_field_address(member.pointer, member.offset),
             element_type,
+            scalar_size(element_type),
         )))
+    }
+
+    fn resolve_local_pointer_array(&self, array: &Expr) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(LocalBinding::PointerArray { slot, length }) = self.local_binding(name) else {
+            return Ok(None);
+        };
+        Ok(Some(LoweredExpr::LocalAddress {
+            offset: self.local_offset(slot)?,
+            byte_size: local_pointer_array_byte_size(length)?,
+        }))
+    }
+
+    fn resolve_local_char_matrix_row(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(LocalBinding::CharMatrix {
+            slot,
+            rows,
+            columns,
+        }) = self.local_binding(name)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(LoweredExpr::PointerOffset {
+            pointer: Box::new(LoweredExpr::LocalAddress {
+                offset: self.local_offset(slot)?,
+                byte_size: local_char_matrix_byte_size(rows, columns)?,
+            }),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size: columns,
+        }))
     }
 
     fn resolve_struct_address(&self, expr: &Expr) -> CompileResult<StructAddress> {
@@ -1849,6 +2110,24 @@ impl LoweringContext {
         } = expr
         {
             return Ok(referent.clone());
+        }
+        if let Expr::Subscript { array, .. } = expr {
+            let referent = self.pointer_referent_for_expr(array)?;
+            if let Some(nested) = referent.strip_prefix(POINTER_REFERENT)
+                && !nested.is_empty()
+            {
+                return Ok(nested.to_owned());
+            }
+        }
+        if let Expr::Binary { op, left, right } = expr {
+            if *op == BinaryOp::Add {
+                return self
+                    .pointer_referent_for_expr(left)
+                    .or_else(|_error| self.pointer_referent_for_expr(right));
+            }
+            if *op == BinaryOp::Sub {
+                return self.pointer_referent_for_expr(left);
+            }
         }
         Err(CompileError::new(
             "pointer member access requires a typed pointer",
@@ -2094,10 +2373,12 @@ fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
             pointer,
             index,
             element_type,
+            element_byte_size,
         } => LoweredExpr::PointerSubscript {
             pointer: pointer.clone(),
             index: index.clone(),
             element_type: *element_type,
+            element_byte_size: *element_byte_size,
         },
         LoweredLValue::PointerField {
             pointer,
@@ -2156,10 +2437,39 @@ fn local_char_array_initializer_values(value: &str, length: usize) -> CompileRes
     Ok(values)
 }
 
+fn local_char_matrix_initializer_values(
+    values: &[String],
+    rows: usize,
+    columns: usize,
+) -> CompileResult<Vec<u8>> {
+    if values.len() > rows {
+        return Err(CompileError::new(
+            "local char matrix initializer has too many rows",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(local_char_matrix_byte_size(rows, columns)?);
+    for value in values {
+        bytes.extend(local_char_array_initializer_values(value, columns)?);
+    }
+    bytes.resize(local_char_matrix_byte_size(rows, columns)?, 0);
+    Ok(bytes)
+}
+
+fn local_char_matrix_byte_size(rows: usize, columns: usize) -> CompileResult<usize> {
+    rows.checked_mul(columns)
+        .ok_or_else(|| CompileError::new("local char matrix size overflow"))
+}
+
 fn local_int_array_byte_size(length: usize) -> CompileResult<usize> {
     length
         .checked_mul(scalar_size(ScalarType::Int))
         .ok_or_else(|| CompileError::new("local int array size overflow"))
+}
+
+fn local_pointer_array_byte_size(length: usize) -> CompileResult<usize> {
+    length
+        .checked_mul(scalar_size(ScalarType::Pointer))
+        .ok_or_else(|| CompileError::new("local pointer array size overflow"))
 }
 
 fn struct_alignment(layout: &StructLayout) -> usize {
@@ -2171,6 +2481,22 @@ const fn scalar_size(scalar_type: ScalarType) -> usize {
         ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
     }
+}
+
+fn pointer_referent_byte_size(referent: &str) -> Option<usize> {
+    if pointer_referent_is_pointer(referent) {
+        Some(scalar_size(ScalarType::Pointer))
+    } else if matches!(referent, "byte" | "char") {
+        Some(1)
+    } else if referent == "int" {
+        Some(scalar_size(ScalarType::Int))
+    } else {
+        None
+    }
+}
+
+fn pointer_referent_is_pointer(referent: &str) -> bool {
+    referent.starts_with(POINTER_REFERENT)
 }
 
 const fn align_to(value: usize, alignment: usize) -> usize {

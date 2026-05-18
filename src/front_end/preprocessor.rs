@@ -255,6 +255,14 @@ fn define_builtin_system_macros(include_path: &str, macros: &mut HashMap<String,
             ("MINLONG", "(-2147483647 - 1)"),
         ][..],
         "netinet/in.h" => &[("IPPORT_USERRESERVED", "5000")][..],
+        "stddef.h" | "stdlib.h" => &[("NULL", "0")][..],
+        "stdio.h" => &[
+            ("NULL", "0"),
+            ("SEEK_SET", "0"),
+            ("SEEK_CUR", "1"),
+            ("SEEK_END", "2"),
+        ][..],
+        "unistd.h" => &[("R_OK", "4")][..],
         _ => return,
     };
     for (name, replacement) in definitions {
