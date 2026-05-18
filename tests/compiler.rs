@@ -682,6 +682,25 @@ fn compiler_accepts_multi_declarator_local_int_slice() {
 }
 
 #[test]
+fn compiler_accepts_mixed_pointer_scalar_local_declaration_slice() {
+    // given
+    let source = "int main(void) { unsigned char *p, c; p = 0; c = 7; return c; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovq %rax, -"));
+    assert!(assembly.contains("\tmovl %eax, -"));
+    assert!(assembly.contains("\tmovl $7, %eax\n"));
+}
+
+#[test]
 fn compiler_emits_void_functions_with_value_less_return() {
     // given
     let source = "void tick(void) { return; } int main(void) { return 42; }";

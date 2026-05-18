@@ -959,25 +959,71 @@ impl Parser<'_> {
     }
 
     fn declaration_type_at_current(&self) -> Option<ScalarType> {
-        match self.peek().map(|token| &token.kind) {
-            Some(TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short)) => {
-                Some(ScalarType::Int)
-            }
-            Some(TokenKind::Keyword(Keyword::Double)) => Some(ScalarType::Double),
-            Some(TokenKind::Identifier(name)) => supported_typedef_scalar(name),
-            _ => None,
-        }
+        self.declaration_type_span_at_current()
+            .map(|(scalar_type, _end)| scalar_type)
     }
 
     fn consume_declaration_type(&mut self, expected: ScalarType) -> CompileResult<()> {
-        let Some(actual) = self.declaration_type_at_current() else {
+        let Some((actual, end)) = self.declaration_type_span_at_current() else {
             return self.expected("declaration type");
         };
         if actual != expected {
             return Err(CompileError::new("unexpected declaration type"));
         }
-        self.advance();
+        self.index = end;
         Ok(())
+    }
+
+    fn declaration_type_span_at_current(&self) -> Option<(ScalarType, usize)> {
+        let mut index = self.index;
+        let mut saw_type = false;
+        let mut saw_double = false;
+        let mut long_count = 0usize;
+        while let Some(token) = self.tokens.get(index) {
+            match &token.kind {
+                TokenKind::Keyword(
+                    Keyword::Const
+                    | Keyword::Register
+                    | Keyword::Restrict
+                    | Keyword::Signed
+                    | Keyword::Unsigned
+                    | Keyword::Volatile,
+                ) => {}
+                TokenKind::Keyword(Keyword::Char | Keyword::Int | Keyword::Short) => {
+                    saw_type = true;
+                }
+                TokenKind::Keyword(Keyword::Double) => {
+                    saw_type = true;
+                    saw_double = true;
+                }
+                TokenKind::Keyword(Keyword::Long) => {
+                    saw_type = true;
+                    long_count += 1;
+                }
+                TokenKind::Identifier(name) => {
+                    if saw_type {
+                        break;
+                    }
+                    let scalar_type = supported_typedef_scalar(name)?;
+                    if scalar_type != ScalarType::Int {
+                        return None;
+                    }
+                    saw_type = true;
+                }
+                _ => break,
+            }
+            index += 1;
+        }
+        if !saw_type {
+            return None;
+        }
+        if saw_double && long_count == 0 {
+            Some((ScalarType::Double, index))
+        } else if long_count == 0 {
+            Some((ScalarType::Int, index))
+        } else {
+            Some((ScalarType::LongLong, index))
+        }
     }
 
     fn current_identifier_starts_assignment(&self) -> bool {
