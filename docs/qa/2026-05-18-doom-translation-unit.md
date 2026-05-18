@@ -1531,6 +1531,74 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `p_maputl.c` Pointer Flow Slice
+
+Parenthesized pointer-member assignments, raw function-pointer parameters, and
+direct calls through function-pointer parameter bindings are now accepted.
+Pointer referents also track `short` as a 2-byte element, and the native
+backends emit signed halfword loads plus halfword stores for `short*`
+subscripts.
+
+Regression coverage added:
+
+```text
+compiler_accepts_parenthesized_pointer_member_assignment_slice
+compiler_accepts_function_pointer_parameter_call_slice
+compiler_accepts_short_pointer_arithmetic_dereference_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_maputl.c \
+  -o /tmp/c99inrust-p_maputl.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_data.c \
+  -o /tmp/c99inrust-r_data.s
+```
+
+Both focused compiles now emit assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779144130`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779144130.txt
+ok=39
+fail=23
+```
+
+Newly green since the previous scan:
+
+```text
+p_maputl.c
+r_data.c
+```
+
+Representative remaining blockers:
+
+```text
+FAIL f_wipe.c
+  error: 4492:5: expected expression
+FAIL i_video.c
+  error: unsupported function parameter
+FAIL p_setup.c
+  error: assignment to non-pointer subscript targets is not supported
+FAIL r_main.c
+  error: assignment to undeclared local or global: colfunc
+FAIL r_things.c
+  error: assignment to undeclared local or global: colfunc
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `d_items.c` Struct Array Declaration Merge
 
 This slice moved `d_items.c` from the conflicting `weaponinfo` declaration
