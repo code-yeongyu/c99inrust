@@ -71,7 +71,9 @@ constant for `<netinet/in.h>`. Decimal fixed-point global initializers such as
 Unsupported brace-initialized aggregate globals are skipped before supported
 function bodies, so Doom typedef structs such as `cheatseq_t` no longer get
 misclassified as scalar integer globals. Local comma-separated integer
-declarations such as `int dx, dy;` are accepted. Typed pointer parameters can
+declarations such as `int dx, dy;` are accepted, as are local declaration
+specifier sequences such as `unsigned char *p, c;` and `unsigned short *p;`.
+Typed pointer parameters can
 now drive scalar member loads and stores through nested Doom typedef structs,
 covering the `AM_getIslope` shape `ml->a.y`, `ml->b.x`, and `is->islp`.
 Compound scalar assignments such as `m_x += m_w/2` and `m_x -= m_w/2` are also
@@ -93,8 +95,9 @@ The current `am_map.c` blocker is the local static aggregate declaration
 `AM_getIslope` member expressions.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
-The current `m_cheat.c` blocker has moved past `(unsigned char)key` and is now
-the mixed local pointer/scalar declaration `unsigned char *p, c;`.
+The current `m_cheat.c` blocker has moved past `(unsigned char)key` and
+`unsigned char *p, c;`, and is now the dereference of a pointer post-increment
+expression in `while (*(p++) != 1);`.
 The current `r_draw.c` blocker has moved past `(unsigned)dc_x` and is now a
 `do { ... } while (...)` loop in `R_DrawColumn`.
 Evidence is recorded in

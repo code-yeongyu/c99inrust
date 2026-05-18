@@ -1459,3 +1459,75 @@ do
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Local Declaration Specifier Slice
+
+`compile -S` now accepts local declaration specifier sequences where Doom mixes
+unsigned integer specifiers, pointer declarators, and scalar declarators:
+
+```c
+unsigned char *p, c;
+unsigned short* colofs;
+```
+
+This extends the existing local declarator-list path. It still lowers
+`unsigned char` and `unsigned short` through the current integer scalar ABI, so
+full unsigned-width storage and conversion semantics remain future work.
+
+Regression coverage added:
+
+```text
+compiler_accepts_mixed_pointer_scalar_local_declaration_slice
+mixed_pointer_scalar_local_declaration_slice_matches_host_c_compiler_exit_code
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_cheat.c \
+  -o /tmp/c99inrust-m_cheat.s
+error: 137:24: expected expression
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779112512`, then that session was closed without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779112512.txt
+ok=9
+fail=53
+```
+
+Representative moved blockers:
+
+```text
+FAIL m_cheat.c
+  before declaration specifier slice: 134:5: expected expression
+  after declaration specifier slice: 137:24: expected expression
+
+FAIL r_data.c
+  before declaration specifier slice: 6556:5: expected expression
+  after declaration specifier slice: 6570:14: expected punctuator ;
+```
+
+The next `m_cheat.c` blocker is a dereference around a pointer post-increment:
+
+```c
+while (*(p++) != 1);
+```
+
+The next `r_data.c` blocker is the comma expression in a `for` initializer and
+post expression:
+
+```c
+for (i=0 , patch = texture->patches;
+     i<texture->patchcount;
+     i++, patch++)
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
