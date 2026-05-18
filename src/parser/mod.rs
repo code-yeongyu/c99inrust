@@ -9,7 +9,14 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    pub return_type: ReturnType,
     pub statements: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnType {
+    Int,
+    Void,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +45,7 @@ pub enum Statement {
         post: Option<Box<Self>>,
         body: Box<Self>,
     },
-    Return(Expr),
+    Return(Option<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,20 +233,55 @@ impl Parser<'_> {
     }
 
     fn function(&mut self) -> CompileResult<Function> {
-        self.expect_keyword(Keyword::Int)?;
+        let return_type = self.return_type()?;
         let name = self.expect_identifier()?;
         self.expect_punctuator("(")?;
-        if self.check_keyword(Keyword::Void) {
-            self.advance();
-        }
-        self.expect_punctuator(")")?;
+        self.skip_parameter_list()?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
         while !self.check_punctuator("}") {
             statements.push(self.statement()?);
         }
         self.expect_punctuator("}")?;
-        Ok(Function { name, statements })
+        Ok(Function {
+            name,
+            return_type,
+            statements,
+        })
+    }
+
+    fn return_type(&mut self) -> CompileResult<ReturnType> {
+        if self.check_keyword(Keyword::Int) {
+            self.advance();
+            return Ok(ReturnType::Int);
+        }
+        if self.check_keyword(Keyword::Void) {
+            self.advance();
+            return Ok(ReturnType::Void);
+        }
+        self.expected("supported function return type")
+    }
+
+    fn skip_parameter_list(&mut self) -> CompileResult<()> {
+        let mut depth = 0usize;
+        while !self.check_end() {
+            if self.check_punctuator("(") {
+                depth += 1;
+                self.advance();
+                continue;
+            }
+            if self.check_punctuator(")") {
+                if depth == 0 {
+                    self.advance();
+                    return Ok(());
+                }
+                depth -= 1;
+                self.advance();
+                continue;
+            }
+            self.advance();
+        }
+        Err(CompileError::new("unterminated function parameter list"))
     }
 
     fn statement(&mut self) -> CompileResult<Statement> {
@@ -260,7 +302,11 @@ impl Parser<'_> {
         }
         if self.check_keyword(Keyword::Return) {
             self.advance();
-            let expr = self.expression()?;
+            let expr = if self.check_punctuator(";") {
+                None
+            } else {
+                Some(self.expression()?)
+            };
             self.expect_punctuator(";")?;
             return Ok(Statement::Return(expr));
         }
@@ -724,36 +770,48 @@ fn function_definition_name(tokens: &[Token]) -> Option<String> {
 }
 
 fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
-    matches!(
-        tokens,
-        [
-            Token {
-                kind: TokenKind::Keyword(Keyword::Int),
-                ..
-            },
-            Token {
-                kind: TokenKind::Identifier(_),
-                ..
-            },
-            Token {
-                kind: TokenKind::Punctuator(open),
-                ..
-            },
-            Token {
-                kind: TokenKind::Keyword(Keyword::Void),
-                ..
-            },
-            Token {
-                kind: TokenKind::Punctuator(close),
-                ..
-            },
-            Token {
-                kind: TokenKind::Punctuator(body),
-                ..
-            },
-            ..
-        ] if open == "(" && close == ")" && body == "{"
-    )
+    let Some(Token {
+        kind: TokenKind::Keyword(Keyword::Int | Keyword::Void),
+        ..
+    }) = tokens.first()
+    else {
+        return false;
+    };
+    let Some(Token {
+        kind: TokenKind::Identifier(_),
+        ..
+    }) = tokens.get(1)
+    else {
+        return false;
+    };
+    let Some(open_index) = tokens
+        .iter()
+        .position(|token| token_is_punctuator(token, "("))
+    else {
+        return false;
+    };
+    if open_index != 2 {
+        return false;
+    }
+    let mut paren_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open_index) {
+        if token_is_punctuator(token, "(") {
+            paren_depth += 1;
+            continue;
+        }
+        if token_is_punctuator(token, ")") {
+            if paren_depth == 0 {
+                return false;
+            }
+            paren_depth -= 1;
+            if paren_depth == 0 {
+                return tokens
+                    .get(index + 1)
+                    .is_some_and(|next| token_is_punctuator(next, "{"));
+            }
+        }
+    }
+    false
 }
 
 fn typedef_name(tokens: &[Token]) -> Option<String> {

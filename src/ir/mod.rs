@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, Function, Program, Statement, UnaryOp};
+use crate::parser::{BinaryOp, Expr, Function, Program, ReturnType, Statement, UnaryOp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredProgram {
@@ -11,6 +11,7 @@ pub struct LoweredProgram {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredFunction {
     pub name: String,
+    pub return_type: ReturnType,
     pub local_count: usize,
     pub instructions: Vec<Instruction>,
 }
@@ -31,7 +32,7 @@ pub enum Instruction {
     Label {
         label: usize,
     },
-    Return(LoweredExpr),
+    Return(Option<LoweredExpr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +58,7 @@ pub enum LoweredExpr {
 /// # Errors
 ///
 /// Returns an error when a function body uses unsupported semantics such as
-/// undeclared locals or a missing return.
+/// undeclared locals or a missing `int` return.
 pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
@@ -113,26 +114,31 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 /// # Errors
 ///
 /// Returns an error when lowering detects unsupported semantics such as
-/// undeclared locals, duplicate locals in a scope, or a missing return.
+/// undeclared locals, duplicate locals in a scope, or a missing `int` return.
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
-    let mut context = LoweringContext::new();
+    let mut context = LoweringContext::new(function.return_type);
     for statement in &function.statements {
         context.lower_statement(statement)?;
     }
-    if !context.has_return {
+    if function.return_type == ReturnType::Int && !context.has_return {
         return Err(CompileError::new(format!(
             "function {} has no return statement",
             function.name
         )));
     }
+    if function.return_type == ReturnType::Void && !ends_with_return(&context.instructions) {
+        context.instructions.push(Instruction::Return(None));
+    }
     Ok(LoweredFunction {
         name: function.name.clone(),
+        return_type: function.return_type,
         local_count: context.local_count,
         instructions: context.instructions,
     })
 }
 
 struct LoweringContext {
+    return_type: ReturnType,
     scopes: Vec<HashMap<String, usize>>,
     local_count: usize,
     instructions: Vec<Instruction>,
@@ -141,8 +147,9 @@ struct LoweringContext {
 }
 
 impl LoweringContext {
-    fn new() -> Self {
+    fn new(return_type: ReturnType) -> Self {
         Self {
+            return_type,
             scopes: vec![HashMap::new()],
             local_count: 0,
             instructions: Vec::new(),
@@ -192,8 +199,21 @@ impl LoweringContext {
                 body,
             ),
             Statement::Return(expr) => {
-                let value = self.lower_expr(expr)?;
-                self.instructions.push(Instruction::Return(value));
+                match (self.return_type, expr) {
+                    (ReturnType::Int, Some(expr)) => {
+                        let value = self.lower_expr(expr)?;
+                        self.instructions.push(Instruction::Return(Some(value)));
+                    }
+                    (ReturnType::Int, None) => {
+                        return Err(CompileError::new("int function must return a value"));
+                    }
+                    (ReturnType::Void, Some(_)) => {
+                        return Err(CompileError::new("void function cannot return a value"));
+                    }
+                    (ReturnType::Void, None) => {
+                        self.instructions.push(Instruction::Return(None));
+                    }
+                }
                 self.has_return = true;
                 Ok(())
             }
@@ -404,7 +424,8 @@ fn constant_return_functions(functions: &[LoweredFunction]) -> HashMap<String, i
     let mut constants = HashMap::new();
     for function in functions {
         if function.local_count == 0
-            && let [Instruction::Return(LoweredExpr::Integer(value))] =
+            && function.return_type == ReturnType::Int
+            && let [Instruction::Return(Some(LoweredExpr::Integer(value)))] =
                 function.instructions.as_slice()
         {
             constants.insert(function.name.clone(), *value);
@@ -430,8 +451,8 @@ fn inline_constant_calls_in_instruction(
         | Instruction::JumpIfZero {
             condition: value, ..
         }
-        | Instruction::Return(value) => inline_constant_calls_in_expr(value, constants),
-        Instruction::Jump { .. } | Instruction::Label { .. } => {}
+        | Instruction::Return(Some(value)) => inline_constant_calls_in_expr(value, constants),
+        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => {}
     }
 }
 
@@ -449,6 +470,10 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         }
         LoweredExpr::Integer(_) | LoweredExpr::Local(_) => {}
     }
+}
+
+const fn ends_with_return(instructions: &[Instruction]) -> bool {
+    matches!(instructions.last(), Some(Instruction::Return(_)))
 }
 
 fn shift_count(value: i64) -> CompileResult<u32> {

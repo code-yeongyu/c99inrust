@@ -180,17 +180,18 @@ fn emit_aarch64_function(
                 )?;
             }
             Instruction::Return(expr) => {
-                emit_aarch64_expr(expr, temporary_base, 0, &mut labels, assembly)?;
-                if let Some(label) = shared_epilogue.as_ref() {
-                    write_assembly!(assembly, "\tb {label}\n")?;
-                } else {
-                    emit_aarch64_epilogue(
+                emit_aarch64_return(
+                    expr.as_ref(),
+                    Aarch64Epilogue {
                         preserved_temp_offset,
                         link_register_offset,
                         stack_bytes,
-                        assembly,
-                    )?;
-                }
+                        shared_label: shared_epilogue.as_deref(),
+                    },
+                    temporary_base,
+                    &mut labels,
+                    assembly,
+                )?;
             }
         }
     }
@@ -204,6 +205,36 @@ fn emit_aarch64_function(
         )?;
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct Aarch64Epilogue<'a> {
+    preserved_temp_offset: Option<usize>,
+    link_register_offset: Option<usize>,
+    stack_bytes: usize,
+    shared_label: Option<&'a str>,
+}
+
+fn emit_aarch64_return(
+    expr: Option<&LoweredExpr>,
+    epilogue: Aarch64Epilogue<'_>,
+    temporary_base: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if let Some(expr) = expr {
+        emit_aarch64_expr(expr, temporary_base, 0, labels, assembly)?;
+    }
+    if let Some(label) = epilogue.shared_label {
+        write_assembly!(assembly, "\tb {label}\n")?;
+        return Ok(());
+    }
+    emit_aarch64_epilogue(
+        epilogue.preserved_temp_offset,
+        epilogue.link_register_offset,
+        epilogue.stack_bytes,
+        assembly,
+    )
 }
 
 fn emit_x86_64_function(
@@ -259,7 +290,9 @@ fn emit_x86_64_function(
                 )?;
             }
             Instruction::Return(expr) => {
-                emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
+                if let Some(expr) = expr {
+                    emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
+                }
                 assembly.push_str("\tleave\n");
                 assembly.push_str("\tret\n");
             }
@@ -724,9 +757,11 @@ const fn aarch64_update_immediate(op: BinaryOp, value: i64) -> Option<(&'static 
 
 fn instruction_depth(instruction: &Instruction) -> usize {
     match instruction {
-        Instruction::StoreLocal { value, .. } | Instruction::Return(value) => expr_depth(value),
+        Instruction::StoreLocal { value, .. } | Instruction::Return(Some(value)) => {
+            expr_depth(value)
+        }
         Instruction::JumpIfZero { condition, .. } => expr_depth(condition),
-        Instruction::Jump { .. } | Instruction::Label { .. } => 0,
+        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => 0,
     }
 }
 
@@ -789,8 +824,8 @@ fn instruction_needs_preserved_temp(instruction: &Instruction) -> bool {
         | Instruction::JumpIfZero {
             condition: value, ..
         }
-        | Instruction::Return(value) => expr_needs_preserved_temp(value),
-        Instruction::Jump { .. } | Instruction::Label { .. } => false,
+        | Instruction::Return(Some(value)) => expr_needs_preserved_temp(value),
+        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => false,
     }
 }
 
@@ -821,8 +856,8 @@ fn instruction_uses_call(instruction: &Instruction) -> bool {
         | Instruction::JumpIfZero {
             condition: value, ..
         }
-        | Instruction::Return(value) => expr_uses_call(value),
-        Instruction::Jump { .. } | Instruction::Label { .. } => false,
+        | Instruction::Return(Some(value)) => expr_uses_call(value),
+        Instruction::Return(None) | Instruction::Jump { .. } | Instruction::Label { .. } => false,
     }
 }
 
