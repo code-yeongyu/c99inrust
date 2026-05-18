@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
@@ -21,6 +21,7 @@ pub struct LoweredGlobal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredGlobalInitializer {
     Int(i32),
+    PointerNull,
     UnsignedCharArray(Vec<u8>),
 }
 
@@ -161,14 +162,17 @@ fn lower_globals(
 ) -> CompileResult<(Vec<LoweredGlobal>, HashMap<String, GlobalBinding>)> {
     let mut lowered = Vec::with_capacity(globals.len());
     let mut bindings = HashMap::with_capacity(globals.len());
+    let mut definitions = HashSet::with_capacity(globals.len());
     for global in globals {
-        if bindings.contains_key(&global.name) {
-            return Err(CompileError::new(format!(
-                "duplicate global declaration: {}",
-                global.name
-            )));
-        }
         let (initializer, binding) = match &global.initializer {
+            GlobalInitializer::Extern(scalar_type) => {
+                insert_global_binding(
+                    &mut bindings,
+                    &global.name,
+                    GlobalBinding::from_scalar_type(*scalar_type)?,
+                )?;
+                continue;
+            }
             GlobalInitializer::Int(value) => (
                 LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
                     CompileError::new(format!(
@@ -178,18 +182,44 @@ fn lower_globals(
                 })?),
                 GlobalBinding::Int,
             ),
+            GlobalInitializer::PointerNull => (
+                LoweredGlobalInitializer::PointerNull,
+                GlobalBinding::Pointer,
+            ),
             GlobalInitializer::UnsignedCharArray(values) => (
                 LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
                 GlobalBinding::UnsignedCharArray,
             ),
         };
-        bindings.insert(global.name.clone(), binding);
+        if !definitions.insert(global.name.clone()) {
+            return Err(CompileError::new(format!(
+                "duplicate global declaration: {}",
+                global.name
+            )));
+        }
+        insert_global_binding(&mut bindings, &global.name, binding)?;
         lowered.push(LoweredGlobal {
             name: global.name.clone(),
             initializer,
         });
     }
     Ok((lowered, bindings))
+}
+
+fn insert_global_binding(
+    bindings: &mut HashMap<String, GlobalBinding>,
+    name: &str,
+    binding: GlobalBinding,
+) -> CompileResult<()> {
+    if let Some(existing) = bindings.get(name)
+        && *existing != binding
+    {
+        return Err(CompileError::new(format!(
+            "conflicting global declaration: {name}"
+        )));
+    }
+    bindings.insert(name.to_owned(), binding);
+    Ok(())
 }
 
 fn lower_constants(constants: &[Constant]) -> CompileResult<HashMap<String, i64>> {
@@ -326,7 +356,28 @@ struct LocalBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GlobalBinding {
     Int,
+    Pointer,
     UnsignedCharArray,
+}
+
+impl GlobalBinding {
+    fn from_scalar_type(scalar_type: ScalarType) -> CompileResult<Self> {
+        match scalar_type {
+            ScalarType::Int => Ok(Self::Int),
+            ScalarType::Pointer => Ok(Self::Pointer),
+            ScalarType::LongLong | ScalarType::Double => {
+                Err(CompileError::new("unsupported extern global scalar type"))
+            }
+        }
+    }
+
+    const fn scalar_type(self) -> Option<ScalarType> {
+        match self {
+            Self::Int => Some(ScalarType::Int),
+            Self::Pointer => Some(ScalarType::Pointer),
+            Self::UnsignedCharArray => None,
+        }
+    }
 }
 
 struct LoweringContext {
@@ -587,10 +638,14 @@ impl LoweringContext {
                         scalar_type: binding.scalar_type,
                     });
                 }
-                if self.global_bindings.get(name) == Some(&GlobalBinding::Int) {
+                if let Some(scalar_type) = self
+                    .global_bindings
+                    .get(name)
+                    .and_then(|binding| binding.scalar_type())
+                {
                     return Ok(LoweredExpr::Global {
                         name: name.clone(),
-                        scalar_type: ScalarType::Int,
+                        scalar_type,
                     });
                 }
                 if self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray) {
@@ -651,10 +706,14 @@ impl LoweringContext {
                         scalar_type: binding.scalar_type,
                     });
                 }
-                if self.global_bindings.get(name) == Some(&GlobalBinding::Int) {
+                if let Some(scalar_type) = self
+                    .global_bindings
+                    .get(name)
+                    .and_then(|binding| binding.scalar_type())
+                {
                     return Ok(LoweredLValue::Global {
                         name: name.clone(),
-                        scalar_type: ScalarType::Int,
+                        scalar_type,
                     });
                 }
                 Err(CompileError::new(format!(

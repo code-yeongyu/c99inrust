@@ -207,6 +207,11 @@ fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.long {value}\n")?;
             }
+            LoweredGlobalInitializer::PointerNull => {
+                assembly.push_str(".p2align 3\n");
+                write_assembly!(assembly, "{label}:\n")?;
+                assembly.push_str("\t.quad 0\n");
+            }
             LoweredGlobalInitializer::UnsignedCharArray(values) => {
                 write_assembly!(assembly, "{label}:\n")?;
                 emit_byte_values(values, assembly)?;

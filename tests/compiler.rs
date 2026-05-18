@@ -653,6 +653,66 @@ int main(void) { return 0; }";
 }
 
 #[test]
+fn compiler_accepts_i_main_global_pointer_slice() {
+    // given
+    let source = r"int myargc;
+char **myargv;
+void D_DoomMain(void) { return; }
+int main(int argc, char **argv) {
+    myargc = argc;
+    myargv = argv;
+    D_DoomMain();
+    if (myargv != argv)
+        return 2;
+    return myargc == argc ? 0 : 1;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly = emit_assembly(&lowered, Target::native()).expect("assembly should emit");
+    let linux_x86_64_assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("linux assembly should emit");
+
+    // then
+    assert!(assembly.contains("myargc"));
+    assert!(assembly.contains("myargv"));
+    assert!(assembly.contains("D_DoomMain"));
+    assert!(linux_x86_64_assembly.contains("\t.quad 0\n"));
+    assert!(linux_x86_64_assembly.contains("\tmovq %rax, myargv(%rip)\n"));
+    assert!(linux_x86_64_assembly.contains("\tmovq myargv(%rip), %rax\n"));
+}
+
+#[test]
+fn compiler_accepts_i_main_extern_global_slice() {
+    // given
+    let source = r"extern int myargc;
+extern char **myargv;
+void D_DoomMain(void);
+int main(int argc, char **argv) {
+    myargc = argc;
+    myargv = argv;
+    D_DoomMain();
+    return 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let linux_x86_64_assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("linux assembly should emit");
+
+    // then
+    assert!(!linux_x86_64_assembly.contains("\t.long 0\n"));
+    assert!(!linux_x86_64_assembly.contains("\t.quad 0\n"));
+    assert!(linux_x86_64_assembly.contains("\tmovl %eax, myargc(%rip)\n"));
+    assert!(linux_x86_64_assembly.contains("\tmovq %rax, myargv(%rip)\n"));
+    assert!(linux_x86_64_assembly.contains("\tcall D_DoomMain\n"));
+}
+
+#[test]
 fn compiler_accepts_typedef_return_signatures() {
     // given
     let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return 42; } int main(void) { return 0; }";

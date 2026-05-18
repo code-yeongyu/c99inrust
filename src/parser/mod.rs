@@ -22,7 +22,9 @@ pub struct Global {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalInitializer {
+    Extern(ScalarType),
     Int(i64),
+    PointerNull,
     UnsignedCharArray(Vec<u8>),
 }
 
@@ -1028,6 +1030,12 @@ fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<
     if let Some(global) = parse_global_unsigned_char_array(tokens)? {
         return Ok(Some(global));
     }
+    if let Some(global) = parse_global_extern_scalar(tokens)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_pointer(tokens)? {
+        return Ok(Some(global));
+    }
     parse_global_int(tokens)
 }
 
@@ -1066,6 +1074,62 @@ fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Gl
     Ok(Some(Global {
         name,
         initializer: GlobalInitializer::UnsignedCharArray(values),
+    }))
+}
+
+fn parse_global_extern_scalar(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    if top_level_punctuator_index(declaration, "=").is_some()
+        || top_level_punctuator_index(declaration, "[").is_some()
+    {
+        return Ok(None);
+    }
+    let Some(name_index) = previous_identifier_index(declaration, declaration.len()) else {
+        return Ok(None);
+    };
+    let scalar_type = if global_specifiers_are_extern_pointer(&declaration[..name_index]) {
+        ScalarType::Pointer
+    } else if global_specifiers_are_extern_int(&declaration[..name_index]) {
+        ScalarType::Int
+    } else {
+        return Ok(None);
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected extern global name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::Extern(scalar_type),
+    }))
+}
+
+fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let end_index = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
+    let Some(name_index) = previous_identifier_index(declaration, end_index) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_pointer(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    if end_index != declaration.len() {
+        let Ok(value) = parse_integer_initializer(&declaration[end_index + 1..]) else {
+            return Ok(None);
+        };
+        if value != 0 {
+            return Ok(None);
+        }
+    }
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global pointer name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::PointerNull,
     }))
 }
 
@@ -1111,10 +1175,57 @@ fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
     saw_unsigned && saw_char
 }
 
+fn global_specifiers_are_pointer(tokens: &[Token]) -> bool {
+    !token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_pointer_like(tokens, false)
+}
+
+fn global_specifiers_are_extern_pointer(tokens: &[Token]) -> bool {
+    token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_pointer_like(tokens, true)
+}
+
+fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> bool {
+    let mut saw_type = false;
+    let mut saw_pointer = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Extern) if allow_extern => {}
+            TokenKind::Keyword(
+                Keyword::Const
+                | Keyword::Restrict
+                | Keyword::Static
+                | Keyword::Volatile
+                | Keyword::Signed
+                | Keyword::Unsigned,
+            ) => {}
+            TokenKind::Keyword(
+                Keyword::Char | Keyword::Int | Keyword::Long | Keyword::Short | Keyword::Void,
+            ) => saw_type = true,
+            TokenKind::Identifier(name) => {
+                if supported_typedef_scalar(name).is_none() {
+                    return false;
+                }
+                saw_type = true;
+            }
+            TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
+            _ => return false,
+        }
+    }
+    saw_type && saw_pointer
+}
+
 fn global_specifiers_are_int(tokens: &[Token]) -> bool {
+    !token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, false)
+}
+
+fn global_specifiers_are_extern_int(tokens: &[Token]) -> bool {
+    token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, true)
+}
+
+fn global_specifiers_are_int_like(tokens: &[Token], allow_extern: bool) -> bool {
     let mut saw_int = false;
     for token in tokens {
         match &token.kind {
+            TokenKind::Keyword(Keyword::Extern) if allow_extern => {}
             TokenKind::Keyword(
                 Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Signed,
             ) => {}
