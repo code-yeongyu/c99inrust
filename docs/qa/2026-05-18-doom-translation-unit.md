@@ -1508,6 +1508,74 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `am_map.c` Typed Pointer Sweep
+
+`compile -S` now moves the focused `am_map.c` path past the file-scope typed
+player pointer and nested typed pointer members:
+
+```c
+static player_t *plr;
+plr->mo->x;
+plr->mo->y;
+```
+
+The implementation preserves struct referents for file-scope pointer globals,
+pointer-valued struct fields, and struct typedefs containing untracked typedef
+scalars or simple array declarators.
+
+Regression coverage added:
+
+```text
+compiler_accepts_typed_global_struct_pointer_member_slice
+compiler_accepts_struct_fields_with_typedef_and_array_slice
+compiler_accepts_nested_typed_pointer_member_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+```
+
+Focused `am_map.c` compile now reaches typed pointer-subscript struct bases:
+
+```text
+error: member access requires a struct base
+```
+
+The representative family is:
+
+```c
+lines[i].v1->x;
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779127759`; the session exited naturally after the scan
+without killing the tmux server:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779127759.txt
+ok=11
+fail=51
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before this sweep:
+    error: unknown local or global: plr
+  after this sweep:
+    error: member access requires a struct base
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After Pointer Walk Expression Slice
 
 `compile -S` now accepts the pointer-walk expression forms used by the middle of
