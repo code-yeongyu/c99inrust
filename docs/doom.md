@@ -175,14 +175,17 @@ the data-only `dstrings.c` quit-message table. Extern pointer arrays now retain
 their struct referent, and simple struct typedef aliases such as
 `typedef post_t column_t;` keep the aliased layout for pointer casts and member
 access.
+The Doom-era `<values.h>` builtin now also supplies `MAXSHORT` and related
+short/char limits, and global `short` arrays are accepted through the current
+integer-array compile path, moving `r_segs.c` to assembly generation.
 Pointer returns remain unsupported.
 
-The current Doom compile scan reaches actual supported function bodies, but 43
+The current Doom compile scan reaches actual supported function bodies, but 42
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
-`m_random.c`, `m_swap.c`, `r_draw.c`, `r_sky.c`, `st_lib.c`, and `tables.c`
-currently reach assembly generation.
+`m_random.c`, `m_swap.c`, `r_draw.c`, `r_segs.c`, `r_sky.c`, `st_lib.c`, and
+`tables.c` currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -201,6 +204,8 @@ and `NULL`. The former `d_net.c` blockers moved past local plain `unsigned`,
 The former `dstrings.c` and `f_finale.c` blockers moved past file-scope string
 pointer data, `hu_font[c]->width`, `column_t*` casts, and `column->topdelta` /
 `column->length` member access.
+The former `r_segs.c` blockers moved past `MAXSHORT` and extern/global short
+array declarations such as `ceilingclip[SCREENWIDTH]`.
 Many remaining files are blocked by enum-sized arrays, old-style function
 definitions, function-pointer declarations, and unsupported expression forms.
 The current `f_wipe.c` blocker is the local static function-pointer array

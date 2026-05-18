@@ -3058,3 +3058,91 @@ missing Doom constants such as `MAXSHORT`.
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After MAXSHORT And Short Array Slice
+
+`compile -S` now accepts the focused `r_segs.c` translation unit. This slice
+adds the Doom-era `<values.h>` `MAXSHORT`/short/char limit macros and accepts
+global `short` arrays through the current integer-array compile path, covering
+extern declarations such as:
+
+```c
+extern short ceilingclip[SCREENWIDTH];
+```
+
+Regression coverage added:
+
+```text
+preprocessor_provides_doom_values_h_integer_limits
+compiler_accepts_extern_short_array_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_segs.c \
+  -o /tmp/c99inrust-r_segs.s
+```
+
+Focused `r_segs.c` compile now succeeds and emits assembly.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779137071`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779137071.txt
+ok=20
+fail=42
+```
+
+Translation units currently reaching assembly:
+
+```text
+am_map.c
+d_items.c
+d_main.c
+d_net.c
+doomdef.c
+doomstat.c
+dstrings.c
+f_finale.c
+i_main.c
+m_argv.c
+m_bbox.c
+m_cheat.c
+m_fixed.c
+m_random.c
+m_swap.c
+r_draw.c
+r_segs.c
+r_sky.c
+st_lib.c
+tables.c
+```
+
+Representative moved blockers:
+
+```text
+FAIL r_segs.c
+  before this slice:
+    error: unknown local or global: MAXSHORT
+  after this slice:
+    OK r_segs.c
+
+FAIL r_plane.c
+  before this slice:
+    error: 5666:1: unsupported function definition: R_FindPlane
+  after this slice:
+    error: 5511:18: expected unsigned char array length
+```
+
+Next visible blockers include function-pointer arrays in `f_wipe.c`,
+enum-sized arrays in several modules, old-style function definitions, and
+unsupported expression forms.
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
