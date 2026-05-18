@@ -2,12 +2,26 @@ use std::collections::HashMap;
 
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
-    BinaryOp, Expr, Function, Program, ReturnType, ScalarType, Statement, UnaryOp,
+    BinaryOp, Expr, Function, Global, GlobalInitializer, LValue, Program, ReturnType, ScalarType,
+    Statement, UnaryOp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredProgram {
+    pub globals: Vec<LoweredGlobal>,
     pub functions: Vec<LoweredFunction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweredGlobal {
+    pub name: String,
+    pub initializer: LoweredGlobalInitializer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoweredGlobalInitializer {
+    Int(i32),
+    UnsignedCharArray(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +44,11 @@ pub enum Instruction {
     StoreLocal {
         slot: usize,
         offset: usize,
+        scalar_type: ScalarType,
+        value: LoweredExpr,
+    },
+    StoreGlobal {
+        name: String,
         scalar_type: ScalarType,
         value: LoweredExpr,
     },
@@ -56,6 +75,18 @@ pub enum LoweredExpr {
     Integer(i64),
     DoubleLiteral(String),
     StringLiteral(String),
+    Global {
+        name: String,
+        scalar_type: ScalarType,
+    },
+    GlobalByteSubscript {
+        name: String,
+        index: Box<Self>,
+    },
+    Assign {
+        target: LoweredLValue,
+        value: Box<Self>,
+    },
     Local {
         offset: usize,
         scalar_type: ScalarType,
@@ -80,6 +111,19 @@ pub enum LoweredExpr {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoweredLValue {
+    Local {
+        slot: usize,
+        offset: usize,
+        scalar_type: ScalarType,
+    },
+    Global {
+        name: String,
+        scalar_type: ScalarType,
+    },
+}
+
 /// Lowers parsed functions into stack-slot IR.
 ///
 /// # Errors
@@ -87,13 +131,50 @@ pub enum LoweredExpr {
 /// Returns an error when a function body uses unsupported semantics such as
 /// undeclared locals or a missing `int` return.
 pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
+    let (globals, global_bindings) = lower_globals(&program.globals)?;
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
-        functions.push(lower_function(function)?);
+        functions.push(lower_function_with_globals(function, &global_bindings)?);
     }
     let constant_returns = constant_return_functions(&functions);
     inline_constant_calls(&mut functions, &constant_returns);
-    Ok(LoweredProgram { functions })
+    Ok(LoweredProgram { globals, functions })
+}
+
+fn lower_globals(
+    globals: &[Global],
+) -> CompileResult<(Vec<LoweredGlobal>, HashMap<String, GlobalBinding>)> {
+    let mut lowered = Vec::with_capacity(globals.len());
+    let mut bindings = HashMap::with_capacity(globals.len());
+    for global in globals {
+        if bindings.contains_key(&global.name) {
+            return Err(CompileError::new(format!(
+                "duplicate global declaration: {}",
+                global.name
+            )));
+        }
+        let (initializer, binding) = match &global.initializer {
+            GlobalInitializer::Int(value) => (
+                LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
+                    CompileError::new(format!(
+                        "global int initializer does not fit i32: {}",
+                        global.name
+                    ))
+                })?),
+                GlobalBinding::Int,
+            ),
+            GlobalInitializer::UnsignedCharArray(values) => (
+                LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
+                GlobalBinding::UnsignedCharArray,
+            ),
+        };
+        bindings.insert(global.name.clone(), binding);
+        lowered.push(LoweredGlobal {
+            name: global.name.clone(),
+            initializer,
+        });
+    }
+    Ok((lowered, bindings))
 }
 
 /// Evaluates a constant integer expression.
@@ -116,6 +197,12 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         )),
         Expr::StringLiteral(_) => Err(CompileError::new(
             "string literal is not an integer constant expression",
+        )),
+        Expr::Subscript { .. } => Err(CompileError::new(
+            "subscript expression is not an integer constant expression",
+        )),
+        Expr::Assignment { .. } => Err(CompileError::new(
+            "assignment expression is not an integer constant expression",
         )),
         Expr::Unary { op, expr } => {
             let value = const_eval(expr)?;
@@ -164,7 +251,15 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 /// Returns an error when lowering detects unsupported semantics such as
 /// undeclared locals, duplicate locals in a scope, or a missing `int` return.
 pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
-    let mut context = LoweringContext::new(function.return_type);
+    let global_bindings = HashMap::new();
+    lower_function_with_globals(function, &global_bindings)
+}
+
+fn lower_function_with_globals(
+    function: &Function,
+    global_bindings: &HashMap<String, GlobalBinding>,
+) -> CompileResult<LoweredFunction> {
+    let mut context = LoweringContext::new(function.return_type, global_bindings);
     for parameter in &function.parameters {
         context.declare_local(parameter, ScalarType::Int)?;
     }
@@ -195,8 +290,15 @@ struct LocalBinding {
     scalar_type: ScalarType,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlobalBinding {
+    Int,
+    UnsignedCharArray,
+}
+
 struct LoweringContext {
     return_type: ReturnType,
+    global_bindings: HashMap<String, GlobalBinding>,
     scopes: Vec<HashMap<String, LocalBinding>>,
     local_slots: Vec<LocalSlot>,
     next_local_offset: usize,
@@ -206,9 +308,10 @@ struct LoweringContext {
 }
 
 impl LoweringContext {
-    fn new(return_type: ReturnType) -> Self {
+    fn new(return_type: ReturnType, global_bindings: &HashMap<String, GlobalBinding>) -> Self {
         Self {
             return_type,
+            global_bindings: global_bindings.clone(),
             scopes: vec![HashMap::new()],
             local_slots: Vec::new(),
             next_local_offset: 0,
@@ -239,19 +342,10 @@ impl LoweringContext {
                 });
                 Ok(())
             }
-            Statement::Assignment { name, value } => {
-                let Some(binding) = self.local_binding(name) else {
-                    return Err(CompileError::new(format!(
-                        "assignment to undeclared local: {name}"
-                    )));
-                };
+            Statement::Assignment { target, value } => {
+                let target = self.lower_lvalue(target)?;
                 let value = self.lower_expr(value)?;
-                self.instructions.push(Instruction::StoreLocal {
-                    slot: binding.slot,
-                    offset: self.local_offset(binding.slot)?,
-                    scalar_type: binding.scalar_type,
-                    value,
-                });
+                self.push_store(target, value);
                 Ok(())
             }
             Statement::If {
@@ -448,17 +542,38 @@ impl LoweringContext {
                     .collect::<CompileResult<Vec<_>>>()?,
             }),
             Expr::Identifier(name) => {
-                let Some(binding) = self.local_binding(name) else {
-                    return Err(CompileError::new(format!("unknown local: {name}")));
-                };
-                Ok(LoweredExpr::Local {
-                    offset: self.local_offset(binding.slot)?,
-                    scalar_type: binding.scalar_type,
-                })
+                if let Some(binding) = self.local_binding(name) {
+                    return Ok(LoweredExpr::Local {
+                        offset: self.local_offset(binding.slot)?,
+                        scalar_type: binding.scalar_type,
+                    });
+                }
+                if self.global_bindings.get(name) == Some(&GlobalBinding::Int) {
+                    return Ok(LoweredExpr::Global {
+                        name: name.clone(),
+                        scalar_type: ScalarType::Int,
+                    });
+                }
+                if self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray) {
+                    return Err(CompileError::new(format!(
+                        "global array requires a subscript: {name}"
+                    )));
+                }
+                Err(CompileError::new(format!(
+                    "unknown local or global: {name}"
+                )))
             }
             Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
             Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
+            Expr::Subscript { array, index } => self.lower_subscript(array, index),
+            Expr::Assignment { target, value } => {
+                let target = self.lower_lvalue(target)?;
+                Ok(LoweredExpr::Assign {
+                    target,
+                    value: Box::new(self.lower_expr(value)?),
+                })
+            }
             Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
@@ -481,6 +596,71 @@ impl LoweringContext {
                 left: Box::new(self.lower_expr(left)?),
                 right: Box::new(self.lower_expr(right)?),
             }),
+        }
+    }
+
+    fn lower_lvalue(&self, target: &LValue) -> CompileResult<LoweredLValue> {
+        match target {
+            LValue::Identifier(name) => {
+                if let Some(binding) = self.local_binding(name) {
+                    return Ok(LoweredLValue::Local {
+                        slot: binding.slot,
+                        offset: self.local_offset(binding.slot)?,
+                        scalar_type: binding.scalar_type,
+                    });
+                }
+                if self.global_bindings.get(name) == Some(&GlobalBinding::Int) {
+                    return Ok(LoweredLValue::Global {
+                        name: name.clone(),
+                        scalar_type: ScalarType::Int,
+                    });
+                }
+                Err(CompileError::new(format!(
+                    "assignment to undeclared local or global: {name}"
+                )))
+            }
+            LValue::Subscript { .. } => Err(CompileError::new(
+                "assignment to subscript targets is not supported yet",
+            )),
+        }
+    }
+
+    fn lower_subscript(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredExpr> {
+        let Expr::Identifier(name) = array else {
+            return Err(CompileError::new(
+                "only global byte-array subscripts are supported",
+            ));
+        };
+        if self.global_bindings.get(name) != Some(&GlobalBinding::UnsignedCharArray) {
+            return Err(CompileError::new(format!(
+                "unknown global byte array: {name}"
+            )));
+        }
+        Ok(LoweredExpr::GlobalByteSubscript {
+            name: name.clone(),
+            index: Box::new(self.lower_expr(index)?),
+        })
+    }
+
+    fn push_store(&mut self, target: LoweredLValue, value: LoweredExpr) {
+        match target {
+            LoweredLValue::Local {
+                slot,
+                offset,
+                scalar_type,
+            } => self.instructions.push(Instruction::StoreLocal {
+                slot,
+                offset,
+                scalar_type,
+                value,
+            }),
+            LoweredLValue::Global { name, scalar_type } => {
+                self.instructions.push(Instruction::StoreGlobal {
+                    name,
+                    scalar_type,
+                    value,
+                });
+            }
         }
     }
 }
@@ -595,6 +775,7 @@ fn inline_constant_calls_in_instruction(
 ) {
     match instruction {
         Instruction::StoreLocal { value, .. }
+        | Instruction::StoreGlobal { value, .. }
         | Instruction::JumpIfZero {
             condition: value, ..
         }
@@ -620,6 +801,12 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         LoweredExpr::Unary { expr, .. } | LoweredExpr::Cast { expr, .. } => {
             inline_constant_calls_in_expr(expr, constants);
         }
+        LoweredExpr::GlobalByteSubscript { index, .. } => {
+            inline_constant_calls_in_expr(index, constants);
+        }
+        LoweredExpr::Assign { value, .. } => {
+            inline_constant_calls_in_expr(value, constants);
+        }
         LoweredExpr::Conditional {
             condition,
             then_expr,
@@ -636,6 +823,7 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Global { .. }
         | LoweredExpr::Local { .. } => {}
     }
 }

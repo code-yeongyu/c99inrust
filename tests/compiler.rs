@@ -572,6 +572,43 @@ int main(void) { return FixedDiv2(3, 2) == 98304 ? 0 : 1; }"#;
 }
 
 #[test]
+fn compiler_accepts_m_random_global_array_slice() {
+    // given
+    let source = r"unsigned char rndtable[4] = { 3, 5, 7, 11 };
+int rndindex = 0;
+int prndindex = 0;
+int P_Random(void) {
+    prndindex = (prndindex + 1) & 0x3;
+    return rndtable[prndindex];
+}
+int M_Random(void) {
+    rndindex = (rndindex + 1) & 0x3;
+    return rndtable[rndindex];
+}
+void M_ClearRandom(void) {
+    rndindex = prndindex = 0;
+}
+int main(void) {
+    int a = P_Random();
+    int b = M_Random();
+    M_ClearRandom();
+    return a == 5 && b == 5 ? 0 : 1;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly = emit_assembly(&lowered, Target::native()).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("rndtable"));
+    assert!(assembly.contains("rndindex"));
+    assert!(assembly.contains("prndindex"));
+    assert!(assembly.contains("M_ClearRandom"));
+}
+
+#[test]
 fn compiler_accepts_typedef_return_signatures() {
     // given
     let source = "typedef int fixed_t; fixed_t FixedMul(fixed_t a, fixed_t b) { return 42; } int main(void) { return 0; }";

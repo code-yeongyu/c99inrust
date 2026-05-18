@@ -1,7 +1,10 @@
 use std::fmt::{self, Write as _};
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::ir::{Instruction, LoweredExpr, LoweredFunction, LoweredProgram};
+use crate::ir::{
+    Instruction, LoweredExpr, LoweredFunction, LoweredGlobal, LoweredGlobalInitializer,
+    LoweredLValue, LoweredProgram,
+};
 use crate::parser::{BinaryOp, ScalarType, UnaryOp};
 
 macro_rules! write_assembly {
@@ -53,7 +56,13 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         LoweredExpr::Cast { target, .. } => scalar_width(*target),
         LoweredExpr::DoubleLiteral(_) => ValueWidth::F64,
         LoweredExpr::StringLiteral(_) => ValueWidth::I64,
-        LoweredExpr::Local { scalar_type, .. } => scalar_width(*scalar_type),
+        LoweredExpr::Global { scalar_type, .. } | LoweredExpr::Local { scalar_type, .. } => {
+            scalar_width(*scalar_type)
+        }
+        LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::Call { .. }
+        | LoweredExpr::Integer(_) => ValueWidth::I32,
+        LoweredExpr::Assign { target, .. } => lowered_lvalue_width(target),
         LoweredExpr::Unary { op, expr } => match op {
             UnaryOp::LogicalNot => ValueWidth::I32,
             UnaryOp::Plus | UnaryOp::Minus | UnaryOp::BitNot => expr_width(expr),
@@ -64,7 +73,14 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             ..
         } => expr_width(then_expr).max(expr_width(else_expr)),
         LoweredExpr::Binary { op, left, right } => binary_result_width(*op, left, right),
-        LoweredExpr::Call { .. } | LoweredExpr::Integer(_) => ValueWidth::I32,
+    }
+}
+
+const fn lowered_lvalue_width(target: &LoweredLValue) -> ValueWidth {
+    match target {
+        LoweredLValue::Local { scalar_type, .. } | LoweredLValue::Global { scalar_type, .. } => {
+            scalar_width(*scalar_type)
+        }
     }
 }
 
@@ -138,6 +154,7 @@ pub fn emit_assembly(program: &LoweredProgram, target: Target) -> CompileResult<
         return Err(CompileError::new("program has no functions"));
     }
     let mut assembly = String::new();
+    emit_globals(&program.globals, target, &mut assembly)?;
     assembly.push_str(".text\n");
     for function in &program.functions {
         match target {
@@ -157,6 +174,48 @@ fn write_assembly(assembly: &mut String, arguments: fmt::Arguments<'_>) -> Compi
     assembly
         .write_fmt(arguments)
         .map_err(|_| CompileError::new("failed to format assembly"))
+}
+
+fn emit_globals(
+    globals: &[LoweredGlobal],
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if globals.is_empty() {
+        return Ok(());
+    }
+    assembly.push_str(".data\n");
+    for global in globals {
+        let label = label_name(&global.name, target);
+        write_assembly!(assembly, ".globl {label}\n")?;
+        match &global.initializer {
+            LoweredGlobalInitializer::Int(value) => {
+                assembly.push_str(".p2align 2\n");
+                write_assembly!(assembly, "{label}:\n")?;
+                write_assembly!(assembly, "\t.long {value}\n")?;
+            }
+            LoweredGlobalInitializer::UnsignedCharArray(values) => {
+                write_assembly!(assembly, "{label}:\n")?;
+                emit_byte_values(values, assembly)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_byte_values(values: &[u8], assembly: &mut String) -> CompileResult<()> {
+    assembly.push_str("\t.byte ");
+    let mut first = true;
+    for value in values {
+        if first {
+            first = false;
+        } else {
+            assembly.push(',');
+        }
+        write_assembly!(assembly, "{value}")?;
+    }
+    assembly.push('\n');
+    Ok(())
 }
 
 struct LabelAllocator<'a> {
@@ -222,6 +281,14 @@ fn emit_aarch64_function(
                     assembly,
                 )?;
                 emit_aarch64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
+            }
+            Instruction::StoreGlobal {
+                name,
+                scalar_type,
+                value,
+            } => {
+                emit_aarch64_expr(value, frame.temporary_base, 0, &mut labels, assembly)?;
+                emit_aarch64_store_global(name, scalar_width(*scalar_type), target, assembly)?;
             }
             Instruction::JumpIfZero { condition, label } => {
                 let target_label = branch_label(&function.name, *label, target);
@@ -384,6 +451,14 @@ fn emit_x86_64_function(
                 emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
                 emit_x86_64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
             }
+            Instruction::StoreGlobal {
+                name,
+                scalar_type,
+                value,
+            } => {
+                emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
+                emit_x86_64_store_global(name, scalar_width(*scalar_type), target, assembly)?;
+            }
             Instruction::JumpIfZero { condition, label } => {
                 emit_x86_64_expr(condition, temporary_base, 0, target, &mut labels, assembly)?;
                 assembly.push_str("\tcmpl $0, %eax\n");
@@ -506,6 +581,22 @@ fn emit_aarch64_expr_natural(
         }
         LoweredExpr::StringLiteral(value) => {
             emit_aarch64_load_string_address(value, labels, assembly)
+        }
+        LoweredExpr::Global { name, scalar_type } => {
+            emit_aarch64_load_global(name, scalar_width(*scalar_type), labels.target, assembly)
+        }
+        LoweredExpr::GlobalByteSubscript { name, index } => {
+            emit_aarch64_load_global_byte_subscript(
+                name,
+                index,
+                temporary_base,
+                depth,
+                labels,
+                assembly,
+            )
+        }
+        LoweredExpr::Assign { target, value } => {
+            emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::Local {
             offset,
@@ -870,6 +961,77 @@ fn emit_aarch64_load_string_address(
     emit_string_literal_data(&label, value, labels.target, assembly)
 }
 
+fn emit_aarch64_load_global(
+    name: &str,
+    width: ValueWidth,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if target != Target::Aarch64AppleDarwin {
+        return Err(CompileError::new("unsupported AArch64 global target"));
+    }
+    let label = label_name(name, target);
+    let register = aarch64_result_register(width);
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tldr {register}, [x16, {label}@PAGEOFF]\n")
+}
+
+fn emit_aarch64_store_global(
+    name: &str,
+    width: ValueWidth,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if target != Target::Aarch64AppleDarwin {
+        return Err(CompileError::new("unsupported AArch64 global target"));
+    }
+    let label = label_name(name, target);
+    let register = aarch64_result_register(width);
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tstr {register}, [x16, {label}@PAGEOFF]\n")
+}
+
+fn emit_aarch64_load_global_byte_subscript(
+    name: &str,
+    index: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, labels.target);
+    emit_aarch64_expr_with_width(
+        index,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tadd x16, x16, {label}@PAGEOFF\n")?;
+    assembly.push_str("\tldrb w0, [x16, w0, sxtw]\n");
+    Ok(())
+}
+
+fn emit_aarch64_assign(
+    target: &LoweredLValue,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = lowered_lvalue_width(target);
+    emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
+    match target {
+        LoweredLValue::Local { offset, .. } => emit_aarch64_store_result(width, *offset, assembly),
+        LoweredLValue::Global { name, .. } => {
+            emit_aarch64_store_global(name, width, labels.target, assembly)
+        }
+    }
+}
+
 const fn aarch64_register_prefix(width: ValueWidth) -> &'static str {
     match width {
         ValueWidth::I32 => "w",
@@ -1041,18 +1203,23 @@ fn emit_x86_64_expr_natural(
             labels,
             assembly,
         ),
-        LoweredExpr::Integer(value) => {
-            let value = i32::try_from(*value)
-                .map_err(|_| CompileError::new("integer literal does not fit i32"))?;
-            write_assembly!(assembly, "\tmovl ${value}, %eax\n")?;
-            Ok(())
-        }
+        LoweredExpr::Integer(value) => emit_x86_64_integer(*value, assembly),
         LoweredExpr::DoubleLiteral(value) => {
             emit_x86_64_load_double_literal(value, target, labels, assembly)
         }
         LoweredExpr::StringLiteral(value) => {
             emit_x86_64_load_string_address(value, target, labels, assembly)
         }
+        expr @ (LoweredExpr::Global { .. }
+        | LoweredExpr::GlobalByteSubscript { .. }
+        | LoweredExpr::Assign { .. }) => emit_x86_64_global_or_assignment_expr(
+            expr,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
         LoweredExpr::Local {
             offset,
             scalar_type,
@@ -1123,6 +1290,51 @@ fn emit_x86_64_expr_natural(
             labels,
             assembly,
         ),
+    }
+}
+
+fn emit_x86_64_integer(value: i64, assembly: &mut String) -> CompileResult<()> {
+    let value =
+        i32::try_from(value).map_err(|_| CompileError::new("integer literal does not fit i32"))?;
+    write_assembly!(assembly, "\tmovl ${value}, %eax\n")
+}
+
+fn emit_x86_64_global_or_assignment_expr(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match expr {
+        LoweredExpr::Global { name, scalar_type } => {
+            emit_x86_64_load_global(name, scalar_width(*scalar_type), target, assembly)
+        }
+        LoweredExpr::GlobalByteSubscript { name, index } => emit_x86_64_load_global_byte_subscript(
+            name,
+            index,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        LoweredExpr::Assign {
+            target: lvalue,
+            value,
+        } => emit_x86_64_assign(
+            lvalue,
+            value,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+        _ => Err(CompileError::new(
+            "internal error: expected x86-64 global expression",
+        )),
     }
 }
 
@@ -1441,6 +1653,82 @@ fn emit_x86_64_load_string_address(
     emit_string_literal_data(&label, value, target, assembly)
 }
 
+fn emit_x86_64_load_global(
+    name: &str,
+    width: ValueWidth,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    let suffix = x86_64_instruction_suffix(width);
+    let register = x86_64_result_register(width);
+    write_assembly!(assembly, "\tmov{suffix} {label}(%rip), {register}\n")
+}
+
+fn emit_x86_64_store_global(
+    name: &str,
+    width: ValueWidth,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    let suffix = x86_64_instruction_suffix(width);
+    let register = x86_64_result_register(width);
+    write_assembly!(assembly, "\tmov{suffix} {register}, {label}(%rip)\n")
+}
+
+fn emit_x86_64_load_global_byte_subscript(
+    name: &str,
+    index: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    emit_x86_64_expr_with_width(
+        index,
+        ValueWidth::I32,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    write_assembly!(assembly, "\tleaq {label}(%rip), %rcx\n")?;
+    assembly.push_str("\tmovzbl (%rcx,%rax), %eax\n");
+    Ok(())
+}
+
+fn emit_x86_64_assign(
+    target: &LoweredLValue,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    codegen_target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = lowered_lvalue_width(target);
+    emit_x86_64_expr_with_width(
+        value,
+        width,
+        temporary_base,
+        depth,
+        codegen_target,
+        labels,
+        assembly,
+    )?;
+    match target {
+        LoweredLValue::Local { offset, .. } => emit_x86_64_store_result(width, *offset, assembly),
+        LoweredLValue::Global { name, .. } => {
+            emit_x86_64_store_global(name, width, codegen_target, assembly)
+        }
+    }
+}
+
 fn emit_x86_64_negate_f64(
     target: Target,
     labels: &mut LabelAllocator<'_>,
@@ -1691,6 +1979,7 @@ const fn aarch64_update_immediate(op: BinaryOp, value: i64) -> Option<(&'static 
 fn instruction_depth(instruction: &Instruction) -> usize {
     match instruction {
         Instruction::StoreLocal { value, .. }
+        | Instruction::StoreGlobal { value, .. }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_depth(value),
         Instruction::JumpIfZero { condition, .. } => expr_depth(condition),
@@ -1720,7 +2009,10 @@ fn should_share_aarch64_epilogue(function: &LoweredFunction, stack_bytes: usize)
 
 const fn instruction_label(instruction: &Instruction) -> Option<usize> {
     match instruction {
-        Instruction::StoreLocal { .. } | Instruction::Eval(_) | Instruction::Return(_) => None,
+        Instruction::StoreLocal { .. }
+        | Instruction::StoreGlobal { .. }
+        | Instruction::Eval(_)
+        | Instruction::Return(_) => None,
         Instruction::JumpIfZero { label, .. }
         | Instruction::Jump { label }
         | Instruction::Label { label } => Some(*label),
@@ -1732,9 +2024,12 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Global { .. }
         | LoweredExpr::Local { .. } => 0,
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),
+        LoweredExpr::GlobalByteSubscript { index, .. } => expr_depth(index),
+        LoweredExpr::Assign { value, .. } => expr_depth(value),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
             left,
@@ -1765,6 +2060,7 @@ fn function_uses_aarch64_preserved_temp(function: &LoweredFunction) -> bool {
 fn instruction_needs_preserved_temp(instruction: &Instruction) -> bool {
     match instruction {
         Instruction::StoreLocal { value, .. }
+        | Instruction::StoreGlobal { value, .. }
         | Instruction::JumpIfZero {
             condition: value, ..
         }
@@ -1798,10 +2094,13 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => {
             expr_needs_preserved_temp(expr)
         }
+        LoweredExpr::GlobalByteSubscript { index, .. } => expr_needs_preserved_temp(index),
+        LoweredExpr::Assign { value, .. } => expr_needs_preserved_temp(value),
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Global { .. }
         | LoweredExpr::Local { .. } => false,
     }
 }
@@ -1813,6 +2112,7 @@ const fn expr_is_direct_call(expr: &LoweredExpr) -> bool {
 fn instruction_uses_call(instruction: &Instruction) -> bool {
     match instruction {
         Instruction::StoreLocal { value, .. }
+        | Instruction::StoreGlobal { value, .. }
         | Instruction::JumpIfZero {
             condition: value, ..
         }
@@ -1828,8 +2128,11 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
+        | LoweredExpr::Global { .. }
         | LoweredExpr::Local { .. } => false,
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_uses_call(expr),
+        LoweredExpr::GlobalByteSubscript { index, .. } => expr_uses_call(index),
+        LoweredExpr::Assign { value, .. } => expr_uses_call(value),
         LoweredExpr::Conditional {
             condition,
             then_expr,

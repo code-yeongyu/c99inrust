@@ -3,7 +3,20 @@ use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
+    pub globals: Vec<Global>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Global {
+    pub name: String,
+    pub initializer: GlobalInitializer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlobalInitializer {
+    Int(i64),
+    UnsignedCharArray(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +50,7 @@ pub enum Statement {
         initializer: Option<Expr>,
     },
     Assignment {
-        name: String,
+        target: LValue,
         value: Expr,
     },
     If {
@@ -60,6 +73,12 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LValue {
+    Identifier(String),
+    Subscript { array: Box<Expr>, index: Box<Expr> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Call {
         callee: String,
@@ -69,6 +88,14 @@ pub enum Expr {
     Integer(i64),
     DoubleLiteral(String),
     StringLiteral(String),
+    Subscript {
+        array: Box<Self>,
+        index: Box<Self>,
+    },
+    Assignment {
+        target: LValue,
+        value: Box<Self>,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Self>,
@@ -206,8 +233,13 @@ pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslat
 pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Program> {
     let mut parser = SurfaceParser { tokens, index: 0 };
     let external_items = parser.external_token_groups()?;
+    let mut globals = Vec::new();
     let mut functions = Vec::new();
     for item_tokens in &external_items {
+        if let Some(global) = parse_supported_global_declaration(item_tokens)? {
+            globals.push(global);
+            continue;
+        }
         let Some(name) = function_definition_name(item_tokens) else {
             continue;
         };
@@ -238,7 +270,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             "translation unit has no supported function definitions",
         ));
     }
-    Ok(Program { functions })
+    Ok(Program { globals, functions })
 }
 
 struct Parser<'a> {
@@ -252,7 +284,10 @@ impl Parser<'_> {
         while !self.check_end() {
             functions.push(self.function()?);
         }
-        Ok(Program { functions })
+        Ok(Program {
+            globals: Vec::new(),
+            functions,
+        })
     }
 
     fn function(&mut self) -> CompileResult<Function> {
@@ -379,7 +414,10 @@ impl Parser<'_> {
         if expect_semicolon {
             self.expect_punctuator(";")?;
         }
-        Ok(Statement::Assignment { name, value })
+        Ok(Statement::Assignment {
+            target: LValue::Identifier(name),
+            value,
+        })
     }
 
     fn declaration_statement(&mut self, scalar_type: ScalarType) -> CompileResult<Statement> {
@@ -470,7 +508,21 @@ impl Parser<'_> {
     }
 
     fn expression(&mut self) -> CompileResult<Expr> {
-        self.conditional()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> CompileResult<Expr> {
+        let target = self.conditional()?;
+        if !self.check_punctuator("=") {
+            return Ok(target);
+        }
+        self.advance();
+        let target = lvalue_from_expr(target)?;
+        let value = self.assignment()?;
+        Ok(Expr::Assignment {
+            target,
+            value: Box::new(value),
+        })
     }
 
     fn conditional(&mut self) -> CompileResult<Expr> {
@@ -603,7 +655,21 @@ impl Parser<'_> {
                 expr: Box::new(self.unary()?),
             });
         }
-        self.primary()
+        self.postfix()
+    }
+
+    fn postfix(&mut self) -> CompileResult<Expr> {
+        let mut expr = self.primary()?;
+        while self.check_punctuator("[") {
+            self.advance();
+            let index = self.expression()?;
+            self.expect_punctuator("]")?;
+            expr = Expr::Subscript {
+                array: Box::new(expr),
+                index: Box::new(index),
+            };
+        }
+        Ok(expr)
     }
 
     fn cast_type_at_current(&self) -> Option<(ScalarType, usize)> {
@@ -784,6 +850,228 @@ impl Parser<'_> {
     const fn advance(&mut self) {
         self.index += 1;
     }
+}
+
+fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
+    match expr {
+        Expr::Identifier(name) => Ok(LValue::Identifier(name)),
+        Expr::Subscript { array, index } => Ok(LValue::Subscript { array, index }),
+        _ => Err(CompileError::new("unsupported assignment target")),
+    }
+}
+
+fn parse_supported_global_declaration(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
+        return Ok(None);
+    }
+    if top_level_function_open_paren(tokens).is_some() {
+        return Ok(None);
+    }
+    if let Some(global) = parse_global_unsigned_char_array(tokens)? {
+        return Ok(Some(global));
+    }
+    parse_global_int(tokens)
+}
+
+fn parse_global_unsigned_char_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_unsigned_char(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated global array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    let Some(assign_index) = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+    else {
+        return Ok(None);
+    };
+    let assign_index = close_bracket + 1 + assign_index;
+    let Ok(values) = parse_unsigned_char_initializer(&declaration[assign_index + 1..]) else {
+        return Ok(None);
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global array name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::UnsignedCharArray(values),
+    }))
+}
+
+fn parse_global_int(tokens: &[Token]) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let end_index = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
+    let Some(name_index) = previous_identifier_index(declaration, end_index) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_int(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let initializer = if end_index == declaration.len() {
+        0
+    } else {
+        let Ok(value) = parse_integer_initializer(&declaration[end_index + 1..]) else {
+            return Ok(None);
+        };
+        value
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global int name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::Int(initializer),
+    }))
+}
+
+fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
+    let mut saw_unsigned = false;
+    let mut saw_char = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Static | Keyword::Const | Keyword::Volatile) => {}
+            TokenKind::Keyword(Keyword::Unsigned) => saw_unsigned = true,
+            TokenKind::Keyword(Keyword::Char) => saw_char = true,
+            _ => return false,
+        }
+    }
+    saw_unsigned && saw_char
+}
+
+fn global_specifiers_are_int(tokens: &[Token]) -> bool {
+    let mut saw_int = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(
+                Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Signed,
+            ) => {}
+            TokenKind::Keyword(Keyword::Int) => saw_int = true,
+            _ => return false,
+        }
+    }
+    saw_int
+}
+
+fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new("expected global array initializer"));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(
+            CompileError::new("expected global array initializer").at(first.line, first.column)
+        );
+    }
+    let mut values = Vec::new();
+    let mut index = 1usize;
+    loop {
+        let Some(token) = tokens.get(index) else {
+            return Err(CompileError::new("unterminated global array initializer")
+                .at(first.line, first.column));
+        };
+        if token_is_punctuator(token, "}") {
+            return Ok(values);
+        }
+        let value = integer_token_value(token)?;
+        let byte = u8::try_from(value).map_err(|_| {
+            CompileError::new("unsigned char initializer does not fit u8")
+                .at(token.line, token.column)
+        })?;
+        values.push(byte);
+        index += 1;
+        let Some(separator) = tokens.get(index) else {
+            return Err(CompileError::new("unterminated global array initializer")
+                .at(first.line, first.column));
+        };
+        if token_is_punctuator(separator, ",") {
+            index += 1;
+            continue;
+        }
+        if token_is_punctuator(separator, "}") {
+            continue;
+        }
+        return Err(
+            CompileError::new("expected global array initializer separator")
+                .at(separator.line, separator.column),
+        );
+    }
+}
+
+fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
+    match tokens {
+        [token] => integer_token_value(token),
+        [minus, token] if token_is_punctuator(minus, "-") => integer_token_value(token)?
+            .checked_neg()
+            .ok_or_else(|| CompileError::new("integer initializer overflow")),
+        [open, token, close]
+            if token_is_punctuator(open, "(") && token_is_punctuator(close, ")") =>
+        {
+            integer_token_value(token)
+        }
+        [first, ..] => Err(CompileError::new("unsupported global integer initializer")
+            .at(first.line, first.column)),
+        [] => Err(CompileError::new("expected global integer initializer")),
+    }
+}
+
+fn integer_token_value(token: &Token) -> CompileResult<i64> {
+    if let TokenKind::Integer(value) = &token.kind {
+        return Ok(*value);
+    }
+    Err(CompileError::new("expected integer initializer").at(token.line, token.column))
+}
+
+fn top_level_punctuator_index(tokens: &[Token], expected: &str) -> Option<usize> {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        if paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+            && token_is_punctuator(token, expected)
+        {
+            return Some(index);
+        }
+        update_depths(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
+    }
+    None
+}
+
+fn matching_top_level_bracket(tokens: &[Token], open_bracket: usize) -> Option<usize> {
+    let mut bracket_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open_bracket) {
+        if token_is_punctuator(token, "[") {
+            bracket_depth += 1;
+            continue;
+        }
+        if token_is_punctuator(token, "]") {
+            bracket_depth = bracket_depth.checked_sub(1)?;
+            if bracket_depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
 }
 
 struct SurfaceParser<'a> {
