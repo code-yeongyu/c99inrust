@@ -1373,6 +1373,71 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After `am_map.c` Local Array And Enum Sweep
+
+`compile -S` now moves the focused `am_map.c` path past the local light-level
+array and the first local declarations in `AM_clipMline`:
+
+```c
+static int litelevels[] = { 0, 4, 7, 10, 12, 14, 15, 15 };
+if (litelevelscnt == sizeof(litelevels)/sizeof(int)) litelevelscnt = 0;
+enum { LEFT = 1, RIGHT = 2, BOTTOM = 4, TOP = 8 };
+register outcode1 = 0;
+```
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_int_array_sizeof_slice
+compiler_accepts_local_enum_and_register_implicit_int_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/am_map.c \
+  -o /tmp/c99inrust-am_map.s
+```
+
+Focused `am_map.c` compile now reaches the next unsupported local struct
+object:
+
+```text
+error: 7692:14: expected punctuator ;
+```
+
+That line is:
+
+```c
+fpoint_t tmp;
+```
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779125648`, then that session was closed with `exit`
+without killing the tmux server:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779125648.txt
+ok=11
+fail=51
+```
+
+Representative moved blocker:
+
+```text
+FAIL am_map.c
+  before this sweep:
+    error: only local char arrays are supported
+  after this sweep:
+    error: 7692:14: expected punctuator ;
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After Pointer Walk Expression Slice
 
 `compile -S` now accepts the pointer-walk expression forms used by the middle of

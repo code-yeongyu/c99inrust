@@ -106,6 +106,12 @@ Local `static` scalar declarations, including old-style implicit-int forms such
 as `static nexttic = 0`, are parsed and lowered as stack-backed locals. This is
 only a compile-progress approximation; true persistent local static storage is
 still future work.
+Local integer arrays with initializer lists, such as
+`static int litelevels[] = { ... }`, are accepted as stack integer storage, and
+`sizeof(local_array)` reports the local array byte size for supported local
+array bindings. Local anonymous enum declarations add their constants to the
+current lowering context, and `register name = ...` is accepted as another
+old-style implicit-int local declaration.
 Plain `unsigned` parameters are accepted as integer parameters.
 The Doom typedef scalar set includes `lighttable_t`, enabling globals such as
 `lighttable_t* dc_colormap`.
@@ -129,10 +135,11 @@ but eleven of the 62 C files still fail before object generation. `doomdef.c`,
 `doomstat.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
 `m_random.c`, `m_swap.c`, `r_draw.c`, and `r_sky.c` currently reach assembly
 generation.
-The current `am_map.c` blocker is the local static integer array declaration
-`static int litelevels[] = { ... }` in `AM_updateLightLev`, not the earlier
-`AM_getIslope` member expressions, `st_notify` local static aggregate,
-`namebuf` stack array, switch statement, or `case '-'` label.
+The current `am_map.c` blocker is the local struct object declaration
+`fpoint_t tmp;` in `AM_clipMline`, not the earlier `AM_getIslope` member
+expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
+statement, `case '-'` label, `litelevels` local integer array, local enum, or
+`register` implicit-int locals.
 The current `f_wipe.c` blocker is the local static function-pointer array
 `static int (*wipes[])(int, int, int) = { ... }`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
