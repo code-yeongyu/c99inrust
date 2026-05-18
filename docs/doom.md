@@ -57,12 +57,13 @@ anonymous enum constants, pointer-width parameter spills, and int element
 load/store for `box[index]`. It also records `extern int` and `extern`
 pointer declarations as scalar global bindings without emitting definitions,
 which lets the Doom `i_main.c` entry translation unit assign `myargc` and
-`myargv`. Pointer returns remain unsupported.
+`myargv`. Postfix `++` is supported as an `int` side-effect statement, covering
+the `m_argv.c` `for (...; i++)` scan loop. Pointer returns remain unsupported.
 
 The current Doom compile scan reaches actual supported function bodies, but all
-but six of the 62 C files still fail before object generation. `i_main.c`,
-`m_bbox.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`, and `r_sky.c` currently
-reach assembly generation.
+but seven of the 62 C files still fail before object generation. `i_main.c`,
+`m_argv.c`, `m_bbox.c`, `m_fixed.c`, `m_random.c`, `m_swap.c`, and `r_sky.c`
+currently reach assembly generation.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 

@@ -569,6 +569,71 @@ FAIL z_zone.c
 This remains a compile-progress milestone only. Full Doom compile/link/run/play
 evidence is still missing.
 
+## Compile Scan After m_argv Post-Increment
+
+`compile -S` now accepts the Doom `m_argv.c` command-line parameter scan. The
+new surface is postfix `++` as an `int` side-effect expression in `for` post
+clauses:
+
+```text
+for (i = 1;i<myargc;i++)
+```
+
+The implementation lowers this only where the increment value is unused. Using
+the value of `i++` as an expression remains outside the supported executable
+subset.
+
+Regression coverage added:
+
+```text
+compiler_accepts_m_argv_post_increment_slice
+post_increment_for_loop_matches_host_c_compiler_exit_code
+```
+
+Manual single-file QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX -I /tmp/c99inrust-doom-src/linuxdoom-1.10 /tmp/c99inrust-doom-src/linuxdoom-1.10/m_argv.c -o /tmp/c99inrust-m-argv.s
+observed=_M_CheckParm
+observed=_myargc
+observed=_myargv
+observed=call _strcasecmp
+```
+
+The repeatable scan script was run in tmux against the pinned official Doom
+checkout without `tmux kill-server`.
+
+```text
+tmux_session=c99inrust-doom-scan-1779103487
+scan=/tmp/c99inrust-doom-scan-1779103487.txt
+command=tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-scan-1779103487.txt
+ok=7
+fail=55
+OK i_main.c
+OK m_argv.c
+OK m_bbox.c
+OK m_fixed.c
+OK m_random.c
+OK m_swap.c
+OK r_sky.c
+```
+
+Representative next blockers:
+
+```text
+FAIL am_map.c
+  error: 7142:11: expected punctuator ;
+FAIL m_cheat.c
+  error: 107:13: expected punctuator )
+FAIL p_inter.c
+  error: unsupported function parameter
+FAIL z_zone.c
+  error: 753:9: expected punctuator ;
+```
+
+This remains a compile-progress milestone only. Full Doom compile/link/run/play
+evidence is still missing.
+
 ## Compile Scan After i_main Extern Globals
 
 `compile -S` now accepts the Doom `i_main.c` entry translation unit. The
