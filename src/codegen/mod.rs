@@ -115,22 +115,40 @@ fn emit_aarch64_function(
     let local_bytes = function.local_count * 4;
     let temporary_base = local_bytes;
     let call_frame_bytes = if function_uses_call(function) { 8 } else { 0 };
-    let stack_bytes = align_to(local_bytes + (temporary_count * 4) + call_frame_bytes, 16);
+    let preserved_temp_bytes = if function_uses_aarch64_preserved_temp(function) {
+        8
+    } else {
+        0
+    };
+    let stack_bytes = align_to(
+        local_bytes + (temporary_count * 4) + call_frame_bytes + preserved_temp_bytes,
+        16,
+    );
     let link_register_offset = if call_frame_bytes > 0 {
         Some(stack_bytes - 8)
     } else {
         None
     };
+    let preserved_temp_offset = if preserved_temp_bytes > 0 {
+        Some(stack_bytes - call_frame_bytes - 8)
+    } else {
+        None
+    };
     let mut labels = LabelAllocator::new(function, target);
+    let shared_epilogue = if should_share_aarch64_epilogue(function, stack_bytes) {
+        Some(labels.fresh())
+    } else {
+        None
+    };
     write_assembly!(assembly, ".globl {label}\n")?;
     assembly.push_str(".p2align 2\n");
     write_assembly!(assembly, "{label}:\n")?;
-    if stack_bytes > 0 {
-        write_assembly!(assembly, "\tsub sp, sp, #{stack_bytes}\n")?;
-    }
-    if let Some(offset) = link_register_offset {
-        write_assembly!(assembly, "\tstr x30, [sp, #{offset}]\n")?;
-    }
+    emit_aarch64_prologue(
+        preserved_temp_offset,
+        link_register_offset,
+        stack_bytes,
+        assembly,
+    )?;
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal { slot, value } => {
@@ -163,15 +181,27 @@ fn emit_aarch64_function(
             }
             Instruction::Return(expr) => {
                 emit_aarch64_expr(expr, temporary_base, 0, &mut labels, assembly)?;
-                if let Some(offset) = link_register_offset {
-                    write_assembly!(assembly, "\tldr x30, [sp, #{offset}]\n")?;
+                if let Some(label) = shared_epilogue.as_ref() {
+                    write_assembly!(assembly, "\tb {label}\n")?;
+                } else {
+                    emit_aarch64_epilogue(
+                        preserved_temp_offset,
+                        link_register_offset,
+                        stack_bytes,
+                        assembly,
+                    )?;
                 }
-                if stack_bytes > 0 {
-                    write_assembly!(assembly, "\tadd sp, sp, #{stack_bytes}\n")?;
-                }
-                assembly.push_str("\tret\n");
             }
         }
+    }
+    if let Some(label) = shared_epilogue {
+        write_assembly!(assembly, "{label}:\n")?;
+        emit_aarch64_epilogue(
+            preserved_temp_offset,
+            link_register_offset,
+            stack_bytes,
+            assembly,
+        )?;
     }
     Ok(())
 }
@@ -291,10 +321,17 @@ fn emit_aarch64_expr(
             }
             let temporary_offset = temporary_base + (depth * 4);
             emit_aarch64_expr(left, temporary_base, depth + 1, labels, assembly)?;
-            write_assembly!(assembly, "\tstr w0, [sp, #{temporary_offset}]\n")?;
-            emit_aarch64_expr(right, temporary_base, depth + 1, labels, assembly)?;
-            assembly.push_str("\tmov w1, w0\n");
-            write_assembly!(assembly, "\tldr w0, [sp, #{temporary_offset}]\n")?;
+            if expr_is_direct_call(right) {
+                assembly.push_str("\tmov w19, w0\n");
+                emit_aarch64_expr(right, temporary_base, depth + 1, labels, assembly)?;
+                assembly.push_str("\tmov w1, w0\n");
+                assembly.push_str("\tmov w0, w19\n");
+            } else {
+                write_assembly!(assembly, "\tstr w0, [sp, #{temporary_offset}]\n")?;
+                emit_aarch64_expr(right, temporary_base, depth + 1, labels, assembly)?;
+                assembly.push_str("\tmov w1, w0\n");
+                write_assembly!(assembly, "\tldr w0, [sp, #{temporary_offset}]\n")?;
+            }
             match op {
                 BinaryOp::Mul => assembly.push_str("\tmul w0, w0, w1\n"),
                 BinaryOp::Div => assembly.push_str("\tsdiv w0, w0, w1\n"),
@@ -340,6 +377,43 @@ fn emit_aarch64_store_local(
         return Ok(());
     }
     emit_aarch64_expr(value, temporary_base, 0, labels, assembly)
+}
+
+fn emit_aarch64_prologue(
+    preserved_temp_offset: Option<usize>,
+    link_register_offset: Option<usize>,
+    stack_bytes: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if stack_bytes > 0 {
+        write_assembly!(assembly, "\tsub sp, sp, #{stack_bytes}\n")?;
+    }
+    if let Some(offset) = link_register_offset {
+        write_assembly!(assembly, "\tstr x30, [sp, #{offset}]\n")?;
+    }
+    if let Some(offset) = preserved_temp_offset {
+        write_assembly!(assembly, "\tstr x19, [sp, #{offset}]\n")?;
+    }
+    Ok(())
+}
+
+fn emit_aarch64_epilogue(
+    preserved_temp_offset: Option<usize>,
+    link_register_offset: Option<usize>,
+    stack_bytes: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if let Some(offset) = preserved_temp_offset {
+        write_assembly!(assembly, "\tldr x19, [sp, #{offset}]\n")?;
+    }
+    if let Some(offset) = link_register_offset {
+        write_assembly!(assembly, "\tldr x30, [sp, #{offset}]\n")?;
+    }
+    if stack_bytes > 0 {
+        write_assembly!(assembly, "\tadd sp, sp, #{stack_bytes}\n")?;
+    }
+    assembly.push_str("\tret\n");
+    Ok(())
 }
 
 fn emit_aarch64_jump_if_zero(
@@ -665,6 +739,17 @@ fn next_available_label(function: &LoweredFunction) -> usize {
         .map_or(0, |label| label + 1)
 }
 
+fn should_share_aarch64_epilogue(function: &LoweredFunction, stack_bytes: usize) -> bool {
+    stack_bytes > 0
+        && function
+            .instructions
+            .iter()
+            .filter(|instruction| matches!(instruction, Instruction::Return(_)))
+            .take(2)
+            .count()
+            > 1
+}
+
 const fn instruction_label(instruction: &Instruction) -> Option<usize> {
     match instruction {
         Instruction::StoreLocal { .. } | Instruction::Return(_) => None,
@@ -689,6 +774,45 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
 
 fn function_uses_call(function: &LoweredFunction) -> bool {
     function.instructions.iter().any(instruction_uses_call)
+}
+
+fn function_uses_aarch64_preserved_temp(function: &LoweredFunction) -> bool {
+    function
+        .instructions
+        .iter()
+        .any(instruction_needs_preserved_temp)
+}
+
+fn instruction_needs_preserved_temp(instruction: &Instruction) -> bool {
+    match instruction {
+        Instruction::StoreLocal { value, .. }
+        | Instruction::JumpIfZero {
+            condition: value, ..
+        }
+        | Instruction::Return(value) => expr_needs_preserved_temp(value),
+        Instruction::Jump { .. } | Instruction::Label { .. } => false,
+    }
+}
+
+fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
+    match expr {
+        LoweredExpr::Binary {
+            op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
+            left,
+            right,
+        } => expr_needs_preserved_temp(left) || expr_needs_preserved_temp(right),
+        LoweredExpr::Binary { left, right, .. } => {
+            expr_is_direct_call(right)
+                || expr_needs_preserved_temp(left)
+                || expr_needs_preserved_temp(right)
+        }
+        LoweredExpr::Unary { expr, .. } => expr_needs_preserved_temp(expr),
+        LoweredExpr::Call { .. } | LoweredExpr::Integer(_) | LoweredExpr::Local(_) => false,
+    }
+}
+
+const fn expr_is_direct_call(expr: &LoweredExpr) -> bool {
+    matches!(expr, LoweredExpr::Call { .. })
 }
 
 fn instruction_uses_call(instruction: &Instruction) -> bool {

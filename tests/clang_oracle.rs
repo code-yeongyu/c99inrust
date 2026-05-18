@@ -220,7 +220,7 @@ fn zero_arg_function_call_matches_host_c_compiler_exit_code() {
     }
     let case = OracleCase {
         name: "zero_arg_function_call",
-        source: "int answer(void) { return 40; } int main(void) { return 2 + answer(); }\n",
+        source: "int answer(void) { int value = 40; return value; } int main(void) { return 2 + answer(); }\n",
     };
     let root = fresh_temp_dir(case.name);
     let source = root.join("case.c");
@@ -234,6 +234,64 @@ fn zero_arg_function_call_matches_host_c_compiler_exit_code() {
         .and_then(|()| assemble(&c99_asm, &c99_exe))
         .and_then(|()| run_exit_code(&c99_exe))
         .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
+fn nested_zero_arg_function_calls_match_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "nested_zero_arg_function_calls",
+        source: "int answer(void) { int value = 40; return value; } int two(void) { int value = 2; return value; } int main(void) { return 100 + (answer() + two()); }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_asm = root.join("c99inrust.s");
+    let c99_exe = executable_path(&root, "c99inrust");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = compile_with_c99inrust(&source, &c99_asm)
+        .and_then(|()| assemble(&c99_asm, &c99_exe))
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust path should compile, link, and run");
+    let clang_status = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_exit_code(&clang_exe))
+        .expect("host C compiler path should compile and run");
+
+    // then
+    assert_eq!(c99_status, clang_status);
+}
+
+#[test]
+fn build_command_matches_host_c_compiler_exit_code() {
+    // given
+    if cfg!(windows) || !command_exists("cc") {
+        return;
+    }
+    let case = OracleCase {
+        name: "build_command",
+        source: "int tick(void) { return 1; } int main(void) { return 41 + tick(); }\n",
+    };
+    let root = fresh_temp_dir(case.name);
+    let source = root.join("case.c");
+    let c99_exe = executable_path(&root, "c99inrust-build");
+    let clang_exe = executable_path(&root, "clang");
+    fs::write(&source, case.source).expect("oracle source should be written");
+
+    // when
+    let c99_status = build_with_c99inrust(&source, &c99_exe)
+        .and_then(|()| run_exit_code(&c99_exe))
+        .expect("c99inrust build path should compile, link, and run");
     let clang_status = compile_with_host_c(&source, &clang_exe)
         .and_then(|()| run_exit_code(&clang_exe))
         .expect("host C compiler path should compile and run");
@@ -261,6 +319,22 @@ fn compile_with_c99inrust(source: &Path, output: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("c99inrust exited with {status}"))
+    }
+}
+
+fn build_with_c99inrust(source: &Path, output: &Path) -> Result<(), String> {
+    let compiler = env!("CARGO_BIN_EXE_c99inrust");
+    let status = Command::new(compiler)
+        .arg("build")
+        .arg(source)
+        .arg("-o")
+        .arg(output)
+        .status()
+        .map_err(|error| format!("failed to run c99inrust build: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("c99inrust build exited with {status}"))
     }
 }
 

@@ -223,7 +223,7 @@ fn compiler_emits_for_loop_back_edges() {
 #[test]
 fn compiler_emits_zero_arg_function_calls() {
     // given
-    let source = "int answer(void) { return 40; } int main(void) { return 2 + answer(); }";
+    let source = "int answer(void) { int value = 40; return value; } int main(void) { return 2 + answer(); }";
 
     // when
     let tokens = lex(source).expect("lexer should succeed");
@@ -250,4 +250,43 @@ fn compiler_emits_zero_arg_function_calls() {
         }
     }
     assert!(assembly.contains("ret"));
+}
+
+#[test]
+fn aarch64_keeps_binary_left_operand_in_preserved_register_across_direct_call() {
+    // given
+    let source = "int answer(void) { int value = 40; return value; } int main(void) { return 2 + answer(); }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("str x19, [sp, #"));
+    assert!(assembly.contains("mov w19, w0"));
+    assert!(assembly.contains("bl _answer"));
+    assert!(assembly.contains("mov w0, w19"));
+    assert!(assembly.contains("ldr x19, [sp, #"));
+}
+
+#[test]
+fn compiler_folds_calls_to_integer_constant_functions() {
+    // given
+    let source = "int tick(void) { return 1; } int main(void) { return tick(); }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::Aarch64AppleDarwin).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains(".globl _tick"));
+    assert!(assembly.contains(".globl _main"));
+    assert!(assembly.contains("movz w0, #1"));
+    assert!(!assembly.contains("\tbl _tick"));
 }

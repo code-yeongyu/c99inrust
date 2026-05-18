@@ -63,6 +63,8 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
     for function in &program.functions {
         functions.push(lower_function(function)?);
     }
+    let constant_returns = constant_return_functions(&functions);
+    inline_constant_calls(&mut functions, &constant_returns);
     Ok(LoweredProgram { functions })
 }
 
@@ -395,6 +397,57 @@ fn eval_binary(op: BinaryOp, left: i64, right: i64) -> CompileResult<i64> {
         BinaryOp::BitAnd => Ok(left & right),
         BinaryOp::BitXor => Ok(left ^ right),
         BinaryOp::BitOr => Ok(left | right),
+    }
+}
+
+fn constant_return_functions(functions: &[LoweredFunction]) -> HashMap<String, i64> {
+    let mut constants = HashMap::new();
+    for function in functions {
+        if function.local_count == 0
+            && let [Instruction::Return(LoweredExpr::Integer(value))] =
+                function.instructions.as_slice()
+        {
+            constants.insert(function.name.clone(), *value);
+        }
+    }
+    constants
+}
+
+fn inline_constant_calls(functions: &mut [LoweredFunction], constants: &HashMap<String, i64>) {
+    for function in functions {
+        for instruction in &mut function.instructions {
+            inline_constant_calls_in_instruction(instruction, constants);
+        }
+    }
+}
+
+fn inline_constant_calls_in_instruction(
+    instruction: &mut Instruction,
+    constants: &HashMap<String, i64>,
+) {
+    match instruction {
+        Instruction::StoreLocal { value, .. }
+        | Instruction::JumpIfZero {
+            condition: value, ..
+        }
+        | Instruction::Return(value) => inline_constant_calls_in_expr(value, constants),
+        Instruction::Jump { .. } | Instruction::Label { .. } => {}
+    }
+}
+
+fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<String, i64>) {
+    match expr {
+        LoweredExpr::Call { callee } => {
+            if let Some(value) = constants.get(callee) {
+                *expr = LoweredExpr::Integer(*value);
+            }
+        }
+        LoweredExpr::Unary { expr, .. } => inline_constant_calls_in_expr(expr, constants),
+        LoweredExpr::Binary { left, right, .. } => {
+            inline_constant_calls_in_expr(left, constants);
+            inline_constant_calls_in_expr(right, constants);
+        }
+        LoweredExpr::Integer(_) | LoweredExpr::Local(_) => {}
     }
 }
 
