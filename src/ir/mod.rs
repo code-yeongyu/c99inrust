@@ -927,8 +927,12 @@ impl LoweringContext {
         dereference: bool,
     ) -> CompileResult<LoweredExpr> {
         let member = self.resolve_member_access(base, field, dereference)?;
-        let FieldType::Scalar(scalar_type) = member.field_type else {
-            return Err(CompileError::new("struct member value is not supported"));
+        let scalar_type = match member.field_type {
+            FieldType::Scalar(scalar_type) => scalar_type,
+            FieldType::Pointer => ScalarType::Pointer,
+            FieldType::Struct(_) => {
+                return Err(CompileError::new("struct member value is not supported"));
+            }
         };
         Ok(LoweredExpr::PointerField {
             pointer: Box::new(member.pointer),
@@ -944,10 +948,14 @@ impl LoweringContext {
         dereference: bool,
     ) -> CompileResult<LoweredLValue> {
         let member = self.resolve_member_access(base, field, dereference)?;
-        let FieldType::Scalar(scalar_type) = member.field_type else {
-            return Err(CompileError::new(
-                "assignment to struct member is not supported",
-            ));
+        let scalar_type = match member.field_type {
+            FieldType::Scalar(scalar_type) => scalar_type,
+            FieldType::Pointer => ScalarType::Pointer,
+            FieldType::Struct(_) => {
+                return Err(CompileError::new(
+                    "assignment to struct member is not supported",
+                ));
+            }
         };
         Ok(LoweredLValue::PointerField {
             pointer: Box::new(member.pointer),
