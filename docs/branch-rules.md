@@ -10,6 +10,9 @@ Recommended GitHub ruleset for `main`:
 - Block deletions.
 - Require linear history.
 
-The local setup step attempts to create the public GitHub repository. Branch
-rules may require GitHub plan/API availability; if the API rejects them, keep
-this file as the source of truth and apply the equivalent rules in the UI.
+Applied repository ruleset:
+
+- Repository: `https://github.com/code-yeongyu/c99inrust`
+- Ruleset: `main protection`
+- Ruleset ID: `16534619`
+- Applied: `2026-05-18T19:46:06+09:00`
