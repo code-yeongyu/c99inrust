@@ -1301,6 +1301,112 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After Doom Action Function Pointer Slice
+
+Doom action-function pointer typedefs are now treated as pointer types in casts,
+struct/union fields, local declarations, and parameters. The compiler also
+parses `typedef union { ... } actionf_t`, keeps tagged struct aliases such as
+`line_s` for `struct line_s**` referents, lowers pointer casts of function
+symbols to symbol addresses, supports indirect calls through pointer-valued
+members, records prototype-only pointer-return functions for `getSide(...)->x`
+style member access, and merges extern struct-object declarations with their
+definitions.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doom_action_function_pointer_slice
+compiler_accepts_doom_action_function_pointer_call_slice
+compiler_accepts_member_access_on_pointer_return_call_slice
+compiler_accepts_tagged_struct_pointer_referent_slice
+compiler_merges_extern_struct_object_with_definition_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_ceilng.c \
+  -o /tmp/c99inrust-p_ceilng.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_doors.c \
+  -o /tmp/c99inrust-p_doors.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_floor.c \
+  -o /tmp/c99inrust-p_floor.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_plats.c \
+  -o /tmp/c99inrust-p_plats.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_saveg.c \
+  -o /tmp/c99inrust-p_saveg.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/p_tick.c \
+  -o /tmp/c99inrust-p_tick.s
+```
+
+All focused compiles above now reach assembly generation. `p_mobj.c` moved past
+the action-function pointer call parse blocker and now stops later on a
+struct-member value gap.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779141874`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779141874.txt
+ok=35
+fail=27
+```
+
+Newly green since the previous scan:
+
+```text
+p_ceilng.c
+p_doors.c
+p_floor.c
+p_inter.c
+p_lights.c
+p_plats.c
+p_pspr.c
+p_saveg.c
+p_spec.c
+p_telept.c
+p_tick.c
+p_user.c
+z_zone.c
+```
+
+Representative remaining blockers:
+
+```text
+FAIL p_enemy.c
+  error: unknown local or global: PIT_VileCheck
+FAIL p_map.c
+  error: unknown local or global: PIT_StompThing
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL r_main.c
+  error: assignment to undeclared local or global: colfunc
+FAIL r_things.c
+  error: assignment to undeclared local or global: colfunc
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After `d_items.c` Struct Array Declaration Merge
 
 This slice moved `d_items.c` from the conflicting `weaponinfo` declaration
