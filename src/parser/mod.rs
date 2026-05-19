@@ -363,6 +363,7 @@ pub enum Expr {
     },
     PostIncrement {
         target: LValue,
+        decrement: bool,
     },
     Unary {
         op: UnaryOp,
@@ -1971,19 +1972,15 @@ impl Parser<'_> {
                 self.advance();
                 expr = Expr::PostIncrement {
                     target: lvalue_from_expr(expr)?,
+                    decrement: false,
                 };
                 continue;
             }
             if self.check_punctuator("--") {
                 self.advance();
-                let target = lvalue_from_expr(expr.clone())?;
-                expr = Expr::Assignment {
-                    target,
-                    value: Box::new(Expr::Binary {
-                        op: BinaryOp::Sub,
-                        left: Box::new(expr),
-                        right: Box::new(Expr::Integer(1)),
-                    }),
+                expr = Expr::PostIncrement {
+                    target: lvalue_from_expr(expr)?,
+                    decrement: true,
                 };
                 continue;
             }

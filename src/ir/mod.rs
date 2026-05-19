@@ -1108,8 +1108,8 @@ impl LoweringContext {
                 cases,
                 default,
             } => self.lower_switch(condition, cases, default),
-            Statement::Expression(Expr::PostIncrement { target }) => {
-                self.lower_post_increment_statement(target)
+            Statement::Expression(Expr::PostIncrement { target, decrement }) => {
+                self.lower_post_increment_statement(target, *decrement)
             }
             Statement::Expression(expr) => self.lower_expression_statement(expr),
             Statement::Break => self.lower_break(),
@@ -1700,7 +1700,9 @@ impl LoweringContext {
             Expr::AddressOf { target } => self.lower_address_of(target),
             Expr::Subscript { array, index } => self.lower_subscript(array, index),
             Expr::Assignment { target, value } => self.lower_assignment_expr(target, value),
-            Expr::PostIncrement { target } => self.lower_post_increment_expr(target),
+            Expr::PostIncrement { target, decrement } => {
+                self.lower_post_increment_expr(target, *decrement)
+            }
             Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
                 op: *op,
                 expr: Box::new(self.lower_expr(expr)?),
@@ -3286,10 +3288,14 @@ impl LoweringContext {
         );
     }
 
-    fn lower_post_increment_statement(&mut self, target: &LValue) -> CompileResult<()> {
+    fn lower_post_increment_statement(
+        &mut self,
+        target: &LValue,
+        decrement: bool,
+    ) -> CompileResult<()> {
         let lowered = self.lower_lvalue(target)?;
         ensure_post_increment_scalar(&lowered)?;
-        let increment = self.post_increment_amount(target, &lowered)?;
+        let increment = self.post_increment_amount(target, &lowered, decrement)?;
         let current = lowered_lvalue_to_expr(&lowered);
         self.push_store(
             lowered,
@@ -3302,10 +3308,14 @@ impl LoweringContext {
         Ok(())
     }
 
-    fn lower_post_increment_expr(&self, target: &LValue) -> CompileResult<LoweredExpr> {
+    fn lower_post_increment_expr(
+        &self,
+        target: &LValue,
+        decrement: bool,
+    ) -> CompileResult<LoweredExpr> {
         let lowered = self.lower_lvalue(target)?;
         ensure_post_increment_scalar(&lowered)?;
-        let increment = self.post_increment_amount(target, &lowered)?;
+        let increment = self.post_increment_amount(target, &lowered, decrement)?;
         Ok(LoweredExpr::PostIncrement {
             target: lowered,
             increment,
@@ -3316,15 +3326,19 @@ impl LoweringContext {
         &self,
         target: &LValue,
         lowered: &LoweredLValue,
+        decrement: bool,
     ) -> CompileResult<i64> {
-        if lowered_lvalue_scalar_type(lowered) != ScalarType::Pointer {
-            return Ok(1);
-        }
-        let Some(referent) = self.pointer_referent_for_lvalue(target)? else {
-            return Ok(1);
+        let amount = if lowered_lvalue_scalar_type(lowered) == ScalarType::Pointer {
+            self.pointer_referent_for_lvalue(target)?
+                .map_or(Ok(1), |referent| {
+                    let stride = self.pointer_referent_stride(&referent)?;
+                    i64::try_from(stride)
+                        .map_err(|_| CompileError::new("pointer stride does not fit i64"))
+                })?
+        } else {
+            1
         };
-        let stride = self.pointer_referent_stride(&referent)?;
-        i64::try_from(stride).map_err(|_| CompileError::new("pointer stride does not fit i64"))
+        Ok(if decrement { -amount } else { amount })
     }
 
     fn pointer_referent_for_lvalue(&self, target: &LValue) -> CompileResult<Option<String>> {

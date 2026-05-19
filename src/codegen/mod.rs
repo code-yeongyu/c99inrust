@@ -1944,19 +1944,23 @@ fn emit_aarch64_increment_result(
     increment: i64,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let immediate = u16::try_from(increment)
-        .map_err(|_| CompileError::new("post-increment value does not fit aarch64 immediate"))?;
+    let immediate = increment.unsigned_abs();
     if immediate > 4095 {
         return Err(CompileError::new(
             "post-increment value does not fit aarch64 immediate",
         ));
     }
+    let op = if increment.is_negative() {
+        "sub"
+    } else {
+        "add"
+    };
     match width {
         ValueWidth::I32 => {
-            write_assembly!(assembly, "\tadd w0, w0, #{immediate}\n")
+            write_assembly!(assembly, "\t{op} w0, w0, #{immediate}\n")
         }
         ValueWidth::I64 => {
-            write_assembly!(assembly, "\tadd x0, x0, #{immediate}\n")
+            write_assembly!(assembly, "\t{op} x0, x0, #{immediate}\n")
         }
         ValueWidth::F64 => Err(CompileError::new("unsupported double post-increment")),
     }

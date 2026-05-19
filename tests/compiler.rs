@@ -229,7 +229,7 @@ fn compiler_accepts_post_decrement_condition_slice() {
 
     // then
     assert!(assembly.contains("run"));
-    assert!(assembly.contains("\tsubl %ecx, %eax\n"));
+    assert!(assembly.contains("\taddl $-1, %eax\n"));
     assert!(assembly.contains("\tje .Lrun_"));
 }
 
