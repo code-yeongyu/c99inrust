@@ -2007,6 +2007,39 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_global_struct_object_with_struct_array_field_slice() {
+    // given
+    let source = r"typedef struct {
+    int in;
+    int frags[4];
+} wbplayerstruct_t;
+typedef struct {
+    int epsd;
+    wbplayerstruct_t plyr[4];
+} wbstartstruct_t;
+wbstartstruct_t wminfo;
+int main(void) {
+    int i;
+    i = 0;
+    wminfo.epsd = 1;
+    wminfo.plyr[i].in = 2;
+    return sizeof(wminfo);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("wminfo:"));
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl $88, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_extern_struct_array_address_slice() {
     // given
     let source = r"typedef struct {
@@ -3525,6 +3558,54 @@ int main(void) {
     // then
     assert!(aarch64_assembly.contains("\tbl _sink\n"));
     assert!(x86_64_assembly.contains("\tcall sink\n"));
+}
+
+#[test]
+fn compiler_accepts_global_int_matrix_slice() {
+    // given
+    let source = r"int pars[4][10] =
+{
+    {0},
+    {0,30,75,120,90,165,180,180,30,165},
+    {0,90,90,90,120,90,360,240,30,170},
+    {0,90,45,90,150,90,90,165,30,135}
+};
+int value(int episode, int map) {
+    return pars[episode][map];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("pars:"));
+    assert!(assembly.contains("value:"));
+}
+
+#[test]
+fn compiler_accepts_global_pointer_subscript_initializer_slice() {
+    // given
+    let source = r"typedef int boolean;
+boolean mousearray[4];
+boolean* mousebuttons = &mousearray[1];
+int main(void) {
+    return mousebuttons[0];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("mousebuttons:"));
+    assert!(assembly.contains("\t.quad mousearray+4\n"));
 }
 
 #[test]

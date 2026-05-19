@@ -27,6 +27,7 @@ pub enum LoweredGlobalInitializer {
     IntArray(Vec<i32>),
     PointerNull,
     PointerString(String),
+    PointerGlobalOffset { base: String, byte_offset: usize },
     PointerArray(usize),
     PointerStringArray(Vec<String>),
     ZeroBytes(usize),
@@ -308,10 +309,12 @@ fn lower_extern_global_binding(
         }
         GlobalInitializer::Int(_)
         | GlobalInitializer::IntArray(_)
+        | GlobalInitializer::IntMatrix { .. }
         | GlobalInitializer::DoubleArray { .. }
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerSubscriptAddress { .. }
         | GlobalInitializer::PointerArray { .. }
         | GlobalInitializer::PointerStringArray { .. }
         | GlobalInitializer::StructObject { .. }
@@ -341,6 +344,10 @@ fn lower_defined_global_initializer(
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntArray,
         )),
+        GlobalInitializer::IntMatrix { values, columns } => Ok((
+            LoweredGlobalInitializer::IntArray(values.clone()),
+            GlobalBinding::IntMatrix { columns: *columns },
+        )),
         GlobalInitializer::DoubleArray { length } => {
             let byte_len = length
                 .checked_mul(scalar_size(ScalarType::Double))
@@ -365,6 +372,11 @@ fn lower_defined_global_initializer(
                 referent: referent.clone(),
             },
         )),
+        GlobalInitializer::PointerSubscriptAddress {
+            referent,
+            base,
+            index,
+        } => lower_global_pointer_subscript_address(referent.as_deref(), base, *index),
         GlobalInitializer::PointerArray { referent, length } => Ok((
             LoweredGlobalInitializer::PointerArray(*length),
             GlobalBinding::PointerArray {
@@ -403,6 +415,28 @@ fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
+}
+
+fn lower_global_pointer_subscript_address(
+    referent: Option<&str>,
+    base: &str,
+    index: usize,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    let stride = referent
+        .and_then(pointer_referent_byte_size)
+        .unwrap_or_else(|| scalar_size(ScalarType::Int));
+    let byte_offset = index
+        .checked_mul(stride)
+        .ok_or_else(|| CompileError::new("global pointer offset overflow"))?;
+    Ok((
+        LoweredGlobalInitializer::PointerGlobalOffset {
+            base: base.to_owned(),
+            byte_offset,
+        },
+        GlobalBinding::Pointer {
+            referent: referent.map(ToOwned::to_owned),
+        },
+    ))
 }
 
 fn lower_int_constant_global(
@@ -748,6 +782,9 @@ enum LocalBinding {
 enum GlobalBinding {
     Int,
     IntArray,
+    IntMatrix {
+        columns: usize,
+    },
     DoubleArray,
     Pointer {
         referent: Option<String>,
@@ -786,6 +823,7 @@ impl GlobalBinding {
             Self::Int => Some(ScalarType::Int),
             Self::Pointer { .. } => Some(ScalarType::Pointer),
             Self::IntArray
+            | Self::IntMatrix { .. }
             | Self::DoubleArray
             | Self::PointerArray { .. }
             | Self::StructObject { .. }
@@ -799,6 +837,7 @@ impl GlobalBinding {
         matches!(
             self,
             Self::IntArray
+                | Self::IntMatrix { .. }
                 | Self::DoubleArray
                 | Self::PointerArray { .. }
                 | Self::StructArray { .. }
@@ -1890,6 +1929,14 @@ impl LoweringContext {
                 .map(LoweredExpr::Integer)
                 .map_err(|_| CompileError::new("sizeof result does not fit i64"));
         }
+        if let Expr::Identifier(name) = expr
+            && let Some(GlobalBinding::StructObject { byte_size, .. }) =
+                self.global_bindings.get(name)
+        {
+            return i64::try_from(*byte_size)
+                .map(LoweredExpr::Integer)
+                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
+        }
         let expr = self.lower_expr(expr)?;
         let size = lowered_expr_scalar_type(&expr).map_or(4, scalar_size);
         i64::try_from(size)
@@ -1898,6 +1945,9 @@ impl LoweringContext {
     }
 
     fn lower_subscript(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredExpr> {
+        if let Some(pointer) = self.resolve_global_int_matrix_row(array, index)? {
+            return Ok(pointer);
+        }
         if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
             return Ok(pointer);
         }
@@ -2066,6 +2116,9 @@ impl LoweringContext {
     fn lower_address_of(&self, target: &LValue) -> CompileResult<LoweredExpr> {
         match target {
             LValue::Subscript { array, index } => {
+                if let Some(pointer) = self.resolve_global_int_matrix_row(array, index)? {
+                    return Ok(pointer);
+                }
                 if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
                     return Ok(pointer);
                 }
@@ -2349,6 +2402,27 @@ impl LoweringContext {
             pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
             index: Box::new(self.lower_expr(index)?),
             byte_size: *columns,
+        }))
+    }
+
+    fn resolve_global_int_matrix_row(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(GlobalBinding::IntMatrix { columns }) = self.global_bindings.get(name) else {
+            return Ok(None);
+        };
+        let byte_size = columns
+            .checked_mul(scalar_size(ScalarType::Int))
+            .ok_or_else(|| CompileError::new("global int matrix row size overflow"))?;
+        Ok(Some(LoweredExpr::PointerOffset {
+            pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size,
         }))
     }
 

@@ -84,6 +84,10 @@ pub enum GlobalInitializer {
     },
     Int(i64),
     IntArray(Vec<i32>),
+    IntMatrix {
+        values: Vec<i32>,
+        columns: usize,
+    },
     IntConstant(String),
     DoubleArray {
         length: usize,
@@ -94,6 +98,11 @@ pub enum GlobalInitializer {
     PointerString {
         referent: Option<String>,
         value: String,
+    },
+    PointerSubscriptAddress {
+        referent: Option<String>,
+        base: String,
+        index: usize,
     },
     PointerArray {
         referent: Option<String>,
@@ -2945,7 +2954,7 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_extern_scalar(tokens, known_structs)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer(tokens)? {
+    if let Some(global) = parse_global_pointer(tokens, constants)? {
         return Ok(Some(global));
     }
     parse_global_int(tokens, known_structs, constants)
@@ -3424,6 +3433,51 @@ fn parse_global_int_array(
             ),
         );
     };
+    if declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        let second_open = close_bracket + 1;
+        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+            return Err(
+                CompileError::new("unterminated global int-matrix declarator").at(
+                    declaration[second_open].line,
+                    declaration[second_open].column,
+                ),
+            );
+        };
+        let rows = parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?;
+        let columns = parse_unsigned_char_array_length(
+            &declaration[second_open + 1..second_close],
+            constants,
+        )?;
+        let length = rows
+            .checked_mul(columns)
+            .ok_or_else(|| CompileError::new("global int matrix size overflow"))?;
+        let values = if let Some(assign_index) =
+            top_level_punctuator_index(&declaration[second_close + 1..], "=")
+        {
+            let assign_index = second_close + 1 + assign_index;
+            parse_int_matrix_initializer(
+                &declaration[assign_index + 1..],
+                rows,
+                columns,
+                constants,
+            )?
+        } else {
+            vec![0; length]
+        };
+        let name = token_identifier(&declaration[name_index])
+            .ok_or_else(|| CompileError::new("expected global int-matrix name"))?
+            .to_owned();
+        return Ok(Some(Global {
+            name,
+            initializer: GlobalInitializer::IntMatrix { values, columns },
+        }));
+    }
     let explicit_length = if open_bracket + 1 == close_bracket {
         None
     } else {
@@ -3522,7 +3576,7 @@ fn parse_global_extern_scalar(
     Ok(Some(Global { name, initializer }))
 }
 
-fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_pointer(tokens: &[Token], constants: &[Constant]) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -3548,6 +3602,18 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
                 initializer: GlobalInitializer::PointerString { referent, value },
             }));
         }
+        if let Some((base, index)) =
+            parse_global_pointer_subscript_address_initializer(initializer, constants)?
+        {
+            return Ok(Some(Global {
+                name,
+                initializer: GlobalInitializer::PointerSubscriptAddress {
+                    referent,
+                    base,
+                    index,
+                },
+            }));
+        }
         let Ok(value) = parse_integer_initializer(initializer) else {
             return Ok(None);
         };
@@ -3559,6 +3625,46 @@ fn parse_global_pointer(tokens: &[Token]) -> CompileResult<Option<Global>> {
         name,
         initializer: GlobalInitializer::PointerNull { referent },
     }))
+}
+
+fn parse_global_pointer_subscript_address_initializer(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<(String, usize)>> {
+    if !tokens
+        .first()
+        .is_some_and(|token| token_is_punctuator(token, "&"))
+    {
+        return Ok(None);
+    }
+    let Some(base) = tokens.get(1).and_then(token_identifier) else {
+        return Ok(None);
+    };
+    if !tokens
+        .get(2)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(tokens, 2) else {
+        return Err(
+            CompileError::new("unterminated global pointer initializer subscript")
+                .at(tokens[2].line, tokens[2].column),
+        );
+    };
+    if close_bracket + 1 != tokens.len() {
+        return Ok(None);
+    }
+    let index = parse_integer_initializer_with_constants(&tokens[3..close_bracket], constants)?;
+    if index < 0 {
+        return Err(
+            CompileError::new("global pointer initializer subscript must be nonnegative")
+                .at(tokens[2].line, tokens[2].column),
+        );
+    }
+    usize::try_from(index)
+        .map(|index| Some((base.to_owned(), index)))
+        .map_err(|_| CompileError::new("global pointer initializer subscript is too large"))
 }
 
 fn parse_global_int(
@@ -3875,6 +3981,72 @@ fn parse_int_array_initializer(
     if values.len() > length {
         return Err(CompileError::new("too many global int array initializers")
             .at(first.line, first.column));
+    }
+    values.resize(length, 0);
+    Ok(values)
+}
+
+fn parse_int_matrix_initializer(
+    tokens: &[Token],
+    rows: usize,
+    columns: usize,
+    constants: &[Constant],
+) -> CompileResult<Vec<i32>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new("expected global int matrix initializer"));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(CompileError::new("expected global int matrix initializer")
+            .at(first.line, first.column));
+    }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+        return Err(
+            CompileError::new("unterminated global int matrix initializer")
+                .at(first.line, first.column),
+        );
+    };
+    if let Some(token) = tokens.get(close_brace + 1) {
+        return Err(
+            CompileError::new("unsupported global int matrix initializer")
+                .at(token.line, token.column),
+        );
+    }
+
+    let length = rows
+        .checked_mul(columns)
+        .ok_or_else(|| CompileError::new("global int matrix size overflow"))?;
+    let mut values = Vec::with_capacity(length);
+    let mut start = 1usize;
+    while start < close_brace {
+        let item = &tokens[start..close_brace];
+        let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
+        if item_len == 0 {
+            return Err(
+                CompileError::new("expected global int matrix initializer value")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        }
+        let item = &item[..item_len];
+        if item
+            .first()
+            .is_some_and(|token| token_is_punctuator(token, "{"))
+        {
+            values.extend(parse_int_array_initializer(item, Some(columns), constants)?);
+        } else {
+            let value = parse_integer_initializer_with_constants(item, constants)?;
+            values.push(i32::try_from(value).map_err(|_| {
+                CompileError::new("global int matrix initializer does not fit i32")
+                    .at(tokens[start].line, tokens[start].column)
+            })?);
+        }
+        if values.len() > length {
+            return Err(CompileError::new("too many global int matrix initializers")
+                .at(tokens[start].line, tokens[start].column));
+        }
+        start += item_len;
+        if start < close_brace {
+            start += 1;
+        }
     }
     values.resize(length, 0);
     Ok(values)

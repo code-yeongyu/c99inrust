@@ -269,6 +269,9 @@ fn emit_globals(
             LoweredGlobalInitializer::PointerString(value) => {
                 emit_pointer_string_global(&global.name, value, target, assembly)?;
             }
+            LoweredGlobalInitializer::PointerGlobalOffset { base, byte_offset } => {
+                emit_pointer_global_offset(&global.name, base, *byte_offset, target, assembly)?;
+            }
             LoweredGlobalInitializer::PointerArray(length) => {
                 let byte_len = length
                     .checked_mul(8)
@@ -306,6 +309,24 @@ fn emit_pointer_string_global(
     write_assembly!(assembly, "{label}:\n")?;
     write_assembly!(assembly, "\t.quad {string_label}\n")?;
     emit_string_literal_data_returning_to(&string_label, value, target, ".data\n", assembly)
+}
+
+fn emit_pointer_global_offset(
+    name: &str,
+    base: &str,
+    byte_offset: usize,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    let base_label = label_name(base, target);
+    assembly.push_str(".p2align 3\n");
+    write_assembly!(assembly, "{label}:\n")?;
+    if byte_offset == 0 {
+        write_assembly!(assembly, "\t.quad {base_label}\n")
+    } else {
+        write_assembly!(assembly, "\t.quad {base_label}+{byte_offset}\n")
+    }
 }
 
 fn emit_pointer_string_array_global(
