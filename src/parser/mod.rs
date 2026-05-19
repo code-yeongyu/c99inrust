@@ -55,7 +55,18 @@ pub struct Constant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Global {
     pub name: String,
+    pub is_static: bool,
     pub initializer: GlobalInitializer,
+}
+
+impl Global {
+    const fn new(name: String, initializer: GlobalInitializer) -> Self {
+        Self {
+            name,
+            is_static: false,
+            initializer,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3243,10 +3254,22 @@ fn parse_supported_global_declarations(
     sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Vec<Global>> {
     if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs, constants)? {
-        return Ok(globals);
+        return Ok(with_global_linkage(tokens, globals));
     }
-    parse_supported_global_declaration(tokens, known_structs, constants, sizeof_symbols)
-        .map(|global| global.map_or_else(Vec::new, |global| vec![global]))
+    parse_supported_global_declaration(tokens, known_structs, constants, sizeof_symbols).map(
+        |global| {
+            let globals = global.map_or_else(Vec::new, |global| vec![global]);
+            with_global_linkage(tokens, globals)
+        },
+    )
+}
+
+fn with_global_linkage(tokens: &[Token], mut globals: Vec<Global>) -> Vec<Global> {
+    let is_static = token_has_keyword(tokens, Keyword::Static);
+    for global in &mut globals {
+        global.is_static = is_static;
+    }
+    globals
 }
 
 fn global_sizeof_symbols(
@@ -3342,7 +3365,7 @@ fn parse_global_function_pointer(tokens: &[Token]) -> Option<Global> {
     } else {
         GlobalInitializer::PointerNull { referent: None }
     };
-    Some(Global { name, initializer })
+    Some(Global::new(name, initializer))
 }
 
 fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {
@@ -3446,15 +3469,15 @@ fn parse_global_unsigned_char_array(
         .ok_or_else(|| CompileError::new("expected global array name"))?
         .to_owned();
     if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
-        return Ok(Some(Global {
+        return Ok(Some(Global::new(
             name,
-            initializer: GlobalInitializer::ExternUnsignedCharArray,
-        }));
+            GlobalInitializer::ExternUnsignedCharArray,
+        )));
     }
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::UnsignedCharArray(values),
-    }))
+        GlobalInitializer::UnsignedCharArray(values),
+    )))
 }
 
 fn parse_global_unsigned_char_matrix(
@@ -3490,10 +3513,10 @@ fn parse_global_unsigned_char_matrix(
         .ok_or_else(|| CompileError::new("expected global matrix name"))?
         .to_owned();
     if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
-        return Ok(Some(Global {
+        return Ok(Some(Global::new(
             name,
-            initializer: GlobalInitializer::ExternUnsignedCharMatrix { columns },
-        }));
+            GlobalInitializer::ExternUnsignedCharMatrix { columns },
+        )));
     }
     let values = parse_global_unsigned_char_matrix_values(
         declaration,
@@ -3503,10 +3526,10 @@ fn parse_global_unsigned_char_matrix(
         length,
         constants,
     )?;
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::UnsignedCharMatrix { values, columns },
-    }))
+        GlobalInitializer::UnsignedCharMatrix { values, columns },
+    )))
 }
 
 fn parse_global_unsigned_char_matrix_values(
@@ -3603,14 +3626,14 @@ fn parse_global_pointer_array(
         return Ok(None);
     }
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::PointerArray {
+        GlobalInitializer::PointerArray {
             referent,
             length,
             columns,
         },
-    }))
+    )))
 }
 
 fn parse_global_pointer_string_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
@@ -3646,10 +3669,10 @@ fn parse_global_pointer_string_array(tokens: &[Token]) -> CompileResult<Option<G
         .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
         .to_owned();
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::PointerStringArray { referent, values },
-    }))
+        GlobalInitializer::PointerStringArray { referent, values },
+    )))
 }
 
 fn parse_global_pointer_name_array(
@@ -3702,14 +3725,14 @@ fn parse_global_pointer_name_array(
         .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
         .to_owned();
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::PointerNameArray {
+        GlobalInitializer::PointerNameArray {
             referent,
             values,
             length,
         },
-    }))
+    )))
 }
 
 fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
@@ -3740,10 +3763,10 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
         .ok_or_else(|| CompileError::new("expected extern global pointer-array name"))?
         .to_owned();
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::ExternPointerArray { referent },
-    }))
+        GlobalInitializer::ExternPointerArray { referent },
+    )))
 }
 
 fn parse_global_struct_array(
@@ -3841,7 +3864,7 @@ fn parse_global_struct_array(
             columns,
         }
     };
-    Ok(Some(Global { name, initializer }))
+    Ok(Some(Global::new(name, initializer)))
 }
 
 fn parse_optional_symbolic_array_length(
@@ -3918,10 +3941,10 @@ fn parse_global_struct_object(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global struct object name"))?
         .to_owned();
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::StructObject { struct_name },
-    }))
+        GlobalInitializer::StructObject { struct_name },
+    )))
 }
 
 fn parse_global_extern_int_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
@@ -3951,10 +3974,7 @@ fn parse_global_extern_int_array(tokens: &[Token]) -> CompileResult<Option<Globa
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected extern global int-array name"))?
         .to_owned();
-    Ok(Some(Global {
-        name,
-        initializer: GlobalInitializer::ExternIntArray,
-    }))
+    Ok(Some(Global::new(name, GlobalInitializer::ExternIntArray)))
 }
 
 fn parse_global_int_array(
@@ -4024,10 +4044,10 @@ fn parse_global_int_array(
         let name = token_identifier(&declaration[name_index])
             .ok_or_else(|| CompileError::new("expected global int-matrix name"))?
             .to_owned();
-        return Ok(Some(Global {
+        return Ok(Some(Global::new(
             name,
-            initializer: GlobalInitializer::IntMatrix { values, columns },
-        }));
+            GlobalInitializer::IntMatrix { values, columns },
+        )));
     }
     let explicit_length = if open_bracket + 1 == close_bracket {
         None
@@ -4055,10 +4075,7 @@ fn parse_global_int_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global int-array name"))?
         .to_owned();
-    Ok(Some(Global {
-        name,
-        initializer: GlobalInitializer::IntArray(values),
-    }))
+    Ok(Some(Global::new(name, GlobalInitializer::IntArray(values))))
 }
 
 fn parse_global_double_array(
@@ -4093,10 +4110,10 @@ fn parse_global_double_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global double-array name"))?
         .to_owned();
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::DoubleArray { length },
-    }))
+        GlobalInitializer::DoubleArray { length },
+    )))
 }
 
 fn parse_global_extern_scalar(
@@ -4129,7 +4146,7 @@ fn parse_global_extern_scalar(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected extern global name"))?
         .to_owned();
-    Ok(Some(Global { name, initializer }))
+    Ok(Some(Global::new(name, initializer)))
 }
 
 fn parse_global_pointer(tokens: &[Token], constants: &[Constant]) -> CompileResult<Option<Global>> {
@@ -4153,22 +4170,22 @@ fn parse_global_pointer(tokens: &[Token], constants: &[Constant]) -> CompileResu
     if end_index != declaration.len() {
         let initializer = &declaration[end_index + 1..];
         if let Ok(value) = parse_string_initializer(initializer) {
-            return Ok(Some(Global {
+            return Ok(Some(Global::new(
                 name,
-                initializer: GlobalInitializer::PointerString { referent, value },
-            }));
+                GlobalInitializer::PointerString { referent, value },
+            )));
         }
         if let Some((base, index)) =
             parse_global_pointer_subscript_address_initializer(initializer, constants)?
         {
-            return Ok(Some(Global {
+            return Ok(Some(Global::new(
                 name,
-                initializer: GlobalInitializer::PointerSubscriptAddress {
+                GlobalInitializer::PointerSubscriptAddress {
                     referent,
                     base,
                     index,
                 },
-            }));
+            )));
         }
         let Ok(value) = parse_integer_initializer(initializer) else {
             return Ok(None);
@@ -4177,10 +4194,10 @@ fn parse_global_pointer(tokens: &[Token], constants: &[Constant]) -> CompileResu
             return Ok(None);
         }
     }
-    Ok(Some(Global {
+    Ok(Some(Global::new(
         name,
-        initializer: GlobalInitializer::PointerNull { referent },
-    }))
+        GlobalInitializer::PointerNull { referent },
+    )))
 }
 
 fn parse_global_pointer_subscript_address_initializer(
@@ -4256,7 +4273,7 @@ fn parse_global_int(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global int name"))?
         .to_owned();
-    Ok(Some(Global { name, initializer }))
+    Ok(Some(Global::new(name, initializer)))
 }
 
 fn parse_global_int_declarator_list(
@@ -4304,7 +4321,7 @@ fn parse_global_int_declarator_list(
         let name = token_identifier(&segment[name_index])
             .ok_or_else(|| CompileError::new("expected global int name"))?
             .to_owned();
-        globals.push(Global { name, initializer });
+        globals.push(Global::new(name, initializer));
     }
     Ok(Some(globals))
 }

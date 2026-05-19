@@ -202,7 +202,7 @@ pub fn emit_assembly(program: &LoweredProgram, target: Target) -> CompileResult<
     let mut assembly = String::new();
     emit_globals(&program.globals, target, &mut assembly)?;
     if program.functions.is_empty() {
-        if target == Target::X86_64UnknownLinuxGnu && !assembly.is_empty() {
+        if target == Target::X86_64UnknownLinuxGnu {
             assembly.push_str(".section .note.GNU-stack,\"\",@progbits\n");
         }
         return Ok(assembly);
@@ -239,7 +239,9 @@ fn emit_globals(
     assembly.push_str(".data\n");
     for global in globals {
         let label = label_name(&global.name, target);
-        write_assembly!(assembly, ".globl {label}\n")?;
+        if !global.is_static {
+            write_assembly!(assembly, ".globl {label}\n")?;
+        }
         match &global.initializer {
             LoweredGlobalInitializer::Int(value) => {
                 assembly.push_str(".p2align 2\n");
@@ -735,16 +737,27 @@ fn emit_x86_64_parameter_stores(
     function: &LoweredFunction,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    const MAX_REGISTER_ARGS: usize = 6;
-    if function.parameter_count > MAX_REGISTER_ARGS {
-        return Err(CompileError::new("too many function parameters"));
-    }
     for slot in 0..function.parameter_count {
         let Some(local_slot) = function.local_slots.get(slot) else {
             return Err(CompileError::new("internal error: missing parameter slot"));
         };
         let width = scalar_width(local_slot.scalar_type);
-        let register = x86_64_argument_register(slot, width)?;
+        if let Some(register) = x86_64_parameter_register(slot, width) {
+            write_assembly!(
+                assembly,
+                "\tmov{} {register}, {}(%rbp)\n",
+                x86_64_instruction_suffix(width),
+                x86_stack_offset(local_offset(function, slot)?, width)
+            )?;
+            continue;
+        }
+        let source_offset = x86_64_stack_parameter_offset(slot)?;
+        let register = x86_64_stack_argument_scratch_register(width);
+        write_assembly!(
+            assembly,
+            "\tmov{} {source_offset}(%rbp), {register}\n",
+            x86_64_instruction_suffix(width)
+        )?;
         write_assembly!(
             assembly,
             "\tmov{} {register}, {}(%rbp)\n",
@@ -753,6 +766,27 @@ fn emit_x86_64_parameter_stores(
         )?;
     }
     Ok(())
+}
+
+fn x86_64_parameter_register(index: usize, width: ValueWidth) -> Option<&'static str> {
+    x86_64_argument_register(index, width).ok()
+}
+
+fn x86_64_stack_parameter_offset(index: usize) -> CompileResult<usize> {
+    const REGISTER_ARGS: usize = 6;
+    const RETURN_ADDRESS_BYTES: usize = 8;
+    const SAVED_BASE_POINTER_BYTES: usize = 8;
+    let stack_index = index
+        .checked_sub(REGISTER_ARGS)
+        .ok_or_else(|| CompileError::new("internal error: register parameter has no stack slot"))?;
+    stack_index
+        .checked_mul(TEMPORARY_BYTES)
+        .and_then(|offset| {
+            offset
+                .checked_add(RETURN_ADDRESS_BYTES)
+                .and_then(|offset| offset.checked_add(SAVED_BASE_POINTER_BYTES))
+        })
+        .ok_or_else(|| CompileError::new("stack parameter offset overflow"))
 }
 
 fn emit_aarch64_expr(
@@ -2599,6 +2633,13 @@ fn emit_x86_64_call(
     assembly: &mut String,
 ) -> CompileResult<()> {
     const MAX_REGISTER_ARGS: usize = 6;
+    if callee == "alloca" {
+        return emit_x86_64_alloca(args, temporary_base, depth, target, labels, assembly);
+    }
+    if matches!(callee, "va_start" | "va_end") {
+        assembly.push_str("\txorl %eax, %eax\n");
+        return Ok(());
+    }
     let register_count = args.len().min(MAX_REGISTER_ARGS);
     let stack_bytes = call_stack_argument_bytes(args.len(), MAX_REGISTER_ARGS)?;
     let arg_depth = depth + args.len();
@@ -2632,6 +2673,27 @@ fn emit_x86_64_call(
     )?;
     write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))?;
     emit_x86_64_pop_call_stack(stack_bytes, assembly)
+}
+
+fn emit_x86_64_alloca(
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let [size] = args else {
+        return Err(CompileError::new("alloca expects one argument"));
+    };
+    let width = expr_width(size);
+    emit_x86_64_expr_with_width(size, width, temporary_base, depth, target, labels, assembly)?;
+    emit_x86_64_width_adjustment(width, ValueWidth::I64, assembly);
+    assembly.push_str("\taddq $15, %rax\n");
+    assembly.push_str("\tandq $-16, %rax\n");
+    assembly.push_str("\tsubq %rax, %rsp\n");
+    assembly.push_str("\tmovq %rsp, %rax\n");
+    Ok(())
 }
 
 fn emit_x86_64_call_expr(
@@ -3013,6 +3075,12 @@ fn emit_x86_64_load_global(
     target: Target,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if target == Target::X86_64UnknownLinuxGnu && name == "errno" {
+        assembly.push_str("\tcall __errno_location\n");
+        let suffix = x86_64_instruction_suffix(width);
+        let register = x86_64_result_register(width);
+        return write_assembly!(assembly, "\tmov{suffix} (%rax), {register}\n");
+    }
     let label = label_name(name, target);
     let suffix = x86_64_instruction_suffix(width);
     let register = x86_64_result_register(width);

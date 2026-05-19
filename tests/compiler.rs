@@ -1084,7 +1084,7 @@ fn compiler_accepts_ignorable_static_metadata_translation_unit() {
     // then
     assert!(program.functions.is_empty());
     assert!(program.globals.is_empty());
-    assert!(assembly.is_empty());
+    assert_eq!(assembly, ".section .note.GNU-stack,\"\",@progbits\n");
 }
 
 #[test]
@@ -1722,6 +1722,25 @@ fn compiler_binds_parameters_as_local_slots_on_x86_64() {
     assert!(assembly.contains("identity:\n\tpushq %rbp"));
     assert!(assembly.contains("\tmovl %edi, -4(%rbp)"));
     assert!(assembly.contains("\tmovl -4(%rbp), %eax"));
+}
+
+#[test]
+fn compiler_loads_x86_64_stack_parameters_into_local_slots() {
+    // given
+    let source = "int seventh(int a, int b, int c, int d, int e, int f, int g) { return g; } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("seventh:\n\tpushq %rbp"));
+    assert!(assembly.contains("\tmovl 16(%rbp), %r10d\n"));
+    assert!(assembly.contains("\tmovl %r10d, -28(%rbp)\n"));
+    assert!(assembly.contains("\tmovl -28(%rbp), %eax\n"));
 }
 
 #[test]
@@ -2428,7 +2447,8 @@ fn compiler_accepts_errno_global_slice() {
         emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
 
     // then
-    assert!(assembly.contains("\tmovl errno(%rip), %eax\n"));
+    assert!(assembly.contains("\tcall __errno_location\n"));
+    assert!(assembly.contains("\tmovl (%rax), %eax\n"));
 }
 
 #[test]
@@ -2750,6 +2770,78 @@ int main(void) {
     assert!(assembly.contains("\t.zero 16\n"));
     assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
     assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}
+
+#[test]
+fn compiler_emits_static_globals_with_internal_linkage_slice() {
+    // given
+    let source = "static int plr; int main(void) { return plr; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("plr:\n"));
+    assert!(!assembly.contains(".globl plr\n"));
+    assert!(assembly.contains("main:"));
+}
+
+#[test]
+fn compiler_emits_x86_64_linux_errno_via_libc_location_slice() {
+    // given
+    let source = "extern int errno; int main(void) { return errno; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tcall __errno_location\n"));
+    assert!(assembly.contains("\tmovl (%rax), %eax\n"));
+    assert!(!assembly.contains("errno(%rip)"));
+}
+
+#[test]
+fn compiler_emits_x86_64_alloca_without_external_call_slice() {
+    // given
+    let source = "void* alloca(int size); int main(void) { char* p; p = (char*) alloca(12); return p != 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tandq $-16, %rax\n"));
+    assert!(assembly.contains("\tsubq %rax, %rsp\n"));
+    assert!(!assembly.contains("\tcall alloca\n"));
+}
+
+#[test]
+fn compiler_emits_x86_64_va_start_end_without_external_calls_slice() {
+    // given
+    let source = "void probe(char* fmt, ...) { va_list ap; va_start(ap, fmt); va_end(ap); } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("probe:"));
+    assert!(!assembly.contains("\tcall va_start\n"));
+    assert!(!assembly.contains("\tcall va_end\n"));
 }
 
 #[test]

@@ -18,6 +18,7 @@ pub struct LoweredProgram {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredGlobal {
     pub name: String,
+    pub is_static: bool,
     pub initializer: LoweredGlobalInitializer,
 }
 
@@ -265,6 +266,7 @@ fn lower_globals(
         insert_global_binding(&mut bindings, &global.name, binding)?;
         lowered.push(LoweredGlobal {
             name: global.name.clone(),
+            is_static: global.is_static,
             initializer,
         });
     }

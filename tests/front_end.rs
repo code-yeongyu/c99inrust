@@ -241,7 +241,7 @@ fn preprocessor_provides_doom_unistd_access_constant() {
 #[test]
 fn preprocessor_provides_doom_x11_and_sysv_constants() {
     // given
-    let source = "#include <X11/Xlib.h>\n#include <X11/keysym.h>\n#include <X11/extensions/XShm.h>\n#include <sys/shm.h>\n#include <signal.h>\nint key = XK_Left;\nint mask = Button1Mask | ExposureMask;\nint event = KeyPress + Expose;\nint flags = CWEventMask | CWColormap | CWBorderPixel;\nint gc = GCFunction | GCGraphicsExposures;\nint shm = IPC_CREAT | IPC_STAT | IPC_RMID | ShmCompletion;\nint sig = SIGINT;\n";
+    let source = "#include <X11/Xlib.h>\n#include <X11/keysym.h>\n#include <X11/extensions/XShm.h>\n#include <sys/shm.h>\n#include <signal.h>\nint key = XK_Left;\nint mask = Button1Mask | ExposureMask;\nint event = KeyPress + Expose;\nint flags = CWEventMask | CWColormap | CWBorderPixel;\nint gc = GCFunction | GCGraphicsExposures;\nint shm = IPC_CREAT | IPC_STAT | IPC_RMID | ShmCompletion;\nint sig = SIGINT;\nint screen = DefaultScreen(display);\nint root = RootWindow(display,\n    screen);\n";
 
     // when
     let unit = Preprocessor::new()
@@ -256,6 +256,14 @@ fn preprocessor_provides_doom_x11_and_sysv_constants() {
     assert!(unit.source.contains("int gc = 1 | 65536;"));
     assert!(unit.source.contains("int shm = 512 | 2 | 0 | 0;"));
     assert!(unit.source.contains("int sig = 2;"));
+    assert!(
+        unit.source
+            .contains("int screen = XDefaultScreen(display);")
+    );
+    assert!(
+        unit.source
+            .contains("int root = XRootWindow(display,\n    screen);")
+    );
 }
 
 #[test]

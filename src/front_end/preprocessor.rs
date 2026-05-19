@@ -354,6 +354,8 @@ const fn x11_xlib_builtin_macros() -> &'static [(&'static str, &'static str)] {
         ("DoRed", "1"),
         ("DoGreen", "2"),
         ("DoBlue", "4"),
+        ("DefaultScreen", "XDefaultScreen"),
+        ("RootWindow", "XRootWindow"),
     ]
 }
 
