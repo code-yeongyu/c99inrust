@@ -8,6 +8,7 @@ use crate::parser::{
 };
 
 mod doom_alloc;
+mod local_array;
 mod pointer_arithmetic;
 mod struct_initializer;
 
@@ -2239,6 +2240,14 @@ impl LoweringContext {
         if let Some(pointer) = self.resolve_local_char_matrix_row(array, index)? {
             return Ok(pointer);
         }
+        if let Some(pointer) = self.resolve_local_char_array(array)? {
+            return Ok(LoweredExpr::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                element_type: ScalarType::Int,
+                element_byte_size: 1,
+            });
+        }
         if let Some(pointer) = self.resolve_local_pointer_array(array)? {
             return Ok(LoweredExpr::PointerSubscript {
                 pointer: Box::new(pointer),
@@ -2329,6 +2338,14 @@ impl LoweringContext {
                 element_byte_size,
             });
         }
+        if let Some(pointer) = self.resolve_local_char_array(array)? {
+            return Ok(LoweredLValue::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                element_type: ScalarType::Int,
+                element_byte_size: 1,
+            });
+        }
         if let Some(pointer) = self.resolve_local_pointer_array(array)? {
             return Ok(LoweredLValue::PointerSubscript {
                 pointer: Box::new(pointer),
@@ -2411,6 +2428,13 @@ impl LoweringContext {
                 pointer: Box::new(pointer),
                 index: Box::new(flat_index),
                 byte_size: element_byte_size,
+            });
+        }
+        if let Some(pointer) = self.resolve_local_char_array(array)? {
+            return Ok(LoweredExpr::PointerOffset {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size: 1,
             });
         }
         self.lower_address_of_struct_subscript(array, index)?
@@ -2718,6 +2742,15 @@ impl LoweringContext {
             offset: self.local_offset(slot)?,
             byte_size: local_pointer_array_byte_size(length)?,
         }))
+    }
+
+    fn resolve_local_char_array(&self, array: &Expr) -> CompileResult<Option<LoweredExpr>> {
+        let binding = if let Expr::Identifier(name) = array {
+            self.local_binding(name)
+        } else {
+            None
+        };
+        local_array::char_array_pointer(array, binding.as_ref(), |slot| self.local_offset(slot))
     }
 
     fn resolve_local_char_matrix_row(
