@@ -309,6 +309,10 @@ function-pointer casts such as `(void (*)(int)) I_Quit`, extern byte matrices
 such as `gammatable[usegamma][...]`, global unsigned and double stretch tables,
 local anonymous union `pixel`, many-argument Xlib calls, and post-increment of
 pointer elements such as `olineptrs[0]++`.
+The former `g_game.c` and `r_bsp.c` blockers moved past nested global int
+matrix initializers such as `pars[4][10]`, global pointer initializers such as
+`boolean* mousebuttons = &mousearray[1]`, and `sizeof` on global struct
+objects such as `wminfo`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
 char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`

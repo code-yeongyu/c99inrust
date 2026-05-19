@@ -1301,6 +1301,91 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After Global Matrix Slice
+
+The Doom `g_game.c` and `r_bsp.c` translation units now reach assembly
+generation. This slice adds support for the global data shapes that blocked
+`g_game.c`: nested global int matrix initializers with row padding, global
+pointer initializers that take the address of a global array element, and
+`sizeof` on global struct objects. The same global int matrix support also
+moved `r_bsp.c` past its reported expression blocker.
+
+Regression coverage added:
+
+```text
+compiler_accepts_global_int_matrix_slice
+compiler_accepts_global_pointer_subscript_initializer_slice
+compiler_accepts_global_struct_object_with_struct_array_field_slice
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S \
+  -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/g_game.c \
+  -o /tmp/c99inrust-g_game.s
+```
+
+The focused compile now reaches assembly generation.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779150882`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779150882.txt
+ok=47
+fail=15
+```
+
+Moved translation units:
+
+```text
+OK g_game.c
+OK r_bsp.c
+```
+
+Remaining blockers:
+
+```text
+FAIL hu_stuff.c
+  error: 5841:5: expected expression
+FAIL i_net.c
+  error: 3905:5: expected expression
+FAIL i_sound.c
+  error: 4750:43: expected expression
+FAIL i_system.c
+  error: 4552:5: expected expression
+FAIL info.c
+  error: translation unit has no supported function definitions
+FAIL m_misc.c
+  error: 5541:5: expected expression
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL p_setup.c
+  error: assignment to non-pointer subscript targets is not supported
+FAIL p_switch.c
+  error: pointer member access requires a typed pointer
+FAIL s_sound.c
+  error: pointer member access requires a typed pointer
+FAIL sounds.c
+  error: 450:3: expected expression
+FAIL st_stuff.c
+  error: 8149:5: expected expression
+FAIL v_video.c
+  error: 5145:5: expected expression
+FAIL w_wad.c
+  error: 602:5: expected expression
+FAIL wi_stuff.c
+  error: unsupported global integer initializer
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After X11 Video Slice
 
 The Linux video translation unit now reaches assembly generation. This slice
