@@ -4261,3 +4261,97 @@ FAIL wi_stuff.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Doom Libc And WAD Slice
+
+The parser now accepts Doom's libc/network struct locals (`struct stat`,
+`struct timeval`, `struct timezone`, `struct sockaddr_in`, and
+`struct hostent*`), local `struct ...*` and `void*` declarations, variadic
+function definitions with `...`, and the `va_list` scalar typedef. The
+preprocessor supplies the socket/ioctl/errno constants used by the Linux
+network backend, and IR lowering exposes `errno` as an external integer
+binding. The parser also recognizes the local anonymous `name8` union used by
+`W_CheckNumForName`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_doom_libc_struct_local_slice
+compiler_accepts_errno_global_slice
+compiler_accepts_variadic_function_definition_slice
+compiler_accepts_local_void_pointer_declaration_slice
+compiler_accepts_doom_name8_union_slice
+preprocessor_provides_doom_socket_constants
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/i_net.c \
+  -o /dev/null
+
+target/debug/c99inrust compile -S \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/i_system.c \
+  -o /dev/null
+
+target/debug/c99inrust compile -S \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/m_misc.c \
+  -o /dev/null
+
+target/debug/c99inrust compile -S \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/w_wad.c \
+  -o /dev/null
+```
+
+All four focused compiles now reach assembly generation.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779152692`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779152692.txt
+ok=51
+fail=11
+```
+
+Moved translation units:
+
+```text
+OK i_net.c
+OK i_system.c
+OK m_misc.c
+OK w_wad.c
+```
+
+Remaining blockers:
+
+```text
+FAIL hu_stuff.c
+  error: 5841:5: expected expression
+FAIL i_sound.c
+  error: 4750:43: expected expression
+FAIL info.c
+  error: translation unit has no supported function definitions
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL p_setup.c
+  error: assignment to non-pointer subscript targets is not supported
+FAIL p_switch.c
+  error: pointer member access requires a typed pointer
+FAIL s_sound.c
+  error: pointer member access requires a typed pointer
+FAIL sounds.c
+  error: 450:3: expected expression
+FAIL st_stuff.c
+  error: 8149:5: expected expression
+FAIL v_video.c
+  error: 5145:5: expected expression
+FAIL wi_stuff.c
+  error: unsupported global integer initializer
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.

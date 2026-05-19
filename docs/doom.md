@@ -240,16 +240,17 @@ parameters such as `patch_t** font`, allowing `font[0]->height` and matching
 `hu_textline_t.f` access through indexed pointer members. This moves
 `hu_lib.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 18
+The current Doom compile scan reaches actual supported function bodies, but 11
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
-`f_finale.c`, `f_wipe.c`, `hu_lib.c`, `i_main.c`, `m_argv.c`, `m_bbox.c`,
-`m_cheat.c`, `m_fixed.c`, `m_menu.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`,
-`p_doors.c`, `p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
+`f_finale.c`, `f_wipe.c`, `g_game.c`, `hu_lib.c`, `i_main.c`, `i_net.c`,
+`i_system.c`, `i_video.c`, `m_argv.c`, `m_bbox.c`, `m_cheat.c`, `m_fixed.c`,
+`m_menu.c`, `m_misc.c`, `m_random.c`, `m_swap.c`, `p_ceilng.c`, `p_doors.c`,
+`p_enemy.c`, `p_floor.c`, `p_inter.c`, `p_lights.c`, `p_map.c`,
 `p_maputl.c`, `p_plats.c`, `p_pspr.c`, `p_saveg.c`, `p_sight.c`, `p_spec.c`,
-`p_telept.c`, `p_tick.c`, `p_user.c`, `r_data.c`, `r_draw.c`, `r_main.c`,
-`r_plane.c`, `r_segs.c`, `r_sky.c`, `r_things.c`, `st_lib.c`, `tables.c`, and
-`z_zone.c` currently reach assembly generation.
+`p_telept.c`, `p_tick.c`, `p_user.c`, `r_bsp.c`, `r_data.c`, `r_draw.c`,
+`r_main.c`, `r_plane.c`, `r_segs.c`, `r_sky.c`, `r_things.c`, `st_lib.c`,
+`tables.c`, `w_wad.c`, and `z_zone.c` currently reach assembly generation.
 The former `am_map.c` blockers have moved past `AM_getIslope` member
 expressions, `st_notify` local static aggregate, `namebuf` stack array, switch
 statement, `case '-'` label, `litelevels` local integer array, local enum,
@@ -320,6 +321,12 @@ parameter in `R_VideoErase`, global arrays `ylookup` and `columnofs`, the
 `lighttable_t* dc_colormap` global, `fuzzoffset`, `screens`, `sprnames`, and
 the local `patch_t* patch` declaration. `r_draw.c` now reaches assembly
 generation.
+The former `i_net.c`, `i_system.c`, `m_misc.c`, and `w_wad.c` blockers moved
+past Doom's libc/network surface: `struct sockaddr_in`, `struct timeval`,
+`struct timezone`, `struct stat`, and `struct hostent` locals, socket and ioctl
+constants, the external `errno` scalar, variadic function definitions with
+`va_list`, the `W_CheckNumForName` anonymous `name8` union, and local
+`void*` declarations.
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
