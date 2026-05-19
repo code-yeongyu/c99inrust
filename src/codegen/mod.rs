@@ -7,7 +7,15 @@ use crate::ir::{
 };
 use crate::parser::{BinaryOp, ScalarType, UnaryOp};
 
+mod sized_fields;
 mod struct_globals;
+
+use sized_fields::{
+    emit_aarch64_load as emit_aarch64_load_sized_field,
+    emit_aarch64_store as emit_aarch64_store_sized_field,
+    emit_x86_64_load as emit_x86_64_load_sized_field,
+    emit_x86_64_store as emit_x86_64_store_sized_field,
+};
 
 macro_rules! write_assembly {
     ($assembly:expr, $($argument:tt)*) => {
@@ -74,6 +82,7 @@ struct PointerFieldExpr<'a> {
     pointer: &'a LoweredExpr,
     offset: usize,
     scalar_type: ScalarType,
+    byte_size: usize,
 }
 
 const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
@@ -1055,11 +1064,13 @@ fn emit_aarch64_memory_expr(
             pointer,
             offset,
             scalar_type,
+            byte_size,
         } => emit_aarch64_load_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
+                byte_size: *byte_size,
             },
             temporary_base,
             depth,
@@ -1771,11 +1782,13 @@ fn emit_aarch64_assign(
             pointer,
             offset,
             scalar_type,
+            byte_size,
         } => emit_aarch64_store_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
+                byte_size: *byte_size,
             },
             value,
             temporary_base,
@@ -1815,11 +1828,13 @@ fn emit_aarch64_post_increment(
             pointer,
             offset,
             scalar_type,
+            byte_size,
         } => emit_aarch64_post_increment_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
+                byte_size: *byte_size,
             },
             temporary_base,
             depth,
@@ -1911,21 +1926,11 @@ fn emit_aarch64_post_increment_pointer_field(
     )?;
     emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
-    write_assembly!(
-        assembly,
-        "\tldr {}, [x16, #{}]\n",
-        aarch64_result_register(width),
-        field.offset
-    )?;
+    emit_aarch64_load_sized_field(field.byte_size, width, "x16", field.offset, assembly)?;
     emit_aarch64_store_temporary(width, value_offset, assembly)?;
     emit_aarch64_increment_result(width, increment, assembly)?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
-    write_assembly!(
-        assembly,
-        "\tstr {}, [x16, #{}]\n",
-        aarch64_result_register(width),
-        field.offset
-    )?;
+    emit_aarch64_store_sized_field(field.byte_size, width, "x16", field.offset, assembly)?;
     emit_aarch64_load_temporary(width, value_offset, assembly)
 }
 
@@ -2173,12 +2178,7 @@ fn emit_aarch64_load_pointer_field(
         labels,
         assembly,
     )?;
-    write_assembly!(
-        assembly,
-        "\tldr {}, [x0, #{}]\n",
-        aarch64_result_register(width),
-        field.offset
-    )
+    emit_aarch64_load_sized_field(field.byte_size, width, "x0", field.offset, assembly)
 }
 
 fn emit_aarch64_store_pointer_field(
@@ -2203,12 +2203,7 @@ fn emit_aarch64_store_pointer_field(
     )?;
     assembly.push_str("\tmov x16, x0\n");
     emit_aarch64_load_temporary(width, value_offset, assembly)?;
-    write_assembly!(
-        assembly,
-        "\tstr {}, [x16, #{}]\n",
-        aarch64_result_register(width),
-        field.offset
-    )
+    emit_aarch64_store_sized_field(field.byte_size, width, "x16", field.offset, assembly)
 }
 
 fn emit_aarch64_unary_expr(
@@ -2600,11 +2595,13 @@ fn emit_x86_64_global_or_assignment_expr(
             pointer,
             offset,
             scalar_type,
+            byte_size,
         } => emit_x86_64_load_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
+                byte_size: *byte_size,
             },
             temporary_base,
             depth,
@@ -3463,13 +3460,7 @@ fn emit_x86_64_load_pointer_field(
         labels,
         assembly,
     )?;
-    write_assembly!(
-        assembly,
-        "\tmov{} {}(%rax), {}\n",
-        x86_64_instruction_suffix(width),
-        field.offset,
-        x86_64_result_register(width)
-    )
+    emit_x86_64_load_sized_field(field.byte_size, width, "%rax", field.offset, assembly)
 }
 
 fn emit_x86_64_assign(
@@ -3563,11 +3554,13 @@ fn emit_x86_64_assign(
             pointer,
             offset,
             scalar_type,
+            byte_size,
         } => emit_x86_64_store_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
+                byte_size: *byte_size,
             },
             value,
             temporary_base,
@@ -3609,11 +3602,13 @@ fn emit_x86_64_post_increment(
             pointer,
             offset,
             scalar_type,
+            byte_size,
         } => emit_x86_64_post_increment_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
+                byte_size: *byte_size,
             },
             temporary_base,
             depth,
@@ -3713,23 +3708,11 @@ fn emit_x86_64_post_increment_pointer_field(
     )?;
     emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
-    write_assembly!(
-        assembly,
-        "\tmov{} {}(%rcx), {}\n",
-        x86_64_instruction_suffix(width),
-        field.offset,
-        x86_64_result_register(width)
-    )?;
+    emit_x86_64_load_sized_field(field.byte_size, width, "%rcx", field.offset, assembly)?;
     emit_x86_64_store_temporary(width, value_offset, assembly)?;
     emit_x86_64_increment_result(width, increment, assembly)?;
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
-    write_assembly!(
-        assembly,
-        "\tmov{} {}, {}(%rcx)\n",
-        x86_64_instruction_suffix(width),
-        x86_64_result_register(width),
-        field.offset
-    )?;
+    emit_x86_64_store_sized_field(field.byte_size, width, "%rcx", field.offset, assembly)?;
     emit_x86_64_load_temporary(width, value_offset, assembly)
 }
 
@@ -4008,13 +3991,7 @@ fn emit_x86_64_store_pointer_field(
     )?;
     assembly.push_str("\tmovq %rax, %rcx\n");
     emit_x86_64_load_temporary(width, value_offset, assembly)?;
-    write_assembly!(
-        assembly,
-        "\tmov{} {}, {}(%rcx)\n",
-        x86_64_instruction_suffix(width),
-        x86_64_result_register(width),
-        field.offset
-    )
+    emit_x86_64_store_sized_field(field.byte_size, width, "%rcx", field.offset, assembly)
 }
 
 fn emit_x86_64_negate_f64(

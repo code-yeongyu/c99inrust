@@ -302,7 +302,7 @@ fn compiler_accepts_address_of_subscript_slice() {
 
     // then
     assert!(assembly.contains("address_of_subscript"));
-    assert!(assembly.contains("\taddq %rcx, %rax\n"));
+    assert!(assembly.contains("\tleaq (%rcx,%rax,4), %rax\n"));
     assert!(assembly.contains("\tmovq %rax, -"));
 }
 
@@ -2179,7 +2179,7 @@ int main(void) {
     // then
     assert!(assembly.contains("wminfo:"));
     assert!(assembly.contains("main:"));
-    assert!(assembly.contains("\tmovl $88, %eax\n"));
+    assert!(assembly.contains("\tmovl $84, %eax\n"));
 }
 
 #[test]

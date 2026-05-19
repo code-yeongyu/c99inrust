@@ -78,34 +78,42 @@ fn lower_value(
     global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<LoweredStructInitializerScalar> {
     match field_type {
-        FieldType::Scalar(ScalarType::Int) => lower_int(value),
-        FieldType::Scalar(ScalarType::LongLong) => lower_long_long(value),
-        FieldType::Scalar(ScalarType::Pointer) | FieldType::Pointer { .. } => {
+        FieldType::Scalar(field) if field.scalar_type == ScalarType::Int => {
+            lower_int(value, field.byte_size)
+        }
+        FieldType::Scalar(field) if field.scalar_type == ScalarType::LongLong => {
+            lower_long_long(value)
+        }
+        FieldType::Scalar(field) if field.scalar_type == ScalarType::Pointer => {
             lower_pointer(value, global_bindings)
         }
+        FieldType::Pointer { .. } => lower_pointer(value, global_bindings),
         FieldType::Array {
             element_size,
             length,
             ..
         } => lower_array_field(value, *element_size, *length),
-        FieldType::Scalar(ScalarType::Double | ScalarType::VaList)
-        | FieldType::Struct(_)
-        | FieldType::StructArray { .. } => Err(CompileError::new(
-            "unsupported global struct initializer field",
-        )),
+        FieldType::Scalar(_) | FieldType::Struct(_) | FieldType::StructArray { .. } => Err(
+            CompileError::new("unsupported global struct initializer field"),
+        ),
     }
 }
 
 fn lower_int(
     value: &GlobalStructInitializerValue,
+    byte_size: usize,
 ) -> CompileResult<LoweredStructInitializerScalar> {
     match value {
-        GlobalStructInitializerValue::Integer(value) => Ok(LoweredStructInitializerScalar::Int(
-            i32::try_from(*value)
+        GlobalStructInitializerValue::Integer(value) => Ok(LoweredStructInitializerScalar::Int {
+            value: i32::try_from(*value)
                 .map_err(|_| CompileError::new("global struct int initializer does not fit i32"))?,
-        )),
+            byte_size,
+        }),
         GlobalStructInitializerValue::String(value) => {
-            Ok(LoweredStructInitializerScalar::IntString(value.clone()))
+            Ok(LoweredStructInitializerScalar::IntString {
+                value: value.clone(),
+                byte_size,
+            })
         }
         GlobalStructInitializerValue::Address(_) => Err(CompileError::new(
             "unsupported global struct int initializer address",

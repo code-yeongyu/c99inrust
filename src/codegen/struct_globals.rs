@@ -53,11 +53,16 @@ fn emit_scalar(
     assembly: &mut String,
 ) -> CompileResult<usize> {
     match value {
-        LoweredStructInitializerScalar::Int(value) => {
-            write_assembly(assembly, format_args!("\t.long {value}\n"))?;
-            Ok(4)
+        LoweredStructInitializerScalar::Int { value, byte_size } => {
+            emit_integer(*value, *byte_size, assembly)?;
+            Ok(*byte_size)
         }
-        LoweredStructInitializerScalar::IntString(_) => {
+        LoweredStructInitializerScalar::IntString { byte_size, .. } => {
+            if *byte_size != 4 {
+                return Err(CompileError::new(
+                    "global struct string address requires int-sized field",
+                ));
+            }
             let string_label = global_string_label(name, string_index, target);
             write_assembly(assembly, format_args!("\t.long {string_label}\n"))?;
             Ok(4)
@@ -95,11 +100,22 @@ fn emit_scalar(
     }
 }
 
+fn emit_integer(value: i32, byte_size: usize, assembly: &mut String) -> CompileResult<()> {
+    match byte_size {
+        1 => write_assembly(assembly, format_args!("\t.byte {value}\n")),
+        2 => write_assembly(assembly, format_args!("\t.short {value}\n")),
+        4 => write_assembly(assembly, format_args!("\t.long {value}\n")),
+        _ => Err(CompileError::new(
+            "unsupported global struct int field byte size",
+        )),
+    }
+}
+
 fn struct_initializer_string(value: &LoweredStructInitializerScalar) -> Option<&str> {
     match value {
-        LoweredStructInitializerScalar::IntString(value)
+        LoweredStructInitializerScalar::IntString { value, .. }
         | LoweredStructInitializerScalar::PointerString(value) => Some(value),
-        LoweredStructInitializerScalar::Int(_)
+        LoweredStructInitializerScalar::Int { .. }
         | LoweredStructInitializerScalar::LongLong(_)
         | LoweredStructInitializerScalar::Bytes { .. }
         | LoweredStructInitializerScalar::PointerNull

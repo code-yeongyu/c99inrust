@@ -1,7 +1,11 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
+mod doom_layout;
 mod global_struct_initializer;
+mod scalar_layout;
+
+use scalar_layout::{scalar_field_type, scalar_size_for_layout, sizeof_scalar_type};
 
 const DOOM_EXPAND_PIXEL_UNION: &str = "__doom_expand_pixel_union";
 const DOOM_NAME8_UNION: &str = "__doom_name8_union";
@@ -32,7 +36,7 @@ pub struct StructField {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldType {
-    Scalar(ScalarType),
+    Scalar(ScalarFieldType),
     Struct(String),
     Pointer {
         referent: Option<String>,
@@ -215,6 +219,12 @@ pub enum ScalarType {
     Double,
     Pointer,
     VaList,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScalarFieldType {
+    pub scalar_type: ScalarType,
+    pub byte_size: usize,
 }
 
 const POINTER_REFERENT: &str = "*";
@@ -2597,7 +2607,7 @@ fn parse_struct_typedef(
     else {
         return Ok(None);
     };
-    layouts.push(StructLayout { name, fields, size });
+    layouts.push(doom_layout::typedef_layout(name, fields, size));
     Ok(Some(layouts))
 }
 
@@ -2831,9 +2841,9 @@ fn parse_struct_field_declaration(
         };
         let field_type = if let Some(shape) = struct_field_array_shape(segment, context.constants) {
             match field_type {
-                FieldType::Scalar(element_type) => FieldType::Array {
-                    element_type,
-                    element_size: array_element_size(element_type, base_specifiers),
+                FieldType::Scalar(element) => FieldType::Array {
+                    element_type: element.scalar_type,
+                    element_size: element.byte_size,
                     length: shape.length,
                     columns: shape.columns,
                 },
@@ -3032,7 +3042,7 @@ fn struct_field_type(
         });
     }
     if let Some(scalar_type) = integer_parameter_type(tokens) {
-        return Some(FieldType::Scalar(scalar_type));
+        return Some(FieldType::Scalar(scalar_field_type(tokens, scalar_type)));
     }
     let name = tokens.iter().rev().find_map(token_identifier)?;
     if pointer_typedefs.iter().any(|known| known == name) {
@@ -3041,14 +3051,13 @@ fn struct_field_type(
     if known_structs.iter().any(|layout| layout.name == name) {
         return Some(FieldType::Struct(name.to_owned()));
     }
-    Some(FieldType::Scalar(
-        supported_typedef_scalar(name).unwrap_or(ScalarType::Int),
-    ))
+    let scalar_type = supported_typedef_scalar(name).unwrap_or(ScalarType::Int);
+    Some(FieldType::Scalar(scalar_field_type(tokens, scalar_type)))
 }
 
 fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> CompileResult<usize> {
     match field_type {
-        FieldType::Scalar(scalar_type) => Ok(scalar_size_for_layout(*scalar_type)),
+        FieldType::Scalar(scalar_type) => Ok(scalar_type.byte_size),
         FieldType::Pointer { .. } => Ok(8),
         FieldType::Array {
             element_size,
@@ -3081,35 +3090,27 @@ fn field_type_alignment(
 ) -> CompileResult<usize> {
     match field_type {
         FieldType::Array { element_size, .. } => Ok((*element_size).clamp(1, 8)),
-        FieldType::StructArray { struct_name, .. } => known_structs
-            .iter()
-            .find(|layout| layout.name == *struct_name)
-            .map(|layout| layout.size.clamp(1, 8))
-            .ok_or_else(|| CompileError::new(format!("unknown struct field type: {struct_name}"))),
+        FieldType::StructArray { struct_name, .. } | FieldType::Struct(struct_name) => {
+            let layout = known_structs
+                .iter()
+                .find(|layout| layout.name == *struct_name)
+                .ok_or_else(|| {
+                    CompileError::new(format!("unknown struct field type: {struct_name}"))
+                })?;
+            struct_layout_alignment(layout, known_structs)
+        }
         _ => field_type_size(field_type, known_structs).map(|size| size.clamp(1, 8)),
     }
 }
 
-fn array_element_size(element_type: ScalarType, specifiers: &[Token]) -> usize {
-    if matches!(element_type, ScalarType::Int) && specifiers_include_char(specifiers) {
-        1
-    } else {
-        scalar_size_for_layout(element_type)
-    }
-}
-
-fn specifiers_include_char(specifiers: &[Token]) -> bool {
-    specifiers
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)))
-}
-
-const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
-    match scalar_type {
-        ScalarType::Int => 4,
-        ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
-        ScalarType::VaList => 24,
-    }
+fn struct_layout_alignment(
+    layout: &StructLayout,
+    known_structs: &[StructLayout],
+) -> CompileResult<usize> {
+    layout.fields.iter().try_fold(1usize, |alignment, field| {
+        field_type_alignment(&field.field_type, known_structs)
+            .map(|field_alignment| alignment.max(field_alignment))
+    })
 }
 
 fn local_array_length(expr: &Expr, constants: &[Constant]) -> CompileResult<usize> {
@@ -5945,7 +5946,7 @@ fn cast_type_starts_with_pointer_declarator(tokens: &[Token]) -> bool {
 }
 
 fn sizeof_type(tokens: &[Token]) -> Option<usize> {
-    supported_cast_type(tokens).map(scalar_size_for_layout)
+    supported_cast_type(tokens).map(|scalar_type| sizeof_scalar_type(tokens, scalar_type))
 }
 
 fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
@@ -6161,10 +6162,10 @@ fn doom_name8_union_layout() -> StructLayout {
     builtin_struct_layout(
         DOOM_NAME8_UNION,
         vec![
-            array_field("s", ScalarType::Int, 9, 0),
+            sized_array_field("s", ScalarType::Int, 1, 9, 0),
             array_field("x", ScalarType::Int, 2, 0),
         ],
-        36,
+        12,
     )
 }
 
@@ -6183,17 +6184,33 @@ fn scalar_field(name: &str, offset: usize) -> StructField {
 fn typed_scalar_field(name: &str, scalar_type: ScalarType, offset: usize) -> StructField {
     StructField {
         name: name.to_owned(),
-        field_type: FieldType::Scalar(scalar_type),
+        field_type: FieldType::Scalar(scalar_field_type(&[], scalar_type)),
         offset,
     }
 }
 
 fn array_field(name: &str, element_type: ScalarType, length: usize, offset: usize) -> StructField {
+    sized_array_field(
+        name,
+        element_type,
+        scalar_size_for_layout(element_type),
+        length,
+        offset,
+    )
+}
+
+fn sized_array_field(
+    name: &str,
+    element_type: ScalarType,
+    element_size: usize,
+    length: usize,
+    offset: usize,
+) -> StructField {
     StructField {
         name: name.to_owned(),
         field_type: FieldType::Array {
             element_type,
-            element_size: scalar_size_for_layout(element_type),
+            element_size,
             length,
             columns: None,
         },
