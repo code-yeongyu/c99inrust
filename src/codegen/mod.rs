@@ -7,6 +7,7 @@ use crate::ir::{
 };
 use crate::parser::{BinaryOp, ScalarType, UnaryOp};
 
+mod pointer_cast;
 mod sized_fields;
 mod struct_globals;
 
@@ -95,7 +96,7 @@ const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
 
 fn expr_width(expr: &LoweredExpr) -> ValueWidth {
     match expr {
-        LoweredExpr::Cast { target, .. } => scalar_width(*target),
+        LoweredExpr::Cast { target, expr } => cast_width(*target, expr),
         LoweredExpr::DoubleLiteral(_) => ValueWidth::F64,
         LoweredExpr::StringLiteral(_)
         | LoweredExpr::LocalAddress { .. }
@@ -133,6 +134,10 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         } => expr_width(then_expr).max(expr_width(else_expr)),
         LoweredExpr::Binary { op, left, right } => binary_result_width(*op, left, right),
     }
+}
+
+fn cast_width(target: ScalarType, expr: &LoweredExpr) -> ValueWidth {
+    pointer_cast::width(target, expr).unwrap_or_else(|| scalar_width(target))
 }
 
 const fn lowered_lvalue_width(target: &LoweredLValue) -> ValueWidth {
@@ -968,7 +973,7 @@ fn emit_aarch64_expr_natural(
         }
         LoweredExpr::Cast { target, expr } => emit_aarch64_expr_with_width(
             expr,
-            scalar_width(*target),
+            cast_width(*target, expr),
             temporary_base,
             depth,
             labels,
@@ -2454,7 +2459,7 @@ fn emit_x86_64_expr_natural(
             expr,
         } => emit_x86_64_expr_with_width(
             expr,
-            scalar_width(*scalar_type),
+            cast_width(*scalar_type, expr),
             temporary_base,
             depth,
             target,
