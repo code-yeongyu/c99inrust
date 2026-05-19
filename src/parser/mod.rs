@@ -1,6 +1,8 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
+const DOOM_EXPAND_PIXEL_UNION: &str = "__doom_expand_pixel_union";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     pub structs: Vec<StructLayout>,
@@ -70,6 +72,10 @@ pub enum GlobalInitializer {
     ExternPointerArray {
         referent: Option<String>,
     },
+    ExternUnsignedCharArray,
+    ExternUnsignedCharMatrix {
+        columns: usize,
+    },
     ExternStructArray {
         struct_name: String,
     },
@@ -79,6 +85,9 @@ pub enum GlobalInitializer {
     Int(i64),
     IntArray(Vec<i32>),
     IntConstant(String),
+    DoubleArray {
+        length: usize,
+    },
     PointerNull {
         referent: Option<String>,
     },
@@ -116,6 +125,8 @@ impl GlobalInitializer {
                 | Self::ExternPointer { .. }
                 | Self::ExternIntArray
                 | Self::ExternPointerArray { .. }
+                | Self::ExternUnsignedCharArray
+                | Self::ExternUnsignedCharMatrix { .. }
                 | Self::ExternStructArray { .. }
                 | Self::ExternStructObject { .. }
         )
@@ -439,7 +450,7 @@ pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslat
 pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Program> {
     let mut parser = SurfaceParser { tokens, index: 0 };
     let external_items = parser.external_token_groups()?;
-    let mut structs = Vec::new();
+    let mut structs = builtin_struct_layouts();
     let mut constants = Vec::new();
     let mut scalar_typedefs = Vec::new();
     let mut pointer_typedefs = Vec::new();
@@ -685,6 +696,9 @@ impl Parser<'_> {
             return Ok(statement);
         }
         if let Some(statement) = self.local_enum_declaration()? {
+            return Ok(statement);
+        }
+        if let Some(statement) = self.local_anonymous_union_declaration()? {
             return Ok(statement);
         }
         if let Some(statement) = self.local_struct_declaration()? {
@@ -1167,10 +1181,10 @@ impl Parser<'_> {
         } else {
             self.index
         };
-        let Some(struct_name) = self.local_struct_name_at(type_index) else {
+        let Some((struct_name, declarator_index)) = self.local_struct_name_at(type_index) else {
             return Ok(None);
         };
-        self.index = type_index + 1;
+        self.index = declarator_index;
         let mut declarations = Vec::new();
         loop {
             let name = self.expect_identifier()?;
@@ -1197,7 +1211,20 @@ impl Parser<'_> {
         }
     }
 
-    fn local_struct_name_at(&self, index: usize) -> Option<String> {
+    fn local_struct_name_at(&self, index: usize) -> Option<(String, usize)> {
+        if token_is_keyword(self.tokens.get(index)?, Keyword::Struct) {
+            let name = token_identifier(self.tokens.get(index + 1)?)?;
+            if !self.known_structs.iter().any(|layout| layout.name == name) {
+                return None;
+            }
+            if !matches!(
+                self.tokens.get(index + 2).map(|token| &token.kind),
+                Some(TokenKind::Identifier(_))
+            ) {
+                return None;
+            }
+            return Some((name.to_owned(), index + 2));
+        }
         let TokenKind::Identifier(name) = &self.tokens.get(index)?.kind else {
             return None;
         };
@@ -1210,7 +1237,33 @@ impl Parser<'_> {
         ) {
             return None;
         }
-        Some(name.clone())
+        Some((name.clone(), index + 1))
+    }
+
+    fn local_anonymous_union_declaration(&mut self) -> CompileResult<Option<Statement>> {
+        if !self.check_keyword(Keyword::Union) {
+            return Ok(None);
+        }
+        let open_brace = self.index + 1;
+        if !self
+            .tokens
+            .get(open_brace)
+            .is_some_and(|token| token_is_punctuator(token, "{"))
+        {
+            return Ok(None);
+        }
+        let close_brace = matching_top_level_brace(self.tokens, open_brace)
+            .ok_or_else(|| CompileError::new("unterminated anonymous union declaration"))?;
+        if !anonymous_doom_expand_pixel_union(&self.tokens[open_brace + 1..close_brace]) {
+            return Ok(None);
+        }
+        self.index = close_brace + 1;
+        let name = self.expect_identifier()?;
+        self.expect_punctuator(";")?;
+        Ok(Some(Statement::LocalStruct {
+            name,
+            struct_name: DOOM_EXPAND_PIXEL_UNION.to_owned(),
+        }))
     }
 
     fn local_int_array_initializer(&mut self) -> CompileResult<Vec<i32>> {
@@ -1761,11 +1814,11 @@ impl Parser<'_> {
             return None;
         }
         let start = self.index + 1;
-        let close = self.tokens[start..]
-            .iter()
-            .position(|token| token_is_punctuator(token, ")"))?
-            + start;
+        let close = matching_top_level_paren(self.tokens, self.index)?;
         let cast_tokens = &self.tokens[start..close];
+        if function_pointer_cast_type(cast_tokens) {
+            return Some((ScalarType::Pointer, None, close + 1));
+        }
         let target = supported_cast_type_with_typedefs(
             cast_tokens,
             self.known_scalar_typedefs,
@@ -2883,6 +2936,9 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_extern_int_array(tokens)? {
         return Ok(Some(global));
     }
+    if let Some(global) = parse_global_double_array(tokens, constants)? {
+        return Ok(Some(global));
+    }
     if let Some(global) = parse_global_int_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
@@ -3013,6 +3069,15 @@ fn parse_global_unsigned_char_array(
         let length = rows
             .checked_mul(columns)
             .ok_or_else(|| CompileError::new("global byte matrix size overflow"))?;
+        let name = token_identifier(&declaration[name_index])
+            .ok_or_else(|| CompileError::new("expected global matrix name"))?
+            .to_owned();
+        if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
+            return Ok(Some(Global {
+                name,
+                initializer: GlobalInitializer::ExternUnsignedCharMatrix { columns },
+            }));
+        }
         let values = if let Some(assign_index) =
             top_level_punctuator_index(&declaration[second_close + 1..], "=")
         {
@@ -3021,9 +3086,6 @@ fn parse_global_unsigned_char_array(
         } else {
             vec![0; length]
         };
-        let name = token_identifier(&declaration[name_index])
-            .ok_or_else(|| CompileError::new("expected global matrix name"))?
-            .to_owned();
         return Ok(Some(Global {
             name,
             initializer: GlobalInitializer::UnsignedCharMatrix { values, columns },
@@ -3047,6 +3109,12 @@ fn parse_global_unsigned_char_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global array name"))?
         .to_owned();
+    if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
+        return Ok(Some(Global {
+            name,
+            initializer: GlobalInitializer::ExternUnsignedCharArray,
+        }));
+    }
     Ok(Some(Global {
         name,
         initializer: GlobalInitializer::UnsignedCharArray(values),
@@ -3383,6 +3451,44 @@ fn parse_global_int_array(
     }))
 }
 
+fn parse_global_double_array(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_double(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated global double-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
+        return Ok(None);
+    }
+    let length =
+        parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket], constants)?;
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global double-array name"))?
+        .to_owned();
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::DoubleArray { length },
+    }))
+}
+
 fn parse_global_extern_scalar(
     tokens: &[Token],
     known_structs: &[StructLayout],
@@ -3545,7 +3651,11 @@ fn global_specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
     for token in tokens {
         match &token.kind {
             TokenKind::Keyword(
-                Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Unsigned,
+                Keyword::Extern
+                | Keyword::Static
+                | Keyword::Const
+                | Keyword::Volatile
+                | Keyword::Unsigned,
             ) => {}
             TokenKind::Keyword(Keyword::Char) => saw_char = true,
             TokenKind::Identifier(name) if name == "byte" => saw_char = true,
@@ -3666,7 +3776,9 @@ fn global_specifiers_are_int_like(
             TokenKind::Keyword(
                 Keyword::Static | Keyword::Const | Keyword::Volatile | Keyword::Signed,
             ) => {}
-            TokenKind::Keyword(Keyword::Int | Keyword::Short) => saw_int = true,
+            TokenKind::Keyword(Keyword::Unsigned | Keyword::Int | Keyword::Short) => {
+                saw_int = true;
+            }
             TokenKind::Identifier(name) => {
                 if known_structs.iter().any(|layout| layout.name == *name) {
                     return false;
@@ -3677,6 +3789,18 @@ fn global_specifiers_are_int_like(
         }
     }
     saw_int
+}
+
+fn global_specifiers_are_double(tokens: &[Token]) -> bool {
+    let mut saw_double = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Static | Keyword::Const | Keyword::Volatile) => {}
+            TokenKind::Keyword(Keyword::Double) => saw_double = true,
+            _ => return false,
+        }
+    }
+    saw_double
 }
 
 fn parse_global_int_initializer(
@@ -4285,6 +4409,23 @@ fn matching_top_level_bracket(tokens: &[Token], open_bracket: usize) -> Option<u
     None
 }
 
+fn matching_top_level_paren(tokens: &[Token], open_paren: usize) -> Option<usize> {
+    let mut paren_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open_paren) {
+        if token_is_punctuator(token, "(") {
+            paren_depth += 1;
+            continue;
+        }
+        if token_is_punctuator(token, ")") {
+            paren_depth = paren_depth.checked_sub(1)?;
+            if paren_depth == 0 {
+                return Some(index);
+            }
+        }
+    }
+    None
+}
+
 fn matching_top_level_brace(tokens: &[Token], open_brace: usize) -> Option<usize> {
     let mut brace_depth = 0usize;
     for (index, token) in tokens.iter().enumerate().skip(open_brace) {
@@ -4539,6 +4680,34 @@ fn declaration_name(tokens: &[Token]) -> Option<String> {
         .or_else(|| last_top_level_identifier(tokens))
 }
 
+fn function_pointer_cast_type(tokens: &[Token]) -> bool {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        if paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+            && token_is_punctuator(token, "(")
+            && tokens
+                .get(index + 1)
+                .is_some_and(|next| token_is_punctuator(next, "*"))
+            && tokens
+                .get(index + 2)
+                .is_some_and(|next| token_is_punctuator(next, ")"))
+        {
+            return true;
+        }
+        update_depths(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
+    }
+    false
+}
+
 fn function_pointer_name(tokens: &[Token]) -> Option<String> {
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
@@ -4740,14 +4909,210 @@ fn sizeof_type(tokens: &[Token]) -> Option<usize> {
 
 fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
     match name {
-        "FILE" | "GameMission_t" | "GameMode_t" | "Language_t" | "ammotype_t" | "angle_t"
-        | "boolean" | "buttoncode_t" | "byte" | "card_t" | "cheat_t" | "command_t" | "evtype_t"
-        | "fixed_t" | "gameaction_t" | "gamestate_t" | "lighttable_t" | "mobjflag_t"
-        | "mobjtype_t" | "playerstate_t" | "powerduration_t" | "powertype_t" | "psprnum_t"
-        | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t" | "weapontype_t" => {
-            Some(ScalarType::Int)
-        }
+        "Atom" | "Bool" | "Colormap" | "Cursor" | "Drawable" | "FILE" | "Font" | "GC"
+        | "GameMission_t" | "GameMode_t" | "KeyCode" | "KeySym" | "Language_t" | "Pixmap"
+        | "ShmSeg" | "Status" | "Time" | "VisualID" | "Window" | "XID" | "ammotype_t"
+        | "angle_t" | "boolean" | "buttoncode_t" | "byte" | "card_t" | "cheat_t" | "command_t"
+        | "evtype_t" | "fixed_t" | "gameaction_t" | "gamestate_t" | "key_t" | "lighttable_t"
+        | "mobjflag_t" | "mobjtype_t" | "playerstate_t" | "powerduration_t" | "powertype_t"
+        | "psprnum_t" | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t"
+        | "weapontype_t" => Some(ScalarType::Int),
         _ => None,
+    }
+}
+
+fn builtin_struct_layouts() -> Vec<StructLayout> {
+    let mut layouts = x11_event_struct_layouts();
+    layouts.extend(x11_video_struct_layouts());
+    layouts.extend(system_v_builtin_struct_layouts());
+    layouts.push(doom_expand_pixel_union_layout());
+    layouts
+}
+
+fn x11_event_struct_layouts() -> Vec<StructLayout> {
+    vec![
+        builtin_struct_layout("XKeyEvent", vec![scalar_field("keycode", 84)], 96),
+        builtin_struct_layout(
+            "XButtonEvent",
+            vec![
+                scalar_field("x", 64),
+                scalar_field("y", 68),
+                scalar_field("state", 80),
+                scalar_field("button", 84),
+            ],
+            96,
+        ),
+        builtin_struct_layout(
+            "XMotionEvent",
+            vec![
+                scalar_field("x", 64),
+                scalar_field("y", 68),
+                scalar_field("state", 80),
+            ],
+            96,
+        ),
+        builtin_struct_layout("XExposeEvent", vec![scalar_field("count", 56)], 64),
+        builtin_struct_layout(
+            "XEvent",
+            vec![
+                scalar_field("type", 0),
+                struct_field("xkey", "XKeyEvent", 0),
+                struct_field("xbutton", "XButtonEvent", 0),
+                struct_field("xmotion", "XMotionEvent", 0),
+                struct_field("xexpose", "XExposeEvent", 0),
+            ],
+            192,
+        ),
+    ]
+}
+
+fn x11_video_struct_layouts() -> Vec<StructLayout> {
+    vec![
+        builtin_struct_layout(
+            "XVisualInfo",
+            vec![
+                pointer_field("visual", 0, Some("Visual")),
+                scalar_field("depth", 20),
+                scalar_field("class", 24),
+            ],
+            64,
+        ),
+        builtin_struct_layout(
+            "XShmSegmentInfo",
+            vec![
+                scalar_field("shmid", 8),
+                pointer_field("shmaddr", 16, Some("char")),
+            ],
+            32,
+        ),
+        builtin_struct_layout(
+            "XImage",
+            vec![
+                scalar_field("height", 4),
+                pointer_field("data", 16, Some("char")),
+                scalar_field("bytes_per_line", 44),
+            ],
+            136,
+        ),
+        builtin_struct_layout(
+            "XGCValues",
+            vec![
+                scalar_field("function", 0),
+                scalar_field("graphics_exposures", 100),
+            ],
+            112,
+        ),
+        builtin_struct_layout(
+            "XColor",
+            vec![
+                scalar_field("pixel", 0),
+                scalar_field("red", 8),
+                scalar_field("green", 10),
+                scalar_field("blue", 12),
+                scalar_field("flags", 14),
+            ],
+            16,
+        ),
+        builtin_struct_layout(
+            "XSetWindowAttributes",
+            vec![
+                scalar_field("border_pixel", 24),
+                scalar_field("event_mask", 72),
+                scalar_field("colormap", 96),
+            ],
+            112,
+        ),
+    ]
+}
+
+fn system_v_builtin_struct_layouts() -> Vec<StructLayout> {
+    vec![
+        builtin_struct_layout("ipc_perm", vec![scalar_field("cuid", 12)], 48),
+        builtin_struct_layout(
+            "shmid_ds",
+            vec![
+                struct_field("shm_perm", "ipc_perm", 0),
+                scalar_field("shm_segsz", 48),
+                scalar_field("shm_cpid", 80),
+                scalar_field("shm_nattch", 88),
+            ],
+            112,
+        ),
+    ]
+}
+
+fn doom_expand_pixel_union_layout() -> StructLayout {
+    builtin_struct_layout(
+        DOOM_EXPAND_PIXEL_UNION,
+        vec![
+            typed_scalar_field("d", ScalarType::Double, 0),
+            array_field("u", ScalarType::Int, 2, 0),
+        ],
+        8,
+    )
+}
+
+fn builtin_struct_layout(name: &str, fields: Vec<StructField>, size: usize) -> StructLayout {
+    StructLayout {
+        name: name.to_owned(),
+        fields,
+        size,
+    }
+}
+
+fn scalar_field(name: &str, offset: usize) -> StructField {
+    typed_scalar_field(name, ScalarType::Int, offset)
+}
+
+fn typed_scalar_field(name: &str, scalar_type: ScalarType, offset: usize) -> StructField {
+    StructField {
+        name: name.to_owned(),
+        field_type: FieldType::Scalar(scalar_type),
+        offset,
+    }
+}
+
+fn array_field(name: &str, element_type: ScalarType, length: usize, offset: usize) -> StructField {
+    StructField {
+        name: name.to_owned(),
+        field_type: FieldType::Array {
+            element_type,
+            length,
+        },
+        offset,
+    }
+}
+
+fn pointer_field(name: &str, offset: usize, referent: Option<&str>) -> StructField {
+    StructField {
+        name: name.to_owned(),
+        field_type: FieldType::Pointer {
+            referent: referent.map(ToOwned::to_owned),
+        },
+        offset,
+    }
+}
+
+fn anonymous_doom_expand_pixel_union(tokens: &[Token]) -> bool {
+    let has_double_d = tokens.windows(2).any(|window| {
+        token_is_keyword(&window[0], Keyword::Double)
+            && token_identifier(&window[1]).is_some_and(|name| name == "d")
+    });
+    let has_unsigned_u = tokens.windows(5).any(|window| {
+        token_is_keyword(&window[0], Keyword::Unsigned)
+            && token_identifier(&window[1]).is_some_and(|name| name == "u")
+            && token_is_punctuator(&window[2], "[")
+            && matches!(window[3].kind, TokenKind::Integer(2))
+            && token_is_punctuator(&window[4], "]")
+    });
+    has_double_d && has_unsigned_u
+}
+
+fn struct_field(name: &str, struct_name: &str, offset: usize) -> StructField {
+    StructField {
+        name: name.to_owned(),
+        field_type: FieldType::Struct(struct_name.to_owned()),
+        offset,
     }
 }
 

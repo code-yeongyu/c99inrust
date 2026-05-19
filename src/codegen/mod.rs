@@ -1022,9 +1022,9 @@ fn emit_aarch64_call(
     assembly: &mut String,
 ) -> CompileResult<()> {
     const REGISTERS: [&str; 8] = ["0", "1", "2", "3", "4", "5", "6", "7"];
-    let Some(registers) = REGISTERS.get(..args.len()) else {
-        return Err(CompileError::new("too many function call arguments"));
-    };
+    let register_count = args.len().min(REGISTERS.len());
+    let registers = &REGISTERS[..register_count];
+    let stack_bytes = call_stack_argument_bytes(args.len(), REGISTERS.len())?;
     let arg_depth = depth + args.len();
     for (index, arg) in args.iter().enumerate() {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
@@ -1036,7 +1036,9 @@ fn emit_aarch64_call(
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
         emit_aarch64_load_temporary_to_register(expr_width(arg), offset, register, assembly)?;
     }
-    write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))
+    emit_aarch64_stack_arguments(args, temporary_base, depth, stack_bytes, assembly)?;
+    write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))?;
+    emit_aarch64_pop_call_stack(stack_bytes, assembly)
 }
 
 fn emit_aarch64_call_expr(
@@ -1068,9 +1070,9 @@ fn emit_aarch64_indirect_call(
     assembly: &mut String,
 ) -> CompileResult<()> {
     const REGISTERS: [&str; 8] = ["0", "1", "2", "3", "4", "5", "6", "7"];
-    let Some(registers) = REGISTERS.get(..args.len()) else {
-        return Err(CompileError::new("too many function call arguments"));
-    };
+    let register_count = args.len().min(REGISTERS.len());
+    let registers = &REGISTERS[..register_count];
+    let stack_bytes = call_stack_argument_bytes(args.len(), REGISTERS.len())?;
     let callee_offset = temporary_base + ((depth + args.len()) * TEMPORARY_BYTES);
     let arg_depth = depth + args.len() + 1;
     for (index, arg) in args.iter().enumerate() {
@@ -1092,8 +1094,53 @@ fn emit_aarch64_indirect_call(
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
         emit_aarch64_load_temporary_to_register(expr_width(arg), offset, register, assembly)?;
     }
-    emit_aarch64_load_temporary_to_register(ValueWidth::I64, callee_offset, "16", assembly)?;
-    write_assembly!(assembly, "\tblr x16\n")
+    emit_aarch64_stack_arguments(args, temporary_base, depth, stack_bytes, assembly)?;
+    let adjusted_callee_offset = callee_offset
+        .checked_add(stack_bytes)
+        .ok_or_else(|| CompileError::new("call callee offset overflow"))?;
+    emit_aarch64_load_temporary_to_register(
+        ValueWidth::I64,
+        adjusted_callee_offset,
+        "16",
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tblr x16\n")?;
+    emit_aarch64_pop_call_stack(stack_bytes, assembly)
+}
+
+fn emit_aarch64_stack_arguments(
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    stack_bytes: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    const REGISTER_ARGS: usize = 8;
+    if stack_bytes == 0 {
+        return Ok(());
+    }
+    write_assembly!(assembly, "\tsub sp, sp, #{stack_bytes}\n")?;
+    for (index, arg) in args.iter().enumerate().skip(REGISTER_ARGS) {
+        let temporary_offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        let adjusted_offset = temporary_offset
+            .checked_add(stack_bytes)
+            .ok_or_else(|| CompileError::new("call argument offset overflow"))?;
+        let stack_offset = (index - REGISTER_ARGS)
+            .checked_mul(TEMPORARY_BYTES)
+            .ok_or_else(|| CompileError::new("call stack argument offset overflow"))?;
+        let width = expr_width(arg);
+        emit_aarch64_load_temporary_to_register(width, adjusted_offset, "17", assembly)?;
+        let prefix = aarch64_register_prefix(width);
+        write_assembly!(assembly, "\tstr {prefix}17, [sp, #{stack_offset}]\n")?;
+    }
+    Ok(())
+}
+
+fn emit_aarch64_pop_call_stack(stack_bytes: usize, assembly: &mut String) -> CompileResult<()> {
+    if stack_bytes == 0 {
+        return Ok(());
+    }
+    write_assembly!(assembly, "\tadd sp, sp, #{stack_bytes}\n")
 }
 
 fn emit_aarch64_conditional(
@@ -1632,13 +1679,65 @@ fn emit_aarch64_post_increment(
             labels,
             assembly,
         ),
+        LoweredLValue::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+            element_byte_size,
+        } => emit_aarch64_post_increment_pointer_subscript(
+            PointerSubscriptExpr {
+                pointer,
+                index,
+                element_type: *element_type,
+                element_byte_size: *element_byte_size,
+            },
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         LoweredLValue::GlobalByteSubscript { .. }
         | LoweredLValue::GlobalIntSubscript { .. }
-        | LoweredLValue::GlobalPointerSubscript { .. }
-        | LoweredLValue::PointerSubscript { .. } => Err(CompileError::new(
+        | LoweredLValue::GlobalPointerSubscript { .. } => Err(CompileError::new(
             "post-increment expression supports direct lvalues only",
         )),
     }
+}
+
+fn emit_aarch64_post_increment_pointer_subscript(
+    subscript: PointerSubscriptExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(subscript.element_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let base_offset = temporary_base + ((depth + 1) * TEMPORARY_BYTES);
+    emit_aarch64_expr_with_width(
+        subscript.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 2,
+        labels,
+        assembly,
+    )?;
+    emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_aarch64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 2,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmov w17, w0\n");
+    emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
+    emit_aarch64_load_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
+    emit_aarch64_store_temporary(width, value_offset, assembly)?;
+    emit_aarch64_increment_result(width, assembly)?;
+    emit_aarch64_store_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
+    emit_aarch64_load_temporary(width, value_offset, assembly)
 }
 
 fn emit_aarch64_post_increment_pointer_field(
@@ -1733,6 +1832,54 @@ fn emit_aarch64_store_pointer_subscript(
         return write_assembly!(assembly, "\tstrh w0, [x16, w17, sxtw #1]\n");
     }
     let Some(shift) = memory_scale_shift_for_byte_size(subscript.element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
+    write_assembly!(
+        assembly,
+        "\tstr {}, [x16, w17, sxtw #{}]\n",
+        aarch64_result_register(width),
+        shift
+    )
+}
+
+fn emit_aarch64_load_pointer_subscript_result(
+    element_byte_size: usize,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tldrb w0, [x16, w17, sxtw]\n");
+    }
+    if element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tldrsh w0, [x16, w17, sxtw #1]\n");
+    }
+    let Some(shift) = memory_scale_shift_for_byte_size(element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
+    write_assembly!(
+        assembly,
+        "\tldr {}, [x16, w17, sxtw #{}]\n",
+        aarch64_result_register(width),
+        shift
+    )
+}
+
+fn emit_aarch64_store_pointer_subscript_result(
+    element_byte_size: usize,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tstrb w0, [x16, w17, sxtw]\n");
+    }
+    if element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tstrh w0, [x16, w17, sxtw #1]\n");
+    }
+    let Some(shift) = memory_scale_shift_for_byte_size(element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",
         ));
@@ -2408,9 +2555,8 @@ fn emit_x86_64_call(
     assembly: &mut String,
 ) -> CompileResult<()> {
     const MAX_REGISTER_ARGS: usize = 6;
-    if args.len() > MAX_REGISTER_ARGS {
-        return Err(CompileError::new("too many function call arguments"));
-    }
+    let register_count = args.len().min(MAX_REGISTER_ARGS);
+    let stack_bytes = call_stack_argument_bytes(args.len(), MAX_REGISTER_ARGS)?;
     let arg_depth = depth + args.len();
     for (index, arg) in args.iter().enumerate() {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
@@ -2426,13 +2572,22 @@ fn emit_x86_64_call(
         )?;
         emit_x86_64_store_temporary(width, offset, assembly)?;
     }
-    for (index, arg) in args.iter().enumerate() {
+    for (index, arg) in args.iter().enumerate().take(register_count) {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
         let width = expr_width(arg);
         let register = x86_64_argument_register(index, width)?;
         emit_x86_64_load_temporary_to_register(width, offset, register, assembly)?;
     }
-    write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))
+    emit_x86_64_stack_arguments(
+        args,
+        temporary_base,
+        depth,
+        MAX_REGISTER_ARGS,
+        stack_bytes,
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))?;
+    emit_x86_64_pop_call_stack(stack_bytes, assembly)
 }
 
 fn emit_x86_64_call_expr(
@@ -2478,9 +2633,8 @@ fn emit_x86_64_indirect_call(
     assembly: &mut String,
 ) -> CompileResult<()> {
     const MAX_REGISTER_ARGS: usize = 6;
-    if args.len() > MAX_REGISTER_ARGS {
-        return Err(CompileError::new("too many function call arguments"));
-    }
+    let register_count = args.len().min(MAX_REGISTER_ARGS);
+    let stack_bytes = call_stack_argument_bytes(args.len(), MAX_REGISTER_ARGS)?;
     let callee_offset = temporary_base + ((depth + args.len()) * TEMPORARY_BYTES);
     let arg_depth = depth + args.len() + 1;
     for (index, arg) in args.iter().enumerate() {
@@ -2507,14 +2661,56 @@ fn emit_x86_64_indirect_call(
         assembly,
     )?;
     emit_x86_64_store_temporary(ValueWidth::I64, callee_offset, assembly)?;
-    for (index, arg) in args.iter().enumerate() {
+    for (index, arg) in args.iter().enumerate().take(register_count) {
         let offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
         let width = expr_width(arg);
         let register = x86_64_argument_register(index, width)?;
         emit_x86_64_load_temporary_to_register(width, offset, register, assembly)?;
     }
+    emit_x86_64_stack_arguments(
+        args,
+        temporary_base,
+        depth,
+        MAX_REGISTER_ARGS,
+        stack_bytes,
+        assembly,
+    )?;
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, callee_offset, "%rax", assembly)?;
-    write_assembly!(assembly, "\tcall *%rax\n")
+    write_assembly!(assembly, "\tcall *%rax\n")?;
+    emit_x86_64_pop_call_stack(stack_bytes, assembly)
+}
+
+fn emit_x86_64_stack_arguments(
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    register_args: usize,
+    stack_bytes: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if stack_bytes == 0 {
+        return Ok(());
+    }
+    write_assembly!(assembly, "\tsubq ${stack_bytes}, %rsp\n")?;
+    for (index, arg) in args.iter().enumerate().skip(register_args) {
+        let temporary_offset = temporary_base + ((depth + index) * TEMPORARY_BYTES);
+        let stack_offset = (index - register_args)
+            .checked_mul(TEMPORARY_BYTES)
+            .ok_or_else(|| CompileError::new("call stack argument offset overflow"))?;
+        let width = expr_width(arg);
+        let register = x86_64_stack_argument_scratch_register(width);
+        emit_x86_64_load_temporary_to_register(width, temporary_offset, register, assembly)?;
+        let suffix = x86_64_instruction_suffix(width);
+        write_assembly!(assembly, "\tmov{suffix} {register}, {stack_offset}(%rsp)\n")?;
+    }
+    Ok(())
+}
+
+fn emit_x86_64_pop_call_stack(stack_bytes: usize, assembly: &mut String) -> CompileResult<()> {
+    if stack_bytes == 0 {
+        return Ok(());
+    }
+    write_assembly!(assembly, "\taddq ${stack_bytes}, %rsp\n")
 }
 
 fn emit_x86_64_conditional(
@@ -3176,13 +3372,70 @@ fn emit_x86_64_post_increment(
             labels,
             assembly,
         ),
+        LoweredLValue::PointerSubscript {
+            pointer,
+            index,
+            element_type,
+            element_byte_size,
+        } => emit_x86_64_post_increment_pointer_subscript(
+            PointerSubscriptExpr {
+                pointer,
+                index,
+                element_type: *element_type,
+                element_byte_size: *element_byte_size,
+            },
+            temporary_base,
+            depth,
+            codegen_target,
+            labels,
+            assembly,
+        ),
         LoweredLValue::GlobalByteSubscript { .. }
         | LoweredLValue::GlobalIntSubscript { .. }
-        | LoweredLValue::GlobalPointerSubscript { .. }
-        | LoweredLValue::PointerSubscript { .. } => Err(CompileError::new(
+        | LoweredLValue::GlobalPointerSubscript { .. } => Err(CompileError::new(
             "post-increment expression supports direct lvalues only",
         )),
     }
+}
+
+fn emit_x86_64_post_increment_pointer_subscript(
+    subscript: PointerSubscriptExpr<'_>,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(subscript.element_type);
+    let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    let base_offset = temporary_base + ((depth + 1) * TEMPORARY_BYTES);
+    emit_x86_64_expr_with_width(
+        subscript.pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 2,
+        target,
+        labels,
+        assembly,
+    )?;
+    emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
+    emit_x86_64_expr_with_width(
+        subscript.index,
+        ValueWidth::I32,
+        temporary_base,
+        depth + 2,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tcltq\n");
+    assembly.push_str("\tmovq %rax, %rdx\n");
+    emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
+    emit_x86_64_load_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
+    emit_x86_64_store_temporary(width, value_offset, assembly)?;
+    emit_x86_64_increment_result(width, assembly)?;
+    emit_x86_64_store_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
+    emit_x86_64_load_temporary(width, value_offset, assembly)
 }
 
 fn emit_x86_64_post_increment_pointer_field(
@@ -3293,6 +3546,56 @@ fn emit_x86_64_store_pointer_subscript(
         return write_assembly!(assembly, "\tmovw %ax, (%rcx,%rdx,2)\n");
     }
     let Some(scale) = memory_scale_bytes_for_byte_size(subscript.element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
+    write_assembly!(
+        assembly,
+        "\tmov{} {}, (%rcx,%rdx,{})\n",
+        x86_64_instruction_suffix(width),
+        x86_64_result_register(width),
+        scale
+    )
+}
+
+fn emit_x86_64_load_pointer_subscript_result(
+    element_byte_size: usize,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovzbl (%rcx,%rdx,1), %eax\n");
+    }
+    if element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovswl (%rcx,%rdx,2), %eax\n");
+    }
+    let Some(scale) = memory_scale_bytes_for_byte_size(element_byte_size) else {
+        return Err(CompileError::new(
+            "unsupported pointer subscript element size",
+        ));
+    };
+    write_assembly!(
+        assembly,
+        "\tmov{} (%rcx,%rdx,{}), {}\n",
+        x86_64_instruction_suffix(width),
+        scale,
+        x86_64_result_register(width)
+    )
+}
+
+fn emit_x86_64_store_pointer_subscript_result(
+    element_byte_size: usize,
+    width: ValueWidth,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovb %al, (%rcx,%rdx,1)\n");
+    }
+    if element_byte_size == 2 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovw %ax, (%rcx,%rdx,2)\n");
+    }
+    let Some(scale) = memory_scale_bytes_for_byte_size(element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",
         ));
@@ -3486,6 +3789,14 @@ fn x86_64_argument_register(index: usize, width: ValueWidth) -> CompileResult<&'
         .get(index)
         .copied()
         .ok_or_else(|| CompileError::new("too many function call arguments"))
+}
+
+const fn x86_64_stack_argument_scratch_register(width: ValueWidth) -> &'static str {
+    match width {
+        ValueWidth::I32 => "%r10d",
+        ValueWidth::I64 => "%r10",
+        ValueWidth::F64 => "%xmm8",
+    }
 }
 
 const fn x86_64_instruction_suffix(width: ValueWidth) -> &'static str {
@@ -4094,6 +4405,14 @@ const fn align_to(value: usize, alignment: usize) -> usize {
     } else {
         value + (alignment - remainder)
     }
+}
+
+fn call_stack_argument_bytes(arg_count: usize, register_count: usize) -> CompileResult<usize> {
+    let stack_arg_count = arg_count.saturating_sub(register_count);
+    let byte_count = stack_arg_count
+        .checked_mul(TEMPORARY_BYTES)
+        .ok_or_else(|| CompileError::new("call stack argument size overflow"))?;
+    Ok(align_to(byte_count, 16))
 }
 
 fn call_arg_depth(args: &[LoweredExpr]) -> usize {

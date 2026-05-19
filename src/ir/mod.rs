@@ -283,6 +283,10 @@ fn lower_extern_global_binding(
         GlobalInitializer::ExternPointerArray { referent } => GlobalBinding::PointerArray {
             referent: referent.clone(),
         },
+        GlobalInitializer::ExternUnsignedCharArray => GlobalBinding::UnsignedCharArray,
+        GlobalInitializer::ExternUnsignedCharMatrix { columns } => {
+            GlobalBinding::UnsignedCharMatrix { columns: *columns }
+        }
         GlobalInitializer::ExternStructArray { struct_name } => {
             let layout = structs.get(struct_name).ok_or_else(|| {
                 CompileError::new(format!("unknown struct-array type: {struct_name}"))
@@ -304,6 +308,7 @@ fn lower_extern_global_binding(
         }
         GlobalInitializer::Int(_)
         | GlobalInitializer::IntArray(_)
+        | GlobalInitializer::DoubleArray { .. }
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
@@ -336,6 +341,15 @@ fn lower_defined_global_initializer(
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntArray,
         )),
+        GlobalInitializer::DoubleArray { length } => {
+            let byte_len = length
+                .checked_mul(scalar_size(ScalarType::Double))
+                .ok_or_else(|| CompileError::new("global double-array size overflow"))?;
+            Ok((
+                LoweredGlobalInitializer::ZeroBytes(byte_len),
+                GlobalBinding::DoubleArray,
+            ))
+        }
         GlobalInitializer::IntConstant(name) => {
             lower_int_constant_global(name, &global.name, constants)
         }
@@ -382,6 +396,8 @@ fn lower_defined_global_initializer(
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
         | GlobalInitializer::ExternPointerArray { .. }
+        | GlobalInitializer::ExternUnsignedCharArray
+        | GlobalInitializer::ExternUnsignedCharMatrix { .. }
         | GlobalInitializer::ExternStructArray { .. }
         | GlobalInitializer::ExternStructObject { .. } => Err(CompileError::new(
             "internal error: extern global reached definition lowering",
@@ -732,6 +748,7 @@ enum LocalBinding {
 enum GlobalBinding {
     Int,
     IntArray,
+    DoubleArray,
     Pointer {
         referent: Option<String>,
     },
@@ -769,6 +786,7 @@ impl GlobalBinding {
             Self::Int => Some(ScalarType::Int),
             Self::Pointer { .. } => Some(ScalarType::Pointer),
             Self::IntArray
+            | Self::DoubleArray
             | Self::PointerArray { .. }
             | Self::StructObject { .. }
             | Self::StructArray { .. }
@@ -781,6 +799,7 @@ impl GlobalBinding {
         matches!(
             self,
             Self::IntArray
+                | Self::DoubleArray
                 | Self::PointerArray { .. }
                 | Self::StructArray { .. }
                 | Self::UnsignedCharArray

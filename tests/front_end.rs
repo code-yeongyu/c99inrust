@@ -199,6 +199,26 @@ fn preprocessor_provides_doom_unistd_access_constant() {
 }
 
 #[test]
+fn preprocessor_provides_doom_x11_and_sysv_constants() {
+    // given
+    let source = "#include <X11/Xlib.h>\n#include <X11/keysym.h>\n#include <X11/extensions/XShm.h>\n#include <sys/shm.h>\n#include <signal.h>\nint key = XK_Left;\nint mask = Button1Mask | ExposureMask;\nint event = KeyPress + Expose;\nint flags = CWEventMask | CWColormap | CWBorderPixel;\nint gc = GCFunction | GCGraphicsExposures;\nint shm = IPC_CREAT | IPC_STAT | IPC_RMID | ShmCompletion;\nint sig = SIGINT;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-x11.c", source)
+        .expect("preprocessor should provide Doom X11 and SysV constants");
+
+    // then
+    assert!(unit.source.contains("int key = 65361;"));
+    assert!(unit.source.contains("int mask = 256 | 32768;"));
+    assert!(unit.source.contains("int event = 2 + 12;"));
+    assert!(unit.source.contains("int flags = 2048 | 8192 | 8;"));
+    assert!(unit.source.contains("int gc = 1 | 65536;"));
+    assert!(unit.source.contains("int shm = 512 | 2 | 0 | 0;"));
+    assert!(unit.source.contains("int sig = 2;"));
+}
+
+#[test]
 fn preprocessor_removes_comments_before_macro_expansion() {
     // given
     let source = "#define HU_FONTSTART '!'\t// the first font character\n#define HU_FONTSIZE ('_' - HU_FONTSTART + 1)\nextern int hu_font[HU_FONTSIZE];\n";
