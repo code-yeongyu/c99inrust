@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
     BinaryOp, Constant, Expr, FieldType, Function, Global, GlobalInitializer, LValue,
-    PointerReturnFunction, Program, ReturnType, ScalarType, Statement, StructLayout, SwitchCase,
-    UnaryOp,
+    LocalCharArrayInitializer, PointerReturnFunction, Program, ReturnType, ScalarType, Statement,
+    StructLayout, SwitchCase, UnaryOp,
 };
 
 const POINTER_REFERENT: &str = "*";
@@ -30,6 +30,7 @@ pub enum LoweredGlobalInitializer {
     PointerGlobalOffset { base: String, byte_offset: usize },
     PointerArray(usize),
     PointerStringArray(Vec<String>),
+    PointerNameArray { values: Vec<String>, length: usize },
     ZeroBytes(usize),
     UnsignedCharArray(Vec<u8>),
 }
@@ -283,6 +284,7 @@ fn lower_extern_global_binding(
         GlobalInitializer::ExternIntArray => GlobalBinding::IntArray,
         GlobalInitializer::ExternPointerArray { referent } => GlobalBinding::PointerArray {
             referent: referent.clone(),
+            columns: None,
         },
         GlobalInitializer::ExternUnsignedCharArray => GlobalBinding::UnsignedCharArray,
         GlobalInitializer::ExternUnsignedCharMatrix { columns } => {
@@ -296,6 +298,7 @@ fn lower_extern_global_binding(
                 struct_name: struct_name.clone(),
                 byte_size: layout.size,
                 length: None,
+                columns: None,
             }
         }
         GlobalInitializer::ExternStructObject { struct_name } => {
@@ -317,6 +320,7 @@ fn lower_extern_global_binding(
         | GlobalInitializer::PointerSubscriptAddress { .. }
         | GlobalInitializer::PointerArray { .. }
         | GlobalInitializer::PointerStringArray { .. }
+        | GlobalInitializer::PointerNameArray { .. }
         | GlobalInitializer::StructObject { .. }
         | GlobalInitializer::StructArray { .. }
         | GlobalInitializer::UnsignedCharArray(_)
@@ -330,6 +334,9 @@ fn lower_defined_global_initializer(
     constants: &HashMap<String, i64>,
     structs: &HashMap<String, StructLayout>,
 ) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    if let Some(lowered) = lower_pointer_array_initializer(&global.initializer) {
+        return lowered;
+    }
     match &global.initializer {
         GlobalInitializer::Int(value) => Ok((
             LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
@@ -377,17 +384,10 @@ fn lower_defined_global_initializer(
             base,
             index,
         } => lower_global_pointer_subscript_address(referent.as_deref(), base, *index),
-        GlobalInitializer::PointerArray { referent, length } => Ok((
-            LoweredGlobalInitializer::PointerArray(*length),
-            GlobalBinding::PointerArray {
-                referent: referent.clone(),
-            },
-        )),
-        GlobalInitializer::PointerStringArray { referent, values } => Ok((
-            LoweredGlobalInitializer::PointerStringArray(values.clone()),
-            GlobalBinding::PointerArray {
-                referent: referent.clone(),
-            },
+        GlobalInitializer::PointerArray { .. }
+        | GlobalInitializer::PointerStringArray { .. }
+        | GlobalInitializer::PointerNameArray { .. } => Err(CompileError::new(
+            "internal error: pointer array global reached fallback lowering",
         )),
         GlobalInitializer::StructObject { struct_name } => {
             lower_struct_object_global(struct_name, structs)
@@ -395,7 +395,8 @@ fn lower_defined_global_initializer(
         GlobalInitializer::StructArray {
             struct_name,
             length,
-        } => lower_struct_array_global(struct_name, *length, structs),
+            columns,
+        } => lower_struct_array_global(struct_name, *length, *columns, structs),
         GlobalInitializer::UnsignedCharArray(values) => Ok((
             LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
             GlobalBinding::UnsignedCharArray,
@@ -414,6 +415,46 @@ fn lower_defined_global_initializer(
         | GlobalInitializer::ExternStructObject { .. } => Err(CompileError::new(
             "internal error: extern global reached definition lowering",
         )),
+    }
+}
+
+fn lower_pointer_array_initializer(
+    initializer: &GlobalInitializer,
+) -> Option<CompileResult<(LoweredGlobalInitializer, GlobalBinding)>> {
+    match initializer {
+        GlobalInitializer::PointerArray {
+            referent,
+            length,
+            columns,
+        } => Some(Ok((
+            LoweredGlobalInitializer::PointerArray(*length),
+            GlobalBinding::PointerArray {
+                referent: referent.clone(),
+                columns: *columns,
+            },
+        ))),
+        GlobalInitializer::PointerStringArray { referent, values } => Some(Ok((
+            LoweredGlobalInitializer::PointerStringArray(values.clone()),
+            GlobalBinding::PointerArray {
+                referent: referent.clone(),
+                columns: None,
+            },
+        ))),
+        GlobalInitializer::PointerNameArray {
+            referent,
+            values,
+            length,
+        } => Some(Ok((
+            LoweredGlobalInitializer::PointerNameArray {
+                values: values.clone(),
+                length: *length,
+            },
+            GlobalBinding::PointerArray {
+                referent: referent.clone(),
+                columns: None,
+            },
+        ))),
+        _ => None,
     }
 }
 
@@ -478,6 +519,7 @@ fn lower_struct_object_global(
 fn lower_struct_array_global(
     struct_name: &str,
     length: usize,
+    columns: Option<usize>,
     structs: &HashMap<String, StructLayout>,
 ) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
     let layout = structs
@@ -492,6 +534,7 @@ fn lower_struct_array_global(
             struct_name: struct_name.to_owned(),
             byte_size: layout.size,
             length: Some(length),
+            columns,
         },
     ))
 }
@@ -534,34 +577,78 @@ fn merge_global_binding(
     }
     match (existing, incoming) {
         (
+            GlobalBinding::PointerArray { referent, columns },
+            GlobalBinding::PointerArray {
+                referent: incoming_referent,
+                columns: incoming_columns,
+            },
+        ) if referent == incoming_referent => {
+            let OptionalUsizeMerge::Compatible(merged_columns) =
+                merge_optional_usize(*columns, *incoming_columns)
+            else {
+                return None;
+            };
+            Some(GlobalBinding::PointerArray {
+                referent: referent.clone(),
+                columns: merged_columns,
+            })
+        }
+        (
             GlobalBinding::StructArray {
                 struct_name,
                 byte_size,
                 length,
+                columns,
             },
             GlobalBinding::StructArray {
                 struct_name: incoming_name,
                 byte_size: incoming_byte_size,
                 length: incoming_length,
+                columns: incoming_columns,
             },
         ) if struct_name == incoming_name && byte_size == incoming_byte_size => {
-            let merged_length = match (*length, *incoming_length) {
-                (Some(existing_length), Some(new_length)) if existing_length == new_length => {
-                    Some(existing_length)
-                }
-                (Some(existing_length), None) | (None, Some(existing_length)) => {
-                    Some(existing_length)
-                }
-                (None, None) => None,
-                (Some(_), Some(_)) => return None,
+            let OptionalUsizeMerge::Compatible(merged_length) =
+                merge_optional_usize(*length, *incoming_length)
+            else {
+                return None;
+            };
+            let OptionalUsizeMerge::Compatible(merged_columns) =
+                merge_optional_usize(*columns, *incoming_columns)
+            else {
+                return None;
             };
             Some(GlobalBinding::StructArray {
                 struct_name: struct_name.clone(),
                 byte_size: *byte_size,
                 length: merged_length,
+                columns: merged_columns,
             })
         }
         _ => None,
+    }
+}
+
+enum OptionalUsizeMerge {
+    Compatible(Option<usize>),
+    Conflict,
+}
+
+const fn merge_optional_usize(
+    existing: Option<usize>,
+    incoming: Option<usize>,
+) -> OptionalUsizeMerge {
+    match (existing, incoming) {
+        (Some(existing), Some(new)) => {
+            if existing == new {
+                OptionalUsizeMerge::Compatible(Some(existing))
+            } else {
+                OptionalUsizeMerge::Conflict
+            }
+        }
+        (Some(existing), None) | (None, Some(existing)) => {
+            OptionalUsizeMerge::Compatible(Some(existing))
+        }
+        (None, None) => OptionalUsizeMerge::Compatible(None),
     }
 }
 
@@ -794,6 +881,7 @@ enum GlobalBinding {
     },
     PointerArray {
         referent: Option<String>,
+        columns: Option<usize>,
     },
     StructObject {
         struct_name: String,
@@ -803,6 +891,7 @@ enum GlobalBinding {
         struct_name: String,
         byte_size: usize,
         length: Option<usize>,
+        columns: Option<usize>,
     },
     UnsignedCharArray,
     UnsignedCharMatrix {
@@ -922,7 +1011,7 @@ impl LoweringContext {
                 name,
                 length,
                 initializer,
-            } => self.lower_local_char_array(name, *length, initializer.as_deref()),
+            } => self.lower_local_char_array(name, *length, initializer.as_ref()),
             Statement::LocalCharMatrix {
                 name,
                 rows,
@@ -1081,13 +1170,13 @@ impl LoweringContext {
         &mut self,
         name: &str,
         length: usize,
-        initializer: Option<&str>,
+        initializer: Option<&LocalCharArrayInitializer>,
     ) -> CompileResult<()> {
         let slot = self.declare_char_array(name, length)?;
-        if let Some(value) = initializer {
+        if let Some(initializer) = initializer {
             self.instructions.push(Instruction::InitLocalBytes {
                 offset: self.local_offset(slot)?,
-                values: local_char_array_initializer_values(value, length)?,
+                values: local_char_array_initializer_values(initializer, length)?,
             });
         }
         Ok(())
@@ -1777,12 +1866,12 @@ impl LoweringContext {
     }
 
     fn lower_assignment(&mut self, target: &LValue, value: &Expr) -> CompileResult<()> {
-        if let Some(target) = self.resolve_struct_lvalue_address(target)? {
+        if let Some(struct_target) = self.resolve_struct_lvalue_address(target)? {
             let source = self.resolve_struct_address(value)?;
-            if source.struct_name != target.struct_name {
+            if source.struct_name != struct_target.struct_name {
                 return Err(CompileError::new("incompatible struct assignment"));
             }
-            self.push_struct_copy(&target, &source)?;
+            self.push_struct_copy(&struct_target, &source)?;
             return Ok(());
         }
         let target = self.lower_lvalue(target)?;
@@ -1970,6 +2059,9 @@ impl LoweringContext {
                 index: Box::new(self.lower_expr(index)?),
             });
         }
+        if let Some(pointer) = self.resolve_global_pointer_matrix_row(array, index)? {
+            return Ok(pointer);
+        }
         if let Expr::Identifier(name) = array
             && matches!(
                 self.global_bindings.get(name),
@@ -1990,6 +2082,19 @@ impl LoweringContext {
                 element_type,
                 element_byte_size,
             });
+        }
+        if let Some((pointer, flat_index, element_type, element_byte_size)) =
+            self.resolve_nested_array_field_subscript(array, index)?
+        {
+            return Ok(LoweredExpr::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(flat_index),
+                element_type,
+                element_byte_size,
+            });
+        }
+        if let Some(pointer) = self.resolve_global_struct_matrix_row(array, index)? {
+            return Ok(pointer);
         }
         if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
             return Ok(address.pointer);
@@ -2048,6 +2153,14 @@ impl LoweringContext {
                 index: Box::new(self.lower_expr(index)?),
             });
         }
+        if let Some(pointer) = self.resolve_global_pointer_matrix_row(array, index)? {
+            return Ok(LoweredLValue::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(LoweredExpr::Integer(0)),
+                element_type: ScalarType::Pointer,
+                element_byte_size: scalar_size(ScalarType::Pointer),
+            });
+        }
         if let Expr::Identifier(name) = array
             && matches!(
                 self.global_bindings.get(name),
@@ -2065,6 +2178,16 @@ impl LoweringContext {
             return Ok(LoweredLValue::PointerSubscript {
                 pointer: Box::new(pointer),
                 index: Box::new(self.lower_expr(index)?),
+                element_type,
+                element_byte_size,
+            });
+        }
+        if let Some((pointer, flat_index, element_type, element_byte_size)) =
+            self.resolve_nested_array_field_subscript(array, index)?
+        {
+            return Ok(LoweredLValue::PointerSubscript {
+                pointer: Box::new(pointer),
+                index: Box::new(flat_index),
                 element_type,
                 element_byte_size,
             });
@@ -2321,6 +2444,55 @@ impl LoweringContext {
         )))
     }
 
+    fn resolve_nested_array_field_subscript(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<(LoweredExpr, LoweredExpr, ScalarType, usize)>> {
+        let Expr::Subscript {
+            array: nested_array,
+            index: row_index,
+        } = array
+        else {
+            return Ok(None);
+        };
+        let Expr::Member {
+            base,
+            field,
+            dereference,
+        } = nested_array.as_ref()
+        else {
+            return Ok(None);
+        };
+        let member = self.resolve_member_access(base, field, *dereference)?;
+        let FieldType::Array {
+            element_type,
+            columns: Some(columns),
+            ..
+        } = member.field_type
+        else {
+            return Ok(None);
+        };
+        let columns = i64::try_from(columns)
+            .map_err(|_| CompileError::new("struct array column count does not fit i64"))?;
+        let row_offset = LoweredExpr::Binary {
+            op: BinaryOp::Mul,
+            left: Box::new(self.lower_expr(row_index)?),
+            right: Box::new(LoweredExpr::Integer(columns)),
+        };
+        let flat_index = LoweredExpr::Binary {
+            op: BinaryOp::Add,
+            left: Box::new(row_offset),
+            right: Box::new(self.lower_expr(index)?),
+        };
+        Ok(Some((
+            pointer_field_address(member.pointer, member.offset),
+            flat_index,
+            element_type,
+            scalar_size(element_type),
+        )))
+    }
+
     fn resolve_struct_array_field_subscript_address(
         &self,
         array: &Expr,
@@ -2429,6 +2601,57 @@ impl LoweringContext {
         }))
     }
 
+    fn resolve_global_pointer_matrix_row(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(GlobalBinding::PointerArray {
+            columns: Some(columns),
+            ..
+        }) = self.global_bindings.get(name)
+        else {
+            return Ok(None);
+        };
+        let byte_size = columns
+            .checked_mul(scalar_size(ScalarType::Pointer))
+            .ok_or_else(|| CompileError::new("global pointer matrix row size overflow"))?;
+        Ok(Some(LoweredExpr::PointerOffset {
+            pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size,
+        }))
+    }
+
+    fn resolve_global_struct_matrix_row(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(GlobalBinding::StructArray {
+            byte_size,
+            columns: Some(columns),
+            ..
+        }) = self.global_bindings.get(name)
+        else {
+            return Ok(None);
+        };
+        let row_size = columns
+            .checked_mul(*byte_size)
+            .ok_or_else(|| CompileError::new("global struct matrix row size overflow"))?;
+        Ok(Some(LoweredExpr::PointerOffset {
+            pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size: row_size,
+        }))
+    }
+
     fn resolve_struct_address(&self, expr: &Expr) -> CompileResult<StructAddress> {
         if let Expr::Identifier(name) = expr
             && let Some(LocalBinding::StructObject {
@@ -2507,11 +2730,15 @@ impl LoweringContext {
         let Some(GlobalBinding::StructArray {
             struct_name,
             byte_size,
+            columns,
             ..
         }) = self.global_bindings.get(name)
         else {
             return Ok(None);
         };
+        if columns.is_some() {
+            return Ok(None);
+        }
         Ok(Some(StructAddress {
             pointer: LoweredExpr::PointerOffset {
                 pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
@@ -2541,22 +2768,33 @@ impl LoweringContext {
         })
     }
 
-    fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
-        if let Expr::Identifier(name) = expr
-            && let Some(binding) = self.local_binding(name)
+    fn pointer_referent_for_identifier(&self, name: &str) -> Option<String> {
+        if let Some(binding) = self.local_binding(name)
             && let LocalBinding::Scalar {
                 referent: Some(referent),
                 ..
             } = binding
         {
-            return Ok(referent);
+            return Some(referent);
         }
-        if let Expr::Identifier(name) = expr
-            && let Some(GlobalBinding::Pointer {
-                referent: Some(referent),
-            }) = self.global_bindings.get(name)
+        if let Some(GlobalBinding::Pointer {
+            referent: Some(referent),
+        }) = self.global_bindings.get(name)
         {
-            return Ok(referent.clone());
+            return Some(referent.clone());
+        }
+        if let Some(GlobalBinding::StructArray { struct_name, .. }) = self.global_bindings.get(name)
+        {
+            return Some(struct_name.clone());
+        }
+        None
+    }
+
+    fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
+        if let Expr::Identifier(name) = expr
+            && let Some(referent) = self.pointer_referent_for_identifier(name)
+        {
+            return Ok(referent);
         }
         if let Expr::Call { callee, .. } = expr
             && let Some(Some(referent)) = self.pointer_return_functions.get(callee)
@@ -2603,11 +2841,24 @@ impl LoweringContext {
                 return Ok("char".to_owned());
             }
             if let Expr::Identifier(name) = array.as_ref()
-                && let Some(GlobalBinding::PointerArray {
-                    referent: Some(referent),
+                && let Some(GlobalBinding::PointerArray { referent, columns }) =
+                    self.global_bindings.get(name)
+            {
+                if columns.is_some() {
+                    return Ok(nested_pointer_referent(referent.as_deref()));
+                }
+                if let Some(referent) = referent {
+                    return Ok(referent.clone());
+                }
+            }
+            if let Expr::Identifier(name) = array.as_ref()
+                && let Some(GlobalBinding::StructArray {
+                    struct_name,
+                    columns: Some(_),
+                    ..
                 }) = self.global_bindings.get(name)
             {
-                return Ok(referent.clone());
+                return Ok(struct_name.clone());
             }
             let referent = self.pointer_referent_for_expr(array)?;
             if let Some(nested) = referent.strip_prefix(POINTER_REFERENT)
@@ -2710,6 +2961,7 @@ impl LoweringContext {
                 FieldType::Array {
                     element_type,
                     length,
+                    ..
                 } => {
                     let element_size = scalar_size(element_type);
                     for index in 0..length {
@@ -2961,7 +3213,24 @@ fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
     }
 }
 
-fn local_char_array_initializer_values(value: &str, length: usize) -> CompileResult<Vec<u8>> {
+fn local_char_array_initializer_values(
+    initializer: &LocalCharArrayInitializer,
+    length: usize,
+) -> CompileResult<Vec<u8>> {
+    match initializer {
+        LocalCharArrayInitializer::StringLiteral(value) => {
+            local_char_array_string_initializer_values(value, length)
+        }
+        LocalCharArrayInitializer::Bytes(values) => {
+            local_char_array_braced_initializer_values(values, length)
+        }
+    }
+}
+
+fn local_char_array_string_initializer_values(
+    value: &str,
+    length: usize,
+) -> CompileResult<Vec<u8>> {
     if value.len() > length {
         return Err(CompileError::new(
             "local char array initializer is too large",
@@ -2972,6 +3241,20 @@ fn local_char_array_initializer_values(value: &str, length: usize) -> CompileRes
     if values.len() < length {
         values.push(0);
     }
+    values.resize(length, 0);
+    Ok(values)
+}
+
+fn local_char_array_braced_initializer_values(
+    values: &[u8],
+    length: usize,
+) -> CompileResult<Vec<u8>> {
+    if values.len() > length {
+        return Err(CompileError::new(
+            "local char array initializer is too large",
+        ));
+    }
+    let mut values = values.to_vec();
     values.resize(length, 0);
     Ok(values)
 }
@@ -2988,7 +3271,7 @@ fn local_char_matrix_initializer_values(
     }
     let mut bytes = Vec::with_capacity(local_char_matrix_byte_size(rows, columns)?);
     for value in values {
-        bytes.extend(local_char_array_initializer_values(value, columns)?);
+        bytes.extend(local_char_array_string_initializer_values(value, columns)?);
     }
     bytes.resize(local_char_matrix_byte_size(rows, columns)?, 0);
     Ok(bytes)
@@ -3038,6 +3321,14 @@ fn pointer_referent_byte_size(referent: &str) -> Option<usize> {
 
 fn pointer_referent_is_pointer(referent: &str) -> bool {
     referent.starts_with(POINTER_REFERENT)
+}
+
+fn nested_pointer_referent(referent: Option<&str>) -> String {
+    let mut nested = POINTER_REFERENT.to_owned();
+    if let Some(referent) = referent {
+        nested.push_str(referent);
+    }
+    nested
 }
 
 const fn align_to(value: usize, alignment: usize) -> usize {

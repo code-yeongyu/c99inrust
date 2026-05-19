@@ -124,6 +124,25 @@ int main(void) { char name1[] = "FLOOR7_2"; char* name; name = name1; use(name);
 }
 
 #[test]
+fn compiler_accepts_local_char_array_braced_initializer_slice() {
+    // given
+    let source = "int main(void) { static char destination_keys[4] = { 'g', 'i', 'b', 'r' }; return destination_keys[2]; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovb $103, -4(%rbp)\n"));
+    assert!(assembly.contains("\tmovb $114, -1(%rbp)\n"));
+    assert!(assembly.contains("ret"));
+}
+
+#[test]
 fn compiler_accepts_local_char_array_decay_slice() {
     // given
     let source = r#"void sprintf(char* out, char* fmt, int value);
@@ -1415,6 +1434,31 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_global_unsigned_char_numeric_matrix_initializer_slice() {
+    // given
+    let source = r"typedef unsigned char byte;
+byte gammatable[2][4] = {
+    {1, 2, 3, 4},
+    {5, 6, 7}
+};
+int main(void) {
+    return gammatable[1][3];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("gammatable:"));
+    assert!(assembly.contains("\t.byte 1,2,3,4,5,6,7,0\n"));
+    assert!(assembly.contains("main:"));
+}
+
+#[test]
 fn compiler_accepts_mixed_pointer_scalar_local_declaration_slice() {
     // given
     let source = "int main(void) { unsigned char *p, c; p = 0; c = 7; return c; }";
@@ -1785,6 +1829,30 @@ int main(void) {
     assert!(assembly.contains("rndindex"));
     assert!(assembly.contains("prndindex"));
     assert!(assembly.contains("M_ClearRandom"));
+}
+
+#[test]
+fn compiler_accepts_global_char_array_braced_initializer_slice() {
+    // given
+    let source = r"char frenchKeyMap[4] = { 'P', '\\', 127, 0 };
+char ForeignTranslation(unsigned char ch) {
+    return ch < 4 ? frenchKeyMap[ch] : ch;
+}
+int main(void) {
+    return ForeignTranslation(1);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("frenchKeyMap:"));
+    assert!(assembly.contains("\t.byte 80,92,127,0\n"));
+    assert!(assembly.contains("ForeignTranslation"));
 }
 
 #[test]
@@ -2752,6 +2820,45 @@ int main(void) { return rotate(0); }";
 }
 
 #[test]
+fn compiler_accepts_parenthesized_product_before_shift_slice() {
+    // given
+    let source = r"int main(void) {
+    int volume;
+    int seperation;
+    return volume - ((volume * seperation * seperation) >> 16);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tsarl %cl, %eax\n"));
+    assert!(assembly.contains("ret"));
+}
+
+#[test]
+fn compiler_accepts_empty_parameter_function_definition_slice() {
+    // given
+    let source = "void I_InitSound() { return; } int main(void) { I_InitSound(); return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("I_InitSound:"));
+    assert!(assembly.contains("\tcall I_InitSound\n"));
+}
+
+#[test]
 fn compiler_accepts_m_cheat_xlate_table_slice() {
     // given
     let source = r"static unsigned char cheat_xlate_table[256];
@@ -3142,6 +3249,270 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_forward_struct_typedef_then_tag_definition_slice() {
+    // given
+    let source = r"typedef struct sfxinfo_struct sfxinfo_t;
+struct sfxinfo_struct {
+    char* name;
+    void* data;
+};
+extern sfxinfo_t S_sfx[];
+int from_global(int index) {
+    return S_sfx[index].name != 0;
+}
+int from_pointer(sfxinfo_t* sfx) {
+    return sfx->data != 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("from_global:"));
+    assert!(assembly.contains("from_pointer:"));
+    assert!(assembly.contains("S_sfx"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_array_arrow_decay_slice() {
+    // given
+    let source = r"typedef struct {
+    int* soundorg;
+} button_t;
+button_t buttonlist[16];
+int main(void) {
+    return buttonlist->soundorg != 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("buttonlist:"));
+    assert!(assembly.contains("main:"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_array_subscript_pointer_member_chain_slice() {
+    // given
+    let source = r"typedef struct {
+    int angle;
+} mobj_t;
+typedef struct {
+    mobj_t* mo;
+} player_t;
+extern player_t players[4];
+int consoleplayer;
+int main(void) {
+    return players[consoleplayer].mo->angle;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(!assembly.contains("players:\n"));
+    assert!(assembly.contains("consoleplayer:"));
+    assert!(assembly.contains("\tleaq players(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovq 0(%rax), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_pointer_matrix_assignment_slice() {
+    // given
+    let source = r"typedef struct {
+    int width;
+} patch_t;
+void* W_CacheLumpName(char* name, int tag);
+patch_t* arms[6][2];
+int main(void) {
+    int i;
+    char* namebuf;
+    i = 3;
+    arms[i][0] = (patch_t*) W_CacheLumpName(namebuf, 1);
+    return arms[i][0]->width;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("arms:"));
+    assert!(assembly.contains("\t.zero 96\n"));
+    assert!(assembly.contains("\tcall W_CacheLumpName\n"));
+    assert!(assembly.contains("\tmovq %rax, (%rcx,%rdx,8)\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_global_sizeof_struct_array_initializer_slice() {
+    // given
+    let source = r"typedef struct {
+    int type;
+    int period;
+} anim_t;
+static anim_t epsd0animinfo[] = { { 0, 1 }, { 0, 2 } };
+static anim_t epsd1animinfo[] = { { 1, 3 } };
+static int NUMANIMS[2] = {
+    sizeof(epsd0animinfo)/sizeof(anim_t),
+    sizeof(epsd1animinfo)/sizeof(anim_t)
+};
+int main(void) {
+    return NUMANIMS[0] + NUMANIMS[1];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("NUMANIMS:"));
+    assert!(assembly.contains("\t.long 2,1\n"));
+    assert!(assembly.contains("main:"));
+}
+
+#[test]
+fn compiler_accepts_global_pointer_name_array_initializer_slice() {
+    // given
+    let source = r"typedef struct {
+    int type;
+} anim_t;
+static anim_t epsd0animinfo[] = { { 0 } };
+static anim_t epsd1animinfo[] = { { 1 } };
+static anim_t *anims[3] = {
+    epsd0animinfo,
+    epsd1animinfo
+};
+int main(void) {
+    return anims[1][0].type;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("anims:"));
+    assert!(assembly.contains("\t.quad epsd0animinfo\n"));
+    assert!(assembly.contains("\t.quad epsd1animinfo\n"));
+    assert!(assembly.contains("\t.quad 0\n"));
+}
+
+#[test]
+fn compiler_merges_extern_and_defined_global_matrices_slice() {
+    // given
+    let source = r"typedef struct {
+    int forwardmove;
+} ticcmd_t;
+typedef unsigned char lighttable_t;
+extern ticcmd_t netcmds[4][12];
+ticcmd_t netcmds[4][12];
+extern lighttable_t* scalelight[16][48];
+lighttable_t* scalelight[16][48];
+int main(void) {
+    return netcmds[1][2].forwardmove + (scalelight[1][2] != 0);
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("netcmds:"));
+    assert!(assembly.contains("scalelight:"));
+    assert!(assembly.contains("main:"));
+}
+
+#[test]
+fn compiler_accepts_global_struct_matrix_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int x;
+    int y;
+} point_t;
+typedef struct {
+    int epsd;
+} wbstartstruct_t;
+static point_t lnodes[4][9] = {
+    { { 185, 164 } },
+    { { 254, 25 } }
+};
+static wbstartstruct_t* wbs;
+int main(void) {
+    int n;
+    n = 0;
+    return lnodes[wbs->epsd][n].x;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("lnodes:"));
+    assert!(assembly.contains("wbs:"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_struct_two_dimensional_array_field_assignment_slice() {
+    // given
+    let source = r"typedef struct {
+    int bbox[2][4];
+} node_t;
+int main(void) {
+    node_t* no;
+    int j;
+    int k;
+    no = 0;
+    j = 1;
+    k = 2;
+    no->bbox[j][k] = 7;
+    return no->bbox[j][k];
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+    assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+}
+
+#[test]
 fn compiler_accepts_doom_named_inner_union_member_slice() {
     // given
     let source = r"typedef struct {
@@ -3251,6 +3622,29 @@ int first_height(patch_t** font) {
 
     // then
     assert!(assembly.contains("first_height:"));
+    assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
+    assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_pointer_element_array_parameter_member_slice() {
+    // given
+    let source = r"typedef struct {
+    int leftoffset;
+} patch_t;
+int first_left(patch_t* patches[]) {
+    return patches[0]->leftoffset;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("first_left:"));
     assert!(assembly.contains("\tmovq (%rcx,%rax,8), %rax\n"));
     assert!(assembly.contains("\tmovl 0(%rax), %eax\n"));
 }
@@ -3677,12 +4071,18 @@ int main(void) {
 #[test]
 fn compiler_accepts_doom_libc_struct_local_slice() {
     // given
-    let source = r"int probe(void) {
+    let source = r"int sigaction(int sig, struct sigaction* act, struct sigaction* oact);
+void handler(int ignore) { ignore = 0; }
+int probe(void) {
     struct stat fileinfo;
     struct timeval tp;
     struct timezone tzp;
     struct sockaddr_in address;
     struct hostent* hostentry;
+    struct itimerval value;
+    struct itimerval ovalue;
+    struct sigaction act;
+    struct sigaction oact;
     int out;
     fileinfo.st_size = 4;
     tp.tv_sec = fileinfo.st_size;
@@ -3690,8 +4090,15 @@ fn compiler_accepts_doom_libc_struct_local_slice() {
     address.sin_family = 2;
     address.sin_addr.s_addr = 0;
     address.sin_port = 5029;
+    value.it_interval.tv_sec = 0;
+    value.it_interval.tv_usec = 1000;
+    value.it_value.tv_sec = value.it_interval.tv_sec;
+    value.it_value.tv_usec = value.it_interval.tv_usec;
+    act.sa_handler = handler;
+    act.sa_flags = 1;
+    sigaction(14, &act, &oact);
     out = *(int *)hostentry->h_addr_list[0];
-    return out + tp.tv_sec + tp.tv_usec + tzp.tz_minuteswest;
+    return out + tp.tv_sec + tp.tv_usec + tzp.tz_minuteswest + ovalue.it_value.tv_sec;
 }
 int main(void) { return 0; }";
 

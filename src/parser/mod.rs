@@ -38,6 +38,7 @@ pub enum FieldType {
     Array {
         element_type: ScalarType,
         length: usize,
+        columns: Option<usize>,
     },
     StructArray {
         struct_name: String,
@@ -108,10 +109,16 @@ pub enum GlobalInitializer {
     PointerArray {
         referent: Option<String>,
         length: usize,
+        columns: Option<usize>,
     },
     PointerStringArray {
         referent: Option<String>,
         values: Vec<String>,
+    },
+    PointerNameArray {
+        referent: Option<String>,
+        values: Vec<String>,
+        length: usize,
     },
     StructObject {
         struct_name: String,
@@ -119,6 +126,7 @@ pub enum GlobalInitializer {
     StructArray {
         struct_name: String,
         length: usize,
+        columns: Option<usize>,
     },
     UnsignedCharArray(Vec<u8>),
     UnsignedCharMatrix {
@@ -194,7 +202,7 @@ pub enum Statement {
     LocalCharArray {
         name: String,
         length: usize,
-        initializer: Option<String>,
+        initializer: Option<LocalCharArrayInitializer>,
     },
     LocalCharMatrix {
         name: String,
@@ -254,6 +262,12 @@ pub enum Statement {
     Break,
     Continue,
     Return(Option<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalCharArrayInitializer {
+    StringLiteral(String),
+    Bytes(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -461,6 +475,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let mut parser = SurfaceParser { tokens, index: 0 };
     let external_items = parser.external_token_groups()?;
     let mut structs = builtin_struct_layouts();
+    let mut struct_aliases = Vec::new();
     let mut constants = Vec::new();
     let mut scalar_typedefs = Vec::new();
     let mut pointer_typedefs = Vec::new();
@@ -474,6 +489,10 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             pointer_typedefs.push(name);
             continue;
         }
+        if let Some(alias) = struct_forward_typedef_alias(item_tokens) {
+            struct_aliases.push(alias);
+            continue;
+        }
         if let Some(function) = pointer_return_function(item_tokens) {
             pointer_return_functions.push(function);
         }
@@ -484,19 +503,13 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         if let Some(layouts) =
             parse_struct_typedef(item_tokens, &structs, &constants, &pointer_typedefs)?
         {
-            let Some(layout) = layouts.last() else {
-                continue;
-            };
-            if let Some(tag_name) = aggregate_tag_name(item_tokens)
-                && tag_name != layout.name
-            {
-                structs.push(StructLayout {
-                    name: tag_name,
-                    fields: layout.fields.clone(),
-                    size: layout.size,
-                });
-            }
-            structs.extend(layouts);
+            register_struct_typedef_layouts(item_tokens, layouts, &mut structs, &struct_aliases);
+            continue;
+        }
+        if let Some(layouts) =
+            parse_struct_definition(item_tokens, &structs, &constants, &pointer_typedefs)?
+        {
+            register_struct_layouts(layouts, &mut structs, &struct_aliases);
             continue;
         }
         let enum_constants = parse_enum_constants(item_tokens, &constants)?;
@@ -507,8 +520,13 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             constants.extend(enum_constants);
             continue;
         }
-        let parsed_globals =
-            parse_supported_global_declarations(item_tokens, &structs, &constants)?;
+        let sizeof_symbols = global_sizeof_symbols(&globals, &structs)?;
+        let parsed_globals = parse_supported_global_declarations(
+            item_tokens,
+            &structs,
+            &constants,
+            &sizeof_symbols,
+        )?;
         if !parsed_globals.is_empty() {
             globals.extend(parsed_globals);
             continue;
@@ -519,31 +537,14 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             }
             continue;
         };
-        if !function_definition_has_supported_signature(item_tokens) {
-            let Some(token) = item_tokens.first() else {
-                return Err(CompileError::new(format!(
-                    "unsupported function definition: {name}"
-                )));
-            };
-            return Err(
-                CompileError::new(format!("unsupported function definition: {name}"))
-                    .at(token.line, token.column),
-            );
-        }
-        let mut function_parser = Parser {
-            tokens: item_tokens,
-            index: 0,
-            known_structs: &structs,
-            known_constants: &constants,
-            known_scalar_typedefs: &scalar_typedefs,
-            known_pointer_typedefs: &pointer_typedefs,
-        };
-        functions.push(function_parser.function()?);
-        if !function_parser.check_end() {
-            return Err(CompileError::new(format!(
-                "trailing tokens after function definition: {name}"
-            )));
-        }
+        functions.push(parse_supported_function_definition(
+            item_tokens,
+            &name,
+            &structs,
+            &constants,
+            &scalar_typedefs,
+            &pointer_typedefs,
+        )?);
     }
     if functions.is_empty() && unsupported_data_declaration {
         return Err(CompileError::new(
@@ -558,6 +559,76 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         function_prototypes,
         functions,
     })
+}
+
+fn register_struct_typedef_layouts(
+    item_tokens: &[Token],
+    layouts: Vec<StructLayout>,
+    structs: &mut Vec<StructLayout>,
+    struct_aliases: &[(String, String)],
+) {
+    let Some(layout) = layouts.last() else {
+        return;
+    };
+    if let Some(tag_name) = aggregate_tag_name(item_tokens)
+        && tag_name != layout.name
+    {
+        let tag_layout = StructLayout {
+            name: tag_name,
+            fields: layout.fields.clone(),
+            size: layout.size,
+        };
+        structs.extend(struct_alias_layouts(&tag_layout, struct_aliases));
+        structs.push(tag_layout);
+    }
+    register_struct_layouts(layouts, structs, struct_aliases);
+}
+
+fn register_struct_layouts(
+    layouts: Vec<StructLayout>,
+    structs: &mut Vec<StructLayout>,
+    struct_aliases: &[(String, String)],
+) {
+    for layout in &layouts {
+        structs.extend(struct_alias_layouts(layout, struct_aliases));
+    }
+    structs.extend(layouts);
+}
+
+fn parse_supported_function_definition(
+    tokens: &[Token],
+    name: &str,
+    structs: &[StructLayout],
+    constants: &[Constant],
+    scalar_typedefs: &[String],
+    pointer_typedefs: &[String],
+) -> CompileResult<Function> {
+    if !function_definition_has_supported_signature(tokens) {
+        let Some(token) = tokens.first() else {
+            return Err(CompileError::new(format!(
+                "unsupported function definition: {name}"
+            )));
+        };
+        return Err(
+            CompileError::new(format!("unsupported function definition: {name}"))
+                .at(token.line, token.column),
+        );
+    }
+    let mut function_parser = Parser {
+        tokens,
+        index: 0,
+        known_structs: structs,
+        known_constants: constants,
+        known_scalar_typedefs: scalar_typedefs,
+        known_pointer_typedefs: pointer_typedefs,
+    };
+    let function = function_parser.function()?;
+    if !function_parser.check_end() {
+        return Err(CompileError::new(format!(
+            "trailing tokens after function definition: {name}"
+        )));
+    }
+    Ok(function)
 }
 
 struct Parser<'a> {
@@ -631,6 +702,10 @@ impl Parser<'_> {
             }
             if self.check_punctuator(")") {
                 if depth == 0 {
+                    if parameter_start == self.index {
+                        self.advance();
+                        return Ok(parameters);
+                    }
                     self.push_parameter(&mut parameters, parameter_start, self.index)?;
                     self.advance();
                     return Ok(parameters);
@@ -909,33 +984,81 @@ impl Parser<'_> {
     ) -> CompileResult<Statement> {
         let initializer = if self.check_punctuator("=") {
             self.advance();
-            let initializer = self.expression()?;
-            let Expr::StringLiteral(value) = initializer else {
-                return Err(CompileError::new(
-                    "local char arrays require string literal initializers",
-                ));
-            };
-            Some(value)
+            Some(self.local_char_array_initializer()?)
         } else {
             None
         };
         let length = match (explicit_length, &initializer) {
             (Some(length), _) => length,
-            (None, Some(value)) => inferred_local_char_array_length(value)?,
+            (None, Some(LocalCharArrayInitializer::StringLiteral(value))) => {
+                inferred_local_char_array_length(value)?
+            }
+            (None, Some(LocalCharArrayInitializer::Bytes(values))) if !values.is_empty() => {
+                values.len()
+            }
             (None, None) => {
                 return Err(CompileError::new(
                     "local char arrays require a size or string literal initializer",
                 ));
             }
+            (None, Some(LocalCharArrayInitializer::Bytes(_))) => {
+                return Err(CompileError::new(
+                    "local char arrays require a size or nonempty initializer",
+                ));
+            }
         };
-        if let Some(value) = &initializer {
-            validate_local_char_array_initializer(value, length)?;
+        if let Some(initializer) = &initializer {
+            validate_local_char_array_initializer_size(initializer, length)?;
         }
         Ok(Statement::LocalCharArray {
             name,
             length,
             initializer,
         })
+    }
+
+    fn local_char_array_initializer(&mut self) -> CompileResult<LocalCharArrayInitializer> {
+        if self.check_punctuator("{") {
+            return Ok(LocalCharArrayInitializer::Bytes(
+                self.local_char_array_braced_initializer()?,
+            ));
+        }
+        let initializer = self.expression()?;
+        let Expr::StringLiteral(value) = initializer else {
+            return Err(CompileError::new(
+                "local char arrays require string literal or braced byte initializers",
+            ));
+        };
+        Ok(LocalCharArrayInitializer::StringLiteral(value))
+    }
+
+    fn local_char_array_braced_initializer(&mut self) -> CompileResult<Vec<u8>> {
+        self.expect_punctuator("{")?;
+        let mut values = Vec::new();
+        if self.check_punctuator("}") {
+            self.advance();
+            return Ok(values);
+        }
+        loop {
+            let value = eval_integer_initializer_expr_with_constants(
+                &self.expression()?,
+                self.known_constants,
+            )?
+            .to_i64_trunc()?;
+            values.push(
+                u8::try_from(value)
+                    .map_err(|_| CompileError::new("local char array initializer too large"))?,
+            );
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+            self.expect_punctuator(",")?;
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+        }
     }
 
     fn local_char_matrix_declaration(
@@ -1166,6 +1289,7 @@ impl Parser<'_> {
             declaration,
             self.known_structs,
             self.known_constants,
+            &[],
         )?
         else {
             return Ok(None);
@@ -2283,7 +2407,8 @@ fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
     let pointer_depth = specifiers
         .iter()
         .filter(|token| token_is_punctuator(token, "*"))
-        .count();
+        .count()
+        .saturating_add(parameter_array_depth(&tokens[name_index + 1..]));
     let base_referent = specifiers
         .iter()
         .rev()
@@ -2292,6 +2417,13 @@ fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
         .map(ToOwned::to_owned)
         .or_else(|| declaration_base_referent_type(specifiers));
     pointer_referent_for_depth(pointer_depth, base_referent.as_deref())
+}
+
+fn parameter_array_depth(tokens: &[Token]) -> usize {
+    tokens
+        .iter()
+        .filter(|token| token_is_punctuator(token, "["))
+        .count()
 }
 
 fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
@@ -2431,6 +2563,77 @@ fn parse_struct_typedef(
     };
     layouts.push(StructLayout { name, fields, size });
     Ok(Some(layouts))
+}
+
+fn parse_struct_definition(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+    constants: &[Constant],
+    pointer_typedefs: &[String],
+) -> CompileResult<Option<Vec<StructLayout>>> {
+    if token_has_keyword(tokens, Keyword::Typedef) {
+        return Ok(None);
+    }
+    if !token_has_keyword(tokens, Keyword::Struct) && !token_has_keyword(tokens, Keyword::Union) {
+        return Ok(None);
+    }
+    let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
+        return Ok(None);
+    };
+    let is_union = tokens[..open_brace]
+        .iter()
+        .any(|token| token_is_keyword(token, Keyword::Union));
+    let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
+        return Ok(None);
+    };
+    let Some(name) = aggregate_tag_name(tokens) else {
+        return Ok(None);
+    };
+    let mut available_structs = known_structs.to_vec();
+    let mut layouts = Vec::new();
+    let mut context = StructParseContext {
+        parent_name: &name,
+        available_structs: &mut available_structs,
+        constants,
+        pointer_typedefs,
+        nested_layouts: &mut layouts,
+    };
+    let Some((fields, size)) =
+        parse_struct_fields(&tokens[open_brace + 1..close_brace], is_union, &mut context)?
+    else {
+        return Ok(None);
+    };
+    layouts.push(StructLayout { name, fields, size });
+    Ok(Some(layouts))
+}
+
+fn struct_forward_typedef_alias(tokens: &[Token]) -> Option<(String, String)> {
+    if !token_has_keyword(tokens, Keyword::Typedef) || !token_has_keyword(tokens, Keyword::Struct) {
+        return None;
+    }
+    if top_level_punctuator_index(tokens, "{").is_some() {
+        return None;
+    }
+    let names = tokens
+        .iter()
+        .filter_map(token_identifier)
+        .collect::<Vec<_>>();
+    let [tag, alias] = names.as_slice() else {
+        return None;
+    };
+    Some(((*tag).to_owned(), (*alias).to_owned()))
+}
+
+fn struct_alias_layouts(layout: &StructLayout, aliases: &[(String, String)]) -> Vec<StructLayout> {
+    aliases
+        .iter()
+        .filter(|(tag, alias)| tag == &layout.name && alias != &layout.name)
+        .map(|(_tag, alias)| StructLayout {
+            name: alias.clone(),
+            fields: layout.fields.clone(),
+            size: layout.size,
+        })
+        .collect()
 }
 
 fn parse_struct_alias_typedef(
@@ -2590,20 +2793,21 @@ fn parse_struct_field_declaration(
         } else {
             base_type.clone()
         };
-        let field_type = if let Some(length) = struct_field_array_length(segment, context.constants)
-        {
+        let field_type = if let Some(shape) = struct_field_array_shape(segment, context.constants) {
             match field_type {
                 FieldType::Scalar(element_type) => FieldType::Array {
                     element_type,
-                    length,
+                    length: shape.length,
+                    columns: shape.columns,
                 },
                 FieldType::Pointer { .. } => FieldType::Array {
                     element_type: ScalarType::Pointer,
-                    length,
+                    length: shape.length,
+                    columns: shape.columns,
                 },
                 FieldType::Struct(struct_name) => FieldType::StructArray {
                     struct_name,
-                    length,
+                    length: shape.length,
                 },
                 FieldType::Array { .. } | FieldType::StructArray { .. } => field_type,
             }
@@ -2746,18 +2950,37 @@ fn declarator_name_index(tokens: &[Token]) -> Option<usize> {
     previous_identifier_index(tokens, before)
 }
 
-fn struct_field_array_length(tokens: &[Token], constants: &[Constant]) -> Option<usize> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ArrayShape {
+    length: usize,
+    columns: Option<usize>,
+}
+
+fn struct_field_array_shape(tokens: &[Token], constants: &[Constant]) -> Option<ArrayShape> {
     let open_bracket = top_level_punctuator_index(tokens, "[")?;
     let close_bracket = matching_top_level_bracket(tokens, open_bracket)?;
     let length_tokens = &tokens[open_bracket + 1..close_bracket];
-    if let Ok(length) = parse_unsigned_char_array_length(length_tokens, constants) {
-        return Some(length);
+    let rows = if let Ok(length) = parse_unsigned_char_array_length(length_tokens, constants) {
+        length
+    } else {
+        match &tokens.get(open_bracket + 1)?.kind {
+            TokenKind::Integer(value) => usize::try_from(*value).ok().filter(|length| *length > 0),
+            _ => Some(1),
+        }?
+    };
+    if close_bracket <= open_bracket {
+        return None;
     }
-    match &tokens.get(open_bracket + 1)?.kind {
-        TokenKind::Integer(value) => usize::try_from(*value).ok().filter(|length| *length > 0),
-        _ => Some(1),
-    }
-    .filter(|_length| close_bracket > open_bracket)
+    let columns = tokens
+        .get(close_bracket + 1)
+        .filter(|token| token_is_punctuator(token, "["))
+        .and_then(|_token| {
+            let second_open = close_bracket + 1;
+            let second_close = matching_top_level_bracket(tokens, second_open)?;
+            parse_unsigned_char_array_length(&tokens[second_open + 1..second_close], constants).ok()
+        });
+    let length = columns.map_or(Some(rows), |columns| rows.checked_mul(columns))?;
+    Some(ArrayShape { length, columns })
 }
 
 fn struct_field_type(
@@ -2792,6 +3015,7 @@ fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> Co
         FieldType::Array {
             element_type,
             length,
+            ..
         } => scalar_size_for_layout(*element_type)
             .checked_mul(*length)
             .ok_or_else(|| CompileError::new("struct array field size overflow")),
@@ -2857,6 +3081,25 @@ fn validate_local_char_array_initializer(value: &str, length: usize) -> CompileR
         ));
     }
     Ok(())
+}
+
+fn validate_local_char_array_initializer_size(
+    initializer: &LocalCharArrayInitializer,
+    length: usize,
+) -> CompileResult<()> {
+    match initializer {
+        LocalCharArrayInitializer::StringLiteral(value) => {
+            validate_local_char_array_initializer(value, length)
+        }
+        LocalCharArrayInitializer::Bytes(values) => {
+            if values.len() > length {
+                return Err(CompileError::new(
+                    "local char array initializer is too large",
+                ));
+            }
+            Ok(())
+        }
+    }
 }
 
 fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> {
@@ -2942,6 +3185,7 @@ fn parse_supported_global_declaration(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Option<Global>> {
     if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
         return Ok(None);
@@ -2956,6 +3200,9 @@ fn parse_supported_global_declaration(
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer_string_array(tokens)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_pointer_name_array(tokens, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer_array(tokens, constants)? {
@@ -2976,7 +3223,8 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_double_array(tokens, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_int_array(tokens, known_structs, constants)? {
+    if let Some(global) = parse_global_int_array(tokens, known_structs, constants, sizeof_symbols)?
+    {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_extern_scalar(tokens, known_structs)? {
@@ -2985,19 +3233,105 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_pointer(tokens, constants)? {
         return Ok(Some(global));
     }
-    parse_global_int(tokens, known_structs, constants)
+    parse_global_int(tokens, known_structs, constants, sizeof_symbols)
 }
 
 fn parse_supported_global_declarations(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Vec<Global>> {
     if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs, constants)? {
         return Ok(globals);
     }
-    parse_supported_global_declaration(tokens, known_structs, constants)
+    parse_supported_global_declaration(tokens, known_structs, constants, sizeof_symbols)
         .map(|global| global.map_or_else(Vec::new, |global| vec![global]))
+}
+
+fn global_sizeof_symbols(
+    globals: &[Global],
+    known_structs: &[StructLayout],
+) -> CompileResult<Vec<(String, usize)>> {
+    let mut symbols = known_structs
+        .iter()
+        .map(|layout| (layout.name.clone(), layout.size))
+        .collect::<Vec<_>>();
+    for global in globals {
+        if let Some(size) = global_initializer_sizeof_bytes(&global.initializer, known_structs)? {
+            symbols.push((global.name.clone(), size));
+        }
+    }
+    Ok(symbols)
+}
+
+fn global_initializer_sizeof_bytes(
+    initializer: &GlobalInitializer,
+    known_structs: &[StructLayout],
+) -> CompileResult<Option<usize>> {
+    let size = match initializer {
+        GlobalInitializer::Int(_) | GlobalInitializer::IntConstant(_) => {
+            scalar_size_for_layout(ScalarType::Int)
+        }
+        GlobalInitializer::PointerNull { .. }
+        | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerSubscriptAddress { .. } => {
+            scalar_size_for_layout(ScalarType::Pointer)
+        }
+        GlobalInitializer::IntArray(values) => values
+            .len()
+            .checked_mul(scalar_size_for_layout(ScalarType::Int))
+            .ok_or_else(|| CompileError::new("global int array sizeof overflow"))?,
+        GlobalInitializer::IntMatrix { values, .. } => values
+            .len()
+            .checked_mul(scalar_size_for_layout(ScalarType::Int))
+            .ok_or_else(|| CompileError::new("global int matrix sizeof overflow"))?,
+        GlobalInitializer::DoubleArray { length } => length
+            .checked_mul(scalar_size_for_layout(ScalarType::Double))
+            .ok_or_else(|| CompileError::new("global double array sizeof overflow"))?,
+        GlobalInitializer::PointerArray { length, .. } => length
+            .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
+            .ok_or_else(|| CompileError::new("global pointer array sizeof overflow"))?,
+        GlobalInitializer::PointerStringArray { values, .. } => values
+            .len()
+            .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
+            .ok_or_else(|| CompileError::new("global pointer string array sizeof overflow"))?,
+        GlobalInitializer::PointerNameArray { length, .. } => length
+            .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
+            .ok_or_else(|| CompileError::new("global pointer name array sizeof overflow"))?,
+        GlobalInitializer::StructObject { struct_name } => {
+            struct_size_for_initializer(struct_name, known_structs)?
+        }
+        GlobalInitializer::StructArray {
+            struct_name,
+            length,
+            ..
+        } => length
+            .checked_mul(struct_size_for_initializer(struct_name, known_structs)?)
+            .ok_or_else(|| CompileError::new("global struct array sizeof overflow"))?,
+        GlobalInitializer::UnsignedCharArray(values)
+        | GlobalInitializer::UnsignedCharMatrix { values, .. } => values.len(),
+        GlobalInitializer::Extern(_)
+        | GlobalInitializer::ExternPointer { .. }
+        | GlobalInitializer::ExternIntArray
+        | GlobalInitializer::ExternPointerArray { .. }
+        | GlobalInitializer::ExternUnsignedCharArray
+        | GlobalInitializer::ExternUnsignedCharMatrix { .. }
+        | GlobalInitializer::ExternStructArray { .. }
+        | GlobalInitializer::ExternStructObject { .. } => return Ok(None),
+    };
+    Ok(Some(size))
+}
+
+fn struct_size_for_initializer(
+    struct_name: &str,
+    known_structs: &[StructLayout],
+) -> CompileResult<usize> {
+    known_structs
+        .iter()
+        .find(|layout| layout.name == struct_name)
+        .map(|layout| layout.size)
+        .ok_or_else(|| CompileError::new(format!("unknown struct sizeof type: {struct_name}")))
 }
 
 fn parse_global_function_pointer(tokens: &[Token]) -> Option<Global> {
@@ -3082,57 +3416,22 @@ fn parse_global_unsigned_char_array(
             ),
         );
     };
-    if declaration
-        .get(close_bracket + 1)
-        .is_some_and(|token| token_is_punctuator(token, "["))
-    {
-        let second_open = close_bracket + 1;
-        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
-            return Err(
-                CompileError::new("unterminated global matrix declarator").at(
-                    declaration[second_open].line,
-                    declaration[second_open].column,
-                ),
-            );
-        };
-        let rows = parse_unsigned_char_array_length(
-            &declaration[open_bracket + 1..close_bracket],
-            constants,
-        )?;
-        let columns = parse_unsigned_char_array_length(
-            &declaration[second_open + 1..second_close],
-            constants,
-        )?;
-        let length = rows
-            .checked_mul(columns)
-            .ok_or_else(|| CompileError::new("global byte matrix size overflow"))?;
-        let name = token_identifier(&declaration[name_index])
-            .ok_or_else(|| CompileError::new("expected global matrix name"))?
-            .to_owned();
-        if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
-            return Ok(Some(Global {
-                name,
-                initializer: GlobalInitializer::ExternUnsignedCharMatrix { columns },
-            }));
-        }
-        let values = if let Some(assign_index) =
-            top_level_punctuator_index(&declaration[second_close + 1..], "=")
-        {
-            let assign_index = second_close + 1 + assign_index;
-            parse_char_matrix_initializer(&declaration[assign_index + 1..], rows, columns)?
-        } else {
-            vec![0; length]
-        };
-        return Ok(Some(Global {
-            name,
-            initializer: GlobalInitializer::UnsignedCharMatrix { values, columns },
-        }));
+    if let Some(global) = parse_global_unsigned_char_matrix(
+        declaration,
+        open_bracket,
+        close_bracket,
+        name_index,
+        constants,
+    )? {
+        return Ok(Some(global));
     }
     let values = if let Some(assign_index) =
         top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
     {
         let assign_index = close_bracket + 1 + assign_index;
-        let Ok(values) = parse_unsigned_char_initializer(&declaration[assign_index + 1..]) else {
+        let Ok(values) =
+            parse_unsigned_char_initializer(&declaration[assign_index + 1..], constants)
+        else {
             return Ok(None);
         };
         values
@@ -3156,6 +3455,78 @@ fn parse_global_unsigned_char_array(
         name,
         initializer: GlobalInitializer::UnsignedCharArray(values),
     }))
+}
+
+fn parse_global_unsigned_char_matrix(
+    declaration: &[Token],
+    open_bracket: usize,
+    close_bracket: usize,
+    name_index: usize,
+    constants: &[Constant],
+) -> CompileResult<Option<Global>> {
+    if !declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        return Ok(None);
+    }
+    let second_open = close_bracket + 1;
+    let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+        return Err(
+            CompileError::new("unterminated global matrix declarator").at(
+                declaration[second_open].line,
+                declaration[second_open].column,
+            ),
+        );
+    };
+    let rows =
+        parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket], constants)?;
+    let columns =
+        parse_unsigned_char_array_length(&declaration[second_open + 1..second_close], constants)?;
+    let length = rows
+        .checked_mul(columns)
+        .ok_or_else(|| CompileError::new("global byte matrix size overflow"))?;
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global matrix name"))?
+        .to_owned();
+    if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
+        return Ok(Some(Global {
+            name,
+            initializer: GlobalInitializer::ExternUnsignedCharMatrix { columns },
+        }));
+    }
+    let values = parse_global_unsigned_char_matrix_values(
+        declaration,
+        second_close,
+        rows,
+        columns,
+        length,
+        constants,
+    )?;
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::UnsignedCharMatrix { values, columns },
+    }))
+}
+
+fn parse_global_unsigned_char_matrix_values(
+    declaration: &[Token],
+    second_close: usize,
+    rows: usize,
+    columns: usize,
+    length: usize,
+    constants: &[Constant],
+) -> CompileResult<Vec<u8>> {
+    let Some(assign_index) = top_level_punctuator_index(&declaration[second_close + 1..], "=")
+    else {
+        return Ok(vec![0; length]);
+    };
+    parse_char_matrix_initializer(
+        &declaration[second_close + 2 + assign_index..],
+        rows,
+        columns,
+        constants,
+    )
 }
 
 fn parse_unsigned_char_array_length(
@@ -3199,15 +3570,46 @@ fn parse_global_pointer_array(
     if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
         return Ok(None);
     }
-    let length =
+    let rows =
         parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket], constants)?;
+    let (length, columns, last_dimension_close) = if declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        let second_open = close_bracket + 1;
+        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+            return Err(
+                CompileError::new("unterminated global pointer-matrix declarator").at(
+                    declaration[second_open].line,
+                    declaration[second_open].column,
+                ),
+            );
+        };
+        let columns = parse_unsigned_char_array_length(
+            &declaration[second_open + 1..second_close],
+            constants,
+        )?;
+        let length = rows
+            .checked_mul(columns)
+            .ok_or_else(|| CompileError::new("global pointer-matrix size overflow"))?;
+        (length, Some(columns), second_close)
+    } else {
+        (rows, None, close_bracket)
+    };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
         .to_owned();
+    if top_level_punctuator_index(&declaration[last_dimension_close + 1..], "=").is_some() {
+        return Ok(None);
+    }
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     Ok(Some(Global {
         name,
-        initializer: GlobalInitializer::PointerArray { referent, length },
+        initializer: GlobalInitializer::PointerArray {
+            referent,
+            length,
+            columns,
+        },
     }))
 }
 
@@ -3247,6 +3649,66 @@ fn parse_global_pointer_string_array(tokens: &[Token]) -> CompileResult<Option<G
     Ok(Some(Global {
         name,
         initializer: GlobalInitializer::PointerStringArray { referent, values },
+    }))
+}
+
+fn parse_global_pointer_name_array(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    if !global_specifiers_are_pointer(&declaration[..name_index]) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated global pointer-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    let Some(assign_index) = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+    else {
+        return Ok(None);
+    };
+    let assign_index = close_bracket + 1 + assign_index;
+    let Ok(values) = parse_identifier_array_initializer(&declaration[assign_index + 1..]) else {
+        return Ok(None);
+    };
+    let explicit_length = if open_bracket + 1 == close_bracket {
+        None
+    } else {
+        Some(parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?)
+    };
+    let length = explicit_length.unwrap_or(values.len());
+    if values.len() > length {
+        return Err(CompileError::new(
+            "too many global pointer-array name initializers",
+        ));
+    }
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
+        .to_owned();
+    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
+    Ok(Some(Global {
+        name,
+        initializer: GlobalInitializer::PointerNameArray {
+            referent,
+            values,
+            length,
+        },
     }))
 }
 
@@ -3313,12 +3775,50 @@ fn parse_global_struct_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global struct-array name"))?
         .to_owned();
+    let is_extern = token_has_keyword(&declaration[..name_index], Keyword::Extern);
+    let columns = if declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        let second_open = close_bracket + 1;
+        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+            return Err(
+                CompileError::new("unterminated global struct-matrix declarator").at(
+                    declaration[second_open].line,
+                    declaration[second_open].column,
+                ),
+            );
+        };
+        if is_extern {
+            parse_optional_symbolic_array_length(
+                &declaration[second_open + 1..second_close],
+                constants,
+            )?
+        } else {
+            Some(parse_unsigned_char_array_length(
+                &declaration[second_open + 1..second_close],
+                constants,
+            )?)
+        }
+    } else {
+        None
+    };
     let assign_index = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
         .map(|offset| close_bracket + 1 + offset);
-    let initializer = if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
+    let initializer = if is_extern {
         GlobalInitializer::ExternStructArray { struct_name }
     } else {
-        let length = if let Some(assign_index) = assign_index {
+        let length = if let Some(columns) = columns {
+            if open_bracket + 1 == close_bracket {
+                return Err(CompileError::new("expected global struct-matrix row count"));
+            }
+            let rows = parse_unsigned_char_array_length(
+                &declaration[open_bracket + 1..close_bracket],
+                constants,
+            )?;
+            rows.checked_mul(columns)
+                .ok_or_else(|| CompileError::new("global struct-matrix size overflow"))?
+        } else if let Some(assign_index) = assign_index {
             let initializer = &declaration[assign_index + 1..];
             aggregate_initializer_length(initializer).ok_or_else(|| {
                 CompileError::new("expected global struct-array initializer").at(
@@ -3327,6 +3827,9 @@ fn parse_global_struct_array(
                 )
             })?
         } else {
+            if open_bracket + 1 == close_bracket {
+                return Err(CompileError::new("expected global struct-array length"));
+            }
             parse_unsigned_char_array_length(
                 &declaration[open_bracket + 1..close_bracket],
                 constants,
@@ -3335,9 +3838,27 @@ fn parse_global_struct_array(
         GlobalInitializer::StructArray {
             struct_name,
             length,
+            columns,
         }
     };
     Ok(Some(Global { name, initializer }))
+}
+
+fn parse_optional_symbolic_array_length(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<usize>> {
+    if let [
+        Token {
+            kind: TokenKind::Identifier(name),
+            ..
+        },
+    ] = tokens
+        && !constants.iter().any(|constant| constant.name == *name)
+    {
+        return Ok(None);
+    }
+    parse_unsigned_char_array_length(tokens, constants).map(Some)
 }
 
 fn aggregate_initializer_length(tokens: &[Token]) -> Option<usize> {
@@ -3440,6 +3961,7 @@ fn parse_global_int_array(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -3494,6 +4016,7 @@ fn parse_global_int_array(
                 rows,
                 columns,
                 constants,
+                sizeof_symbols,
             )?
         } else {
             vec![0; length]
@@ -3517,7 +4040,12 @@ fn parse_global_int_array(
     let assign_index = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
         .map(|offset| close_bracket + 1 + offset);
     let values = if let Some(assign_index) = assign_index {
-        parse_int_array_initializer(&declaration[assign_index + 1..], explicit_length, constants)?
+        parse_int_array_initializer(
+            &declaration[assign_index + 1..],
+            explicit_length,
+            constants,
+            sizeof_symbols,
+        )?
     } else {
         let Some(length) = explicit_length else {
             return Err(CompileError::new("expected unsigned char array length"));
@@ -3699,6 +4227,7 @@ fn parse_global_int(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -3722,7 +4251,7 @@ fn parse_global_int(
     let initializer = if end_index == declaration.len() {
         GlobalInitializer::Int(0)
     } else {
-        parse_global_int_initializer(&declaration[end_index + 1..], constants)?
+        parse_global_int_initializer(&declaration[end_index + 1..], constants, sizeof_symbols)?
     };
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global int name"))?
@@ -3770,7 +4299,7 @@ fn parse_global_int_declarator_list(
         let initializer = if end_index == segment.len() {
             GlobalInitializer::Int(0)
         } else {
-            parse_global_int_initializer(&segment[end_index + 1..], constants)?
+            parse_global_int_initializer(&segment[end_index + 1..], constants, &[])?
         };
         let name = token_identifier(&segment[name_index])
             .ok_or_else(|| CompileError::new("expected global int name"))?
@@ -3940,8 +4469,9 @@ fn global_specifiers_are_double(tokens: &[Token]) -> bool {
 fn parse_global_int_initializer(
     tokens: &[Token],
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<GlobalInitializer> {
-    if let Ok(value) = parse_integer_initializer_with_constants(tokens, constants) {
+    if let Ok(value) = parse_integer_initializer_with_context(tokens, constants, sizeof_symbols) {
         return Ok(GlobalInitializer::Int(value));
     }
     match tokens {
@@ -3962,6 +4492,7 @@ fn parse_int_array_initializer(
     tokens: &[Token],
     explicit_length: Option<usize>,
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Vec<i32>> {
     let Some(first) = tokens.first() else {
         return Err(CompileError::new("expected global int array initializer"));
@@ -3995,7 +4526,8 @@ fn parse_int_array_initializer(
                     .at(tokens[start].line, tokens[start].column),
             );
         }
-        let value = parse_integer_initializer_with_constants(&item[..item_len], constants)?;
+        let value =
+            parse_integer_initializer_with_context(&item[..item_len], constants, sizeof_symbols)?;
         values.push(i32::try_from(value).map_err(|_| {
             CompileError::new("global int array initializer does not fit i32")
                 .at(tokens[start].line, tokens[start].column)
@@ -4019,6 +4551,7 @@ fn parse_int_matrix_initializer(
     rows: usize,
     columns: usize,
     constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<Vec<i32>> {
     let Some(first) = tokens.first() else {
         return Err(CompileError::new("expected global int matrix initializer"));
@@ -4059,9 +4592,14 @@ fn parse_int_matrix_initializer(
             .first()
             .is_some_and(|token| token_is_punctuator(token, "{"))
         {
-            values.extend(parse_int_array_initializer(item, Some(columns), constants)?);
+            values.extend(parse_int_array_initializer(
+                item,
+                Some(columns),
+                constants,
+                sizeof_symbols,
+            )?);
         } else {
-            let value = parse_integer_initializer_with_constants(item, constants)?;
+            let value = parse_integer_initializer_with_context(item, constants, sizeof_symbols)?;
             values.push(i32::try_from(value).map_err(|_| {
                 CompileError::new("global int matrix initializer does not fit i32")
                     .at(tokens[start].line, tokens[start].column)
@@ -4125,12 +4663,72 @@ fn parse_string_array_initializer(tokens: &[Token]) -> CompileResult<Vec<String>
     Ok(values)
 }
 
+fn parse_identifier_array_initializer(tokens: &[Token]) -> CompileResult<Vec<String>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new(
+            "expected global pointer-array initializer",
+        ));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(
+            CompileError::new("expected global pointer-array initializer")
+                .at(first.line, first.column),
+        );
+    }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+        return Err(
+            CompileError::new("unterminated global pointer-array initializer")
+                .at(first.line, first.column),
+        );
+    };
+    if let Some(token) = tokens.get(close_brace + 1) {
+        return Err(
+            CompileError::new("unsupported global pointer-array initializer")
+                .at(token.line, token.column),
+        );
+    }
+
+    let mut values = Vec::new();
+    let mut start = 1usize;
+    while start < close_brace {
+        let item = &tokens[start..close_brace];
+        let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
+        if item_len == 0 {
+            return Err(
+                CompileError::new("expected global pointer-array initializer value")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        }
+        let [token] = &item[..item_len] else {
+            return Err(
+                CompileError::new("unsupported global pointer-array initializer")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        };
+        let Some(name) = token_identifier(token) else {
+            return Err(
+                CompileError::new("expected global pointer-array initializer name")
+                    .at(token.line, token.column),
+            );
+        };
+        values.push(name.to_owned());
+        start += item_len;
+        if start < close_brace {
+            start += 1;
+        }
+    }
+    Ok(values)
+}
+
 fn parse_char_matrix_initializer(
     tokens: &[Token],
     rows: usize,
     columns: usize,
+    constants: &[Constant],
 ) -> CompileResult<Vec<u8>> {
-    let values = parse_string_array_initializer(tokens)?;
+    let Ok(values) = parse_string_array_initializer(tokens) else {
+        return parse_unsigned_char_matrix_initializer(tokens, rows, columns, constants);
+    };
     if values.len() > rows {
         return Err(CompileError::new(
             "global char matrix initializer has too many rows",
@@ -4160,6 +4758,88 @@ fn parse_char_matrix_initializer(
     Ok(bytes)
 }
 
+fn parse_unsigned_char_matrix_initializer(
+    tokens: &[Token],
+    rows: usize,
+    columns: usize,
+    constants: &[Constant],
+) -> CompileResult<Vec<u8>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new("expected global byte matrix initializer"));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(CompileError::new("expected global byte matrix initializer")
+            .at(first.line, first.column));
+    }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+        return Err(
+            CompileError::new("unterminated global byte matrix initializer")
+                .at(first.line, first.column),
+        );
+    };
+    if let Some(token) = tokens.get(close_brace + 1) {
+        return Err(
+            CompileError::new("unsupported global byte matrix initializer")
+                .at(token.line, token.column),
+        );
+    }
+
+    let length = rows
+        .checked_mul(columns)
+        .ok_or_else(|| CompileError::new("global byte matrix size overflow"))?;
+    let mut values = Vec::with_capacity(length);
+    let mut start = 1usize;
+    let mut row_count = 0usize;
+    while start < close_brace {
+        let item = &tokens[start..close_brace];
+        let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
+        if item_len == 0 {
+            return Err(
+                CompileError::new("expected global byte matrix initializer value")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        }
+        let item = &item[..item_len];
+        if item
+            .first()
+            .is_some_and(|token| token_is_punctuator(token, "{"))
+        {
+            let row = parse_unsigned_char_initializer(item, constants)?;
+            if row.len() > columns {
+                return Err(CompileError::new("global byte matrix row is too large")
+                    .at(tokens[start].line, tokens[start].column));
+            }
+            values.extend(row.iter());
+            values.resize(
+                values
+                    .len()
+                    .checked_add(columns - row.len())
+                    .ok_or_else(|| CompileError::new("global byte matrix row size overflow"))?,
+                0,
+            );
+            row_count += 1;
+        } else {
+            let value = parse_integer_initializer_with_constants(item, constants)?;
+            values.push(u8::try_from(value).map_err(|_| {
+                CompileError::new("global byte matrix initializer does not fit u8")
+                    .at(tokens[start].line, tokens[start].column)
+            })?);
+        }
+        if row_count > rows || values.len() > length {
+            return Err(
+                CompileError::new("too many global byte matrix initializers")
+                    .at(tokens[start].line, tokens[start].column),
+            );
+        }
+        start += item_len;
+        if start < close_brace {
+            start += 1;
+        }
+    }
+    values.resize(length, 0);
+    Ok(values)
+}
+
 fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {
     if tokens.is_empty() {
         return Err(CompileError::new("expected global string initializer"));
@@ -4184,7 +4864,10 @@ fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String> {
     Ok(value)
 }
 
-fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
+fn parse_unsigned_char_initializer(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Vec<u8>> {
     let Some(first) = tokens.first() else {
         return Err(CompileError::new("expected global array initializer"));
     };
@@ -4193,39 +4876,39 @@ fn parse_unsigned_char_initializer(tokens: &[Token]) -> CompileResult<Vec<u8>> {
             CompileError::new("expected global array initializer").at(first.line, first.column)
         );
     }
-    let mut values = Vec::new();
-    let mut index = 1usize;
-    loop {
-        let Some(token) = tokens.get(index) else {
-            return Err(CompileError::new("unterminated global array initializer")
-                .at(first.line, first.column));
-        };
-        if token_is_punctuator(token, "}") {
-            return Ok(values);
-        }
-        let value = integer_token_value(token)?;
-        let byte = u8::try_from(value).map_err(|_| {
-            CompileError::new("unsigned char initializer does not fit u8")
-                .at(token.line, token.column)
-        })?;
-        values.push(byte);
-        index += 1;
-        let Some(separator) = tokens.get(index) else {
-            return Err(CompileError::new("unterminated global array initializer")
-                .at(first.line, first.column));
-        };
-        if token_is_punctuator(separator, ",") {
-            index += 1;
-            continue;
-        }
-        if token_is_punctuator(separator, "}") {
-            continue;
-        }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
         return Err(
-            CompileError::new("expected global array initializer separator")
-                .at(separator.line, separator.column),
+            CompileError::new("unterminated global array initializer").at(first.line, first.column)
+        );
+    };
+    if close_brace + 1 != tokens.len() {
+        let token = &tokens[close_brace + 1];
+        return Err(
+            CompileError::new("unsupported global array initializer").at(token.line, token.column)
         );
     }
+    let initializer = &tokens[1..close_brace];
+    if initializer.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut values = Vec::new();
+    for (start, end) in top_level_comma_ranges(initializer) {
+        if start == end && end == initializer.len() {
+            continue;
+        }
+        if start == end {
+            let token = &initializer[start];
+            return Err(CompileError::new("expected global array initializer value")
+                .at(token.line, token.column));
+        }
+        let value = parse_integer_initializer_with_constants(&initializer[start..end], constants)?;
+        let byte = u8::try_from(value).map_err(|_| {
+            CompileError::new("unsigned char initializer does not fit u8")
+                .at(initializer[start].line, initializer[start].column)
+        })?;
+        values.push(byte);
+    }
+    Ok(values)
 }
 
 fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
@@ -4235,6 +4918,14 @@ fn parse_integer_initializer(tokens: &[Token]) -> CompileResult<i64> {
 fn parse_integer_initializer_with_constants(
     tokens: &[Token],
     constants: &[Constant],
+) -> CompileResult<i64> {
+    parse_integer_initializer_with_context(tokens, constants, &[])
+}
+
+fn parse_integer_initializer_with_context(
+    tokens: &[Token],
+    constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<i64> {
     if tokens.is_empty() {
         return Err(CompileError::new("expected global integer initializer"));
@@ -4252,7 +4943,7 @@ fn parse_integer_initializer_with_constants(
         return Err(CompileError::new("unsupported global integer initializer")
             .at(token.line, token.column));
     }
-    eval_integer_initializer_expr_with_constants(&expr, constants)?.to_i64_trunc()
+    eval_integer_initializer_expr_with_context(&expr, constants, sizeof_symbols)?.to_i64_trunc()
 }
 
 #[derive(Clone, Copy)]
@@ -4441,11 +5132,20 @@ fn eval_integer_initializer_expr_with_constants(
     expr: &Expr,
     constants: &[Constant],
 ) -> CompileResult<InitializerNumber> {
+    eval_integer_initializer_expr_with_context(expr, constants, &[])
+}
+
+fn eval_integer_initializer_expr_with_context(
+    expr: &Expr,
+    constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
+) -> CompileResult<InitializerNumber> {
     match expr {
         Expr::Integer(value) => Ok(InitializerNumber::integer(*value)),
         Expr::DoubleLiteral(value) => InitializerNumber::decimal(value),
         Expr::Unary { op, expr } => {
-            let value = eval_integer_initializer_expr_with_constants(expr, constants)?;
+            let value =
+                eval_integer_initializer_expr_with_context(expr, constants, sizeof_symbols)?;
             match op {
                 UnaryOp::Plus => Ok(value),
                 UnaryOp::Minus => value.checked_neg(),
@@ -4460,7 +5160,8 @@ fn eval_integer_initializer_expr_with_constants(
             }
         }
         Expr::Cast { target, expr, .. } => {
-            let value = eval_integer_initializer_expr_with_constants(expr, constants)?;
+            let value =
+                eval_integer_initializer_expr_with_context(expr, constants, sizeof_symbols)?;
             match target {
                 ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer => {
                     Ok(InitializerNumber::integer(value.to_i64_trunc()?))
@@ -4469,8 +5170,9 @@ fn eval_integer_initializer_expr_with_constants(
             }
         }
         Expr::Binary { op, left, right } => {
-            let left = eval_integer_initializer_expr_with_constants(left, constants)?;
-            let right = eval_integer_initializer_expr_with_constants(right, constants)?;
+            let left = eval_integer_initializer_expr_with_context(left, constants, sizeof_symbols)?;
+            let right =
+                eval_integer_initializer_expr_with_context(right, constants, sizeof_symbols)?;
             eval_integer_binary_initializer_expr(*op, left, right)
         }
         Expr::Conditional {
@@ -4478,13 +5180,13 @@ fn eval_integer_initializer_expr_with_constants(
             then_expr,
             else_expr,
         } => {
-            if eval_integer_initializer_expr_with_constants(condition, constants)?
+            if eval_integer_initializer_expr_with_context(condition, constants, sizeof_symbols)?
                 .to_i128_integer()?
                 == 0
             {
-                eval_integer_initializer_expr_with_constants(else_expr, constants)
+                eval_integer_initializer_expr_with_context(else_expr, constants, sizeof_symbols)
             } else {
-                eval_integer_initializer_expr_with_constants(then_expr, constants)
+                eval_integer_initializer_expr_with_context(then_expr, constants, sizeof_symbols)
             }
         }
         Expr::Identifier(name) => constants
@@ -4501,8 +5203,8 @@ fn eval_integer_initializer_expr_with_constants(
         Expr::IndirectCall { .. } => Err(CompileError::new(
             "indirect call is not an integer initializer",
         )),
+        Expr::SizeOfExpr { expr } => eval_sizeof_initializer_expr(expr, sizeof_symbols),
         Expr::StringLiteral(_)
-        | Expr::SizeOfExpr { .. }
         | Expr::AddressOf { .. }
         | Expr::Dereference { .. }
         | Expr::Member { .. }
@@ -4512,6 +5214,27 @@ fn eval_integer_initializer_expr_with_constants(
             Err(CompileError::new("unsupported global integer initializer"))
         }
     }
+}
+
+fn eval_sizeof_initializer_expr(
+    expr: &Expr,
+    sizeof_symbols: &[(String, usize)],
+) -> CompileResult<InitializerNumber> {
+    let Expr::Identifier(name) = expr else {
+        return Err(CompileError::new("unsupported global sizeof initializer"));
+    };
+    let Some((_name, size)) = sizeof_symbols
+        .iter()
+        .rev()
+        .find(|(candidate, _size)| candidate == name)
+    else {
+        return Err(CompileError::new(format!(
+            "unknown global sizeof initializer: {name}"
+        )));
+    };
+    i64::try_from(*size)
+        .map(InitializerNumber::integer)
+        .map_err(|_| CompileError::new("global sizeof initializer is too large"))
 }
 
 fn eval_integer_binary_initializer_expr(
@@ -4561,13 +5284,6 @@ fn eval_integer_binary_initializer_expr(
             left.to_i128_integer()? != 0 || right.to_i128_integer()? != 0,
         ))),
     }
-}
-
-fn integer_token_value(token: &Token) -> CompileResult<i64> {
-    if let TokenKind::Integer(value) = &token.kind {
-        return Ok(*value);
-    }
-    Err(CompileError::new("expected integer initializer").at(token.line, token.column))
 }
 
 fn top_level_punctuator_index(tokens: &[Token], expected: &str) -> Option<usize> {
@@ -5028,32 +5744,37 @@ fn supported_cast_type_with_typedefs(
     let mut saw_double = false;
     let mut saw_named_type = false;
     let mut saw_pointer = false;
+    let mut expecting_struct_tag = false;
     let mut long_count = 0usize;
     for token in tokens {
         match &token.kind {
             TokenKind::Keyword(
                 Keyword::Const | Keyword::Restrict | Keyword::Signed | Keyword::Volatile,
-            ) => {}
+            ) => expecting_struct_tag = false,
             TokenKind::Keyword(Keyword::Double) => {
                 saw_type = true;
                 saw_double = true;
+                expecting_struct_tag = false;
             }
             TokenKind::Keyword(
-                Keyword::Char
-                | Keyword::Int
-                | Keyword::Short
-                | Keyword::Struct
-                | Keyword::Unsigned
-                | Keyword::Void,
+                Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Unsigned | Keyword::Void,
             ) => {
                 saw_type = true;
+                expecting_struct_tag = false;
+            }
+            TokenKind::Keyword(Keyword::Struct) => {
+                saw_type = true;
+                expecting_struct_tag = true;
             }
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
                 long_count += 1;
+                expecting_struct_tag = false;
             }
             TokenKind::Identifier(name) => {
-                if known_pointer_typedefs.iter().any(|known| known == name) {
+                if expecting_struct_tag {
+                    expecting_struct_tag = false;
+                } else if known_pointer_typedefs.iter().any(|known| known == name) {
                     saw_pointer = true;
                 } else if let Some(scalar_type) = supported_typedef_scalar(name).or_else(|| {
                     known_scalar_typedefs
@@ -5064,12 +5785,17 @@ fn supported_cast_type_with_typedefs(
                     if scalar_type != ScalarType::Int {
                         return None;
                     }
+                } else if saw_pointer {
+                    return None;
                 } else {
                     saw_named_type = true;
                 }
                 saw_type = true;
             }
-            TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
+            TokenKind::Punctuator(value) if value == "*" => {
+                saw_pointer = true;
+                expecting_struct_tag = false;
+            }
             TokenKind::Integer(_)
             | TokenKind::StringLiteral(_)
             | TokenKind::CharLiteral(_)
@@ -5298,6 +6024,14 @@ fn libc_builtin_struct_layouts() -> Vec<StructLayout> {
             ],
             32,
         ),
+        builtin_struct_layout(
+            "sigaction",
+            vec![
+                pointer_field("sa_handler", 0, None),
+                scalar_field("sa_flags", 136),
+            ],
+            152,
+        ),
     ]
 }
 
@@ -5349,6 +6083,7 @@ fn array_field(name: &str, element_type: ScalarType, length: usize, offset: usiz
         field_type: FieldType::Array {
             element_type,
             length,
+            columns: None,
         },
         offset,
     }

@@ -172,6 +172,24 @@ fn preprocessor_provides_doom_socket_constants() {
 }
 
 #[test]
+fn preprocessor_provides_doom_timer_signal_constants() {
+    // given
+    let source = "#include <sys/time.h>\n#include <signal.h>\nint timer = ITIMER_REAL;\nint sig = SIGALRM;\nint restart = SA_RESTART;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-timer.c", source)
+        .expect("preprocessor should provide Doom-era timer and signal constants");
+
+    // then
+    assert!(unit.source.contains("#include <sys/time.h>"));
+    assert!(unit.source.contains("#include <signal.h>"));
+    assert!(unit.source.contains("int timer = 0;"));
+    assert!(unit.source.contains("int sig = 14;"));
+    assert!(unit.source.contains("int restart = 0x10000000;"));
+}
+
+#[test]
 fn preprocessor_provides_doom_fcntl_open_constants() {
     // given
     let source = "#include <fcntl.h>\nint flags = O_WRONLY | O_CREAT | O_TRUNC | O_BINARY;\nint read = O_RDONLY;\n";
@@ -207,7 +225,7 @@ fn preprocessor_provides_doom_stdio_seek_constants() {
 #[test]
 fn preprocessor_provides_doom_unistd_access_constant() {
     // given
-    let source = "#include <unistd.h>\nint readable = R_OK;\n";
+    let source = "#include <unistd.h>\nint readable = R_OK;\nint executable = X_OK;\n";
 
     // when
     let unit = Preprocessor::new()
@@ -217,6 +235,7 @@ fn preprocessor_provides_doom_unistd_access_constant() {
     // then
     assert!(unit.source.contains("#include <unistd.h>"));
     assert!(unit.source.contains("int readable = 4;"));
+    assert!(unit.source.contains("int executable = 1;"));
 }
 
 #[test]

@@ -283,6 +283,9 @@ fn emit_globals(
             LoweredGlobalInitializer::PointerStringArray(values) => {
                 emit_pointer_string_array_global(&global.name, values, target, assembly)?;
             }
+            LoweredGlobalInitializer::PointerNameArray { values, length } => {
+                emit_pointer_name_array_global(&global.name, values, *length, target, assembly)?;
+            }
             LoweredGlobalInitializer::ZeroBytes(byte_len) => {
                 assembly.push_str(".p2align 3\n");
                 write_assembly!(assembly, "{label}:\n")?;
@@ -345,6 +348,26 @@ fn emit_pointer_string_array_global(
     for (index, value) in values.iter().enumerate() {
         let string_label = global_string_label(name, index, target);
         emit_string_literal_data_returning_to(&string_label, value, target, ".data\n", assembly)?;
+    }
+    Ok(())
+}
+
+fn emit_pointer_name_array_global(
+    name: &str,
+    values: &[String],
+    length: usize,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    assembly.push_str(".p2align 3\n");
+    write_assembly!(assembly, "{label}:\n")?;
+    for value in values {
+        let value_label = label_name(value, target);
+        write_assembly!(assembly, "\t.quad {value_label}\n")?;
+    }
+    for _index in values.len()..length {
+        assembly.push_str("\t.quad 0\n");
     }
     Ok(())
 }

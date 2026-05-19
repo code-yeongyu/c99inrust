@@ -283,6 +283,12 @@ fn builtin_system_macro_definitions(
         ]),
         "errno.h" => Some(&[("EWOULDBLOCK", "11")]),
         "sys/ioctl.h" => Some(&[("FIONBIO", "21537")]),
+        "sys/time.h" => Some(&[("ITIMER_REAL", "0")]),
+        "signal.h" => Some(&[
+            ("SIGINT", "2"),
+            ("SIGALRM", "14"),
+            ("SA_RESTART", "0x10000000"),
+        ]),
         "stddef.h" | "stdlib.h" => Some(&[("NULL", "0")]),
         "fcntl.h" => Some(&[
             ("O_RDONLY", "0"),
@@ -298,8 +304,7 @@ fn builtin_system_macro_definitions(
             ("SEEK_CUR", "1"),
             ("SEEK_END", "2"),
         ]),
-        "unistd.h" => Some(&[("R_OK", "4")]),
-        "signal.h" => Some(&[("SIGINT", "2")]),
+        "unistd.h" => Some(&[("R_OK", "4"), ("X_OK", "1")]),
         "sys/ipc.h" | "sys/shm.h" => {
             Some(&[("IPC_RMID", "0"), ("IPC_STAT", "2"), ("IPC_CREAT", "512")])
         }
