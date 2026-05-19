@@ -4,6 +4,7 @@ use crate::front_end::lexer::{Keyword, Token, TokenKind};
 mod doom_layout;
 mod global_struct_initializer;
 mod scalar_layout;
+mod typedef_referent;
 
 use scalar_layout::{scalar_field_type, scalar_size_for_layout, sizeof_scalar_type};
 
@@ -2501,8 +2502,15 @@ fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
         .iter()
         .rev()
         .find_map(token_identifier)
-        .filter(|name| supported_typedef_scalar(name).is_none())
-        .map(ToOwned::to_owned)
+        .and_then(|name| {
+            typedef_referent::byte_sized(name)
+                .map(ToOwned::to_owned)
+                .or_else(|| {
+                    supported_typedef_scalar(name)
+                        .is_none()
+                        .then(|| name.to_owned())
+                })
+        })
 }
 
 fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
