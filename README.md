@@ -71,10 +71,11 @@ cargo run -- doom-audit /tmp/DOOM
 
 Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX`
-defined, and `compile -S` now emits assembly for all 62 official Doom C
-translation units in that directory. This is not yet a linked or playable Doom
-claim; full acceptance still requires linking the executable and manually
-running a playable Linux/X11 Doom target with a legal IWAD.
+defined, `compile -S` emits x86_64 Linux assembly for all 62 official Doom C
+translation units, and those assembly files link into a Linux/X11 ELF with
+`gcc -lm -lX11 -lXext` in an amd64 Ubuntu container. This is not yet a playable
+Doom claim; full acceptance still requires manually running a playable
+Linux/X11 Doom target with a legal IWAD.
 
 ## Development
 

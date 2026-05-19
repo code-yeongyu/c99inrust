@@ -349,10 +349,6 @@ ok=62
 fail=0
 ```
 
-This remains an assembly-generation milestone only. The repository still must
-not claim linked, running, or playable Doom support until the playability gate
-below passes.
-
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 
@@ -362,6 +358,24 @@ Repeat the compile-progress scan with:
 cargo build
 tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-compile-scan.txt
 ```
+
+## Latest Link Scan
+
+The 62 generated x86_64 Linux assembly files now link into a Linux/X11 ELF in
+an amd64 Ubuntu container with system `gcc`, libc headers, X11, and Xext:
+
+```text
+tmux_session=c99inrust-doom-link-1779165229
+scan=/tmp/c99inrust-doom-link-1779165229.txt
+asm_dir=/tmp/c99inrust-doom-link-1779165229-asm
+binary=/tmp/c99inrust-doom-link-1779165229-out/linuxdoom-c99inrust
+```
+
+The linked binary is an x86_64 Linux PIE executable. This remains a compile and
+link milestone only; the repository still must not claim running or playable
+Doom support until the playability gate below passes.
+
+Evidence is recorded in `docs/qa/2026-05-19-doom-link.md`.
 
 ## Playability Gate
 
