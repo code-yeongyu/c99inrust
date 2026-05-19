@@ -71,9 +71,10 @@ cargo run -- doom-audit /tmp/DOOM
 
 Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX`
-defined. `parse-check` is a surface parser gate for top-level typedefs,
-declarations, prototypes, and function-definition boundaries; it is not yet full
-semantic C parsing or code generation.
+defined, and `compile -S` now emits assembly for all 62 official Doom C
+translation units in that directory. This is not yet a linked or playable Doom
+claim; full acceptance still requires linking the executable and manually
+running a playable Linux/X11 Doom target with a legal IWAD.
 
 ## Development
 

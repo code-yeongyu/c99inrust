@@ -240,7 +240,7 @@ parameters such as `patch_t** font`, allowing `font[0]->height` and matching
 `hu_textline_t.f` access through indexed pointer members. This moves
 `hu_lib.c` to assembly generation.
 
-The current Doom compile scan reaches actual supported function bodies, but 11
+An earlier Doom compile scan reached actual supported function bodies, but 11
 of the 62 C files still fail before object generation. `am_map.c`,
 `d_items.c`, `d_main.c`, `d_net.c`, `doomdef.c`, `doomstat.c`, `dstrings.c`,
 `f_finale.c`, `f_wipe.c`, `g_game.c`, `hu_lib.c`, `i_main.c`, `i_net.c`,
@@ -327,6 +327,32 @@ past Doom's libc/network surface: `struct sockaddr_in`, `struct timeval`,
 constants, the external `errno` scalar, variadic function definitions with
 `va_list`, the `W_CheckNumForName` anonymous `name8` union, and local
 `void*` declarations.
+
+## Latest Compile Scan
+
+`compile -S` now reaches assembly generation for all 62 official
+`linuxdoom-1.10` C translation units with the upstream Linux build defines.
+The latest slice covers the remaining Doom surface blockers, including
+`struct sigaction` and the paired `struct itimerval` timer locals in
+`i_sound.c`, pointer-name global initializers in `wi_stuff.c`, global pointer
+and struct matrices, 2D struct field arrays, forward struct typedef/tag
+linking, empty old-style parameter definitions, and the Doom-era signal,
+timer, and `access(2)` constants.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779162206`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779162206.txt
+ok=62
+fail=0
+```
+
+This remains an assembly-generation milestone only. The repository still must
+not claim linked, running, or playable Doom support until the playability gate
+below passes.
+
 Evidence is recorded in
 `docs/qa/2026-05-18-doom-translation-unit.md`.
 

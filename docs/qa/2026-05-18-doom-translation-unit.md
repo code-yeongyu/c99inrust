@@ -4355,3 +4355,87 @@ FAIL wi_stuff.c
 This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
+
+## Compile Scan After Full Doom Assembly Slice
+
+The remaining Doom translation-unit blockers moved past assembly generation.
+The latest slice adds coverage for Doom's timer/signal surface in `i_sound.c`,
+including `ITIMER_REAL`, `SIGALRM`, `SA_RESTART`, `struct itimerval`, and
+`struct sigaction`. It also covers global pointer-name initializers such as the
+`wi_stuff.c` animation tables, global pointer and struct matrices, 2D struct
+field arrays, forward struct typedef/tag linking, empty old-style parameter
+definitions, braced char and byte initializers, and `X_OK` from `<unistd.h>`.
+
+Regression coverage added:
+
+```text
+compiler_accepts_local_char_array_braced_initializer_slice
+compiler_accepts_global_unsigned_char_numeric_matrix_initializer_slice
+compiler_accepts_global_char_array_braced_initializer_slice
+compiler_accepts_parenthesized_product_before_shift_slice
+compiler_accepts_empty_parameter_function_definition_slice
+compiler_accepts_forward_struct_typedef_then_tag_definition_slice
+compiler_accepts_global_struct_array_arrow_decay_slice
+compiler_accepts_global_struct_array_subscript_pointer_member_chain_slice
+compiler_accepts_global_pointer_matrix_assignment_slice
+compiler_accepts_global_sizeof_struct_array_initializer_slice
+compiler_accepts_global_pointer_name_array_initializer_slice
+compiler_merges_extern_and_defined_global_matrices_slice
+compiler_accepts_global_struct_matrix_member_slice
+compiler_accepts_struct_two_dimensional_array_field_assignment_slice
+compiler_accepts_pointer_element_array_parameter_member_slice
+preprocessor_provides_doom_timer_signal_constants
+preprocessor_provides_doom_unistd_access_constant
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/st_stuff.c -o /tmp/st_stuff.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/wi_stuff.c -o /tmp/wi_stuff.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/d_net.c -o /tmp/d_net.s
+
+target/debug/c99inrust compile -S -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/r_main.c -o /tmp/r_main.s
+```
+
+All four focused compiles reached assembly generation.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779162206`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779162206.txt
+ok=62
+fail=0
+```
+
+Moved translation units:
+
+```text
+OK hu_stuff.c
+OK i_sound.c
+OK info.c
+OK p_mobj.c
+OK p_setup.c
+OK p_switch.c
+OK s_sound.c
+OK sounds.c
+OK st_stuff.c
+OK v_video.c
+OK wi_stuff.c
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
