@@ -274,7 +274,15 @@ fn builtin_system_macro_definitions(
             ("MAXLONG", "2147483647"),
             ("MINLONG", "(-2147483647 - 1)"),
         ]),
-        "netinet/in.h" => Some(&[("IPPORT_USERRESERVED", "5000")]),
+        "sys/socket.h" => Some(&[("PF_INET", "2"), ("SOCK_DGRAM", "2")]),
+        "netinet/in.h" => Some(&[
+            ("AF_INET", "2"),
+            ("INADDR_ANY", "0"),
+            ("IPPORT_USERRESERVED", "5000"),
+            ("IPPROTO_UDP", "17"),
+        ]),
+        "errno.h" => Some(&[("EWOULDBLOCK", "11")]),
+        "sys/ioctl.h" => Some(&[("FIONBIO", "21537")]),
         "stddef.h" | "stdlib.h" => Some(&[("NULL", "0")]),
         "fcntl.h" => Some(&[
             ("O_RDONLY", "0"),

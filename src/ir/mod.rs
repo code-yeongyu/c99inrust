@@ -267,7 +267,7 @@ fn lower_globals(
             initializer,
         });
     }
-    insert_standard_stream_bindings(&mut bindings);
+    insert_builtin_libc_bindings(&mut bindings);
     Ok((lowered, bindings))
 }
 
@@ -496,7 +496,10 @@ fn lower_struct_array_global(
     ))
 }
 
-fn insert_standard_stream_bindings(bindings: &mut HashMap<String, GlobalBinding>) {
+fn insert_builtin_libc_bindings(bindings: &mut HashMap<String, GlobalBinding>) {
+    bindings
+        .entry("errno".to_owned())
+        .or_insert(GlobalBinding::Int);
     for name in ["stdin", "stdout", "stderr"] {
         bindings
             .entry(name.to_owned())

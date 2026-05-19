@@ -2,6 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 const DOOM_EXPAND_PIXEL_UNION: &str = "__doom_expand_pixel_union";
+const DOOM_NAME8_UNION: &str = "__doom_name8_union";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
@@ -659,6 +660,9 @@ impl Parser<'_> {
         if parameter_is_void(tokens) {
             return Ok(());
         }
+        if parameter_is_variadic(tokens) {
+            return Ok(());
+        }
         if let Some(name) = function_pointer_name(tokens) {
             parameters.push(Parameter {
                 name,
@@ -1263,15 +1267,17 @@ impl Parser<'_> {
         }
         let close_brace = matching_top_level_brace(self.tokens, open_brace)
             .ok_or_else(|| CompileError::new("unterminated anonymous union declaration"))?;
-        if !anonymous_doom_expand_pixel_union(&self.tokens[open_brace + 1..close_brace]) {
+        let Some(struct_name) =
+            anonymous_union_struct_name(&self.tokens[open_brace + 1..close_brace])
+        else {
             return Ok(None);
-        }
+        };
         self.index = close_brace + 1;
         let name = self.expect_identifier()?;
         self.expect_punctuator(";")?;
         Ok(Some(Statement::LocalStruct {
             name,
-            struct_name: DOOM_EXPAND_PIXEL_UNION.to_owned(),
+            struct_name: struct_name.to_owned(),
         }))
     }
 
@@ -1958,9 +1964,31 @@ impl Parser<'_> {
                 ) => {
                     saw_type = true;
                 }
+                TokenKind::Keyword(Keyword::Void) => {
+                    if !self.struct_pointer_declarator_follows(index + 1) {
+                        return None;
+                    }
+                    saw_type = true;
+                    saw_pointer_typedef = true;
+                }
                 TokenKind::Keyword(Keyword::Double) => {
                     saw_type = true;
                     saw_double = true;
+                }
+                TokenKind::Keyword(Keyword::Struct) => {
+                    if saw_type {
+                        break;
+                    }
+                    let name = self.tokens.get(index + 1).and_then(token_identifier)?;
+                    if !self.known_structs.iter().any(|layout| layout.name == name)
+                        || !self.struct_pointer_declarator_follows(index + 2)
+                    {
+                        return None;
+                    }
+                    saw_type = true;
+                    saw_struct_pointer = true;
+                    index += 2;
+                    continue;
                 }
                 TokenKind::Keyword(Keyword::Long) => {
                     saw_type = true;
@@ -5011,7 +5039,12 @@ fn supported_cast_type_with_typedefs(
                 saw_double = true;
             }
             TokenKind::Keyword(
-                Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Unsigned | Keyword::Void,
+                Keyword::Char
+                | Keyword::Int
+                | Keyword::Short
+                | Keyword::Struct
+                | Keyword::Unsigned
+                | Keyword::Void,
             ) => {
                 saw_type = true;
             }
@@ -5087,7 +5120,7 @@ fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
         | "angle_t" | "boolean" | "buttoncode_t" | "byte" | "card_t" | "cheat_t" | "command_t"
         | "evtype_t" | "fixed_t" | "gameaction_t" | "gamestate_t" | "key_t" | "lighttable_t"
         | "mobjflag_t" | "mobjtype_t" | "playerstate_t" | "powerduration_t" | "powertype_t"
-        | "psprnum_t" | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t"
+        | "psprnum_t" | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t" | "va_list"
         | "weapontype_t" => Some(ScalarType::Int),
         _ => None,
     }
@@ -5097,7 +5130,9 @@ fn builtin_struct_layouts() -> Vec<StructLayout> {
     let mut layouts = x11_event_struct_layouts();
     layouts.extend(x11_video_struct_layouts());
     layouts.extend(system_v_builtin_struct_layouts());
+    layouts.extend(libc_builtin_struct_layouts());
     layouts.push(doom_expand_pixel_union_layout());
+    layouts.push(doom_name8_union_layout());
     layouts
 }
 
@@ -5213,6 +5248,59 @@ fn system_v_builtin_struct_layouts() -> Vec<StructLayout> {
     ]
 }
 
+fn libc_builtin_struct_layouts() -> Vec<StructLayout> {
+    vec![
+        builtin_struct_layout("in_addr", vec![scalar_field("s_addr", 0)], 4),
+        builtin_struct_layout("sockaddr", vec![scalar_field("sa_family", 0)], 16),
+        builtin_struct_layout(
+            "sockaddr_in",
+            vec![
+                scalar_field("sin_family", 0),
+                scalar_field("sin_port", 2),
+                struct_field("sin_addr", "in_addr", 4),
+            ],
+            16,
+        ),
+        builtin_struct_layout(
+            "timeval",
+            vec![scalar_field("tv_sec", 0), scalar_field("tv_usec", 8)],
+            16,
+        ),
+        builtin_struct_layout(
+            "timezone",
+            vec![
+                scalar_field("tz_minuteswest", 0),
+                scalar_field("tz_dsttime", 4),
+            ],
+            8,
+        ),
+        builtin_struct_layout(
+            "stat",
+            vec![scalar_field("st_size", 48), scalar_field("st_mtime", 96)],
+            144,
+        ),
+        builtin_struct_layout(
+            "hostent",
+            vec![
+                pointer_field("h_name", 0, Some("char")),
+                pointer_field("h_aliases", 8, Some("*char")),
+                scalar_field("h_addrtype", 16),
+                scalar_field("h_length", 20),
+                pointer_field("h_addr_list", 24, Some("*char")),
+            ],
+            32,
+        ),
+        builtin_struct_layout(
+            "itimerval",
+            vec![
+                struct_field("it_interval", "timeval", 0),
+                struct_field("it_value", "timeval", 16),
+            ],
+            32,
+        ),
+    ]
+}
+
 fn doom_expand_pixel_union_layout() -> StructLayout {
     builtin_struct_layout(
         DOOM_EXPAND_PIXEL_UNION,
@@ -5221,6 +5309,17 @@ fn doom_expand_pixel_union_layout() -> StructLayout {
             array_field("u", ScalarType::Int, 2, 0),
         ],
         8,
+    )
+}
+
+fn doom_name8_union_layout() -> StructLayout {
+    builtin_struct_layout(
+        DOOM_NAME8_UNION,
+        vec![
+            array_field("s", ScalarType::Int, 9, 0),
+            array_field("x", ScalarType::Int, 2, 0),
+        ],
+        36,
     )
 }
 
@@ -5265,6 +5364,16 @@ fn pointer_field(name: &str, offset: usize, referent: Option<&str>) -> StructFie
     }
 }
 
+fn anonymous_union_struct_name(tokens: &[Token]) -> Option<&'static str> {
+    if anonymous_doom_expand_pixel_union(tokens) {
+        Some(DOOM_EXPAND_PIXEL_UNION)
+    } else if anonymous_doom_name8_union(tokens) {
+        Some(DOOM_NAME8_UNION)
+    } else {
+        None
+    }
+}
+
 fn anonymous_doom_expand_pixel_union(tokens: &[Token]) -> bool {
     let has_double_d = tokens.windows(2).any(|window| {
         token_is_keyword(&window[0], Keyword::Double)
@@ -5278,6 +5387,24 @@ fn anonymous_doom_expand_pixel_union(tokens: &[Token]) -> bool {
             && token_is_punctuator(&window[4], "]")
     });
     has_double_d && has_unsigned_u
+}
+
+fn anonymous_doom_name8_union(tokens: &[Token]) -> bool {
+    let has_char_s = tokens.windows(5).any(|window| {
+        token_is_keyword(&window[0], Keyword::Char)
+            && token_identifier(&window[1]).is_some_and(|name| name == "s")
+            && token_is_punctuator(&window[2], "[")
+            && matches!(window[3].kind, TokenKind::Integer(9))
+            && token_is_punctuator(&window[4], "]")
+    });
+    let has_int_x = tokens.windows(5).any(|window| {
+        token_is_keyword(&window[0], Keyword::Int)
+            && token_identifier(&window[1]).is_some_and(|name| name == "x")
+            && token_is_punctuator(&window[2], "[")
+            && matches!(window[3].kind, TokenKind::Integer(2))
+            && token_is_punctuator(&window[4], "]")
+    });
+    has_char_s && has_int_x
 }
 
 fn struct_field(name: &str, struct_name: &str, offset: usize) -> StructField {
@@ -5300,6 +5427,16 @@ fn parameter_is_void(tokens: &[Token]) -> bool {
         }
     }
     saw_void
+}
+
+fn parameter_is_variadic(tokens: &[Token]) -> bool {
+    matches!(
+        tokens,
+        [Token {
+            kind: TokenKind::Punctuator(value),
+            ..
+        }] if value == "..."
+    )
 }
 
 fn array_declarator_name(tokens: &[Token]) -> Option<String> {

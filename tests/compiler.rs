@@ -2346,6 +2346,72 @@ int main(void) {
 }
 
 #[test]
+fn compiler_accepts_errno_global_slice() {
+    // given
+    let source = r"int main(void) {
+    return errno;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovl errno(%rip), %eax\n"));
+}
+
+#[test]
+fn compiler_accepts_variadic_function_definition_slice() {
+    // given
+    let source = r#"void va_start(int ap, char* last);
+void va_end(int ap);
+void I_Error(char *error, ...) {
+    va_list argptr;
+    va_start(argptr, error);
+    va_end(argptr);
+    error = error;
+}
+int main(void) {
+    I_Error("doom", 1);
+    return 0;
+}"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("I_Error:"));
+    assert!(assembly.contains("\tcall I_Error\n"));
+}
+
+#[test]
+fn compiler_accepts_local_void_pointer_declaration_slice() {
+    // given
+    let source = r"int main(void) {
+    void* ptr;
+    ptr = 0;
+    return ptr ? 1 : 0;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("main:"));
+}
+
+#[test]
 fn compiler_accepts_extern_global_pointer_array_slice() {
     // given
     let source = r"typedef unsigned char byte;
@@ -3606,6 +3672,66 @@ int main(void) {
     // then
     assert!(assembly.contains("mousebuttons:"));
     assert!(assembly.contains("\t.quad mousearray+4\n"));
+}
+
+#[test]
+fn compiler_accepts_doom_libc_struct_local_slice() {
+    // given
+    let source = r"int probe(void) {
+    struct stat fileinfo;
+    struct timeval tp;
+    struct timezone tzp;
+    struct sockaddr_in address;
+    struct hostent* hostentry;
+    int out;
+    fileinfo.st_size = 4;
+    tp.tv_sec = fileinfo.st_size;
+    tp.tv_usec = 5;
+    address.sin_family = 2;
+    address.sin_addr.s_addr = 0;
+    address.sin_port = 5029;
+    out = *(int *)hostentry->h_addr_list[0];
+    return out + tp.tv_sec + tp.tv_usec + tzp.tz_minuteswest;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("probe:"));
+}
+
+#[test]
+fn compiler_accepts_doom_name8_union_slice() {
+    // given
+    let source = r"void strupr(char* s);
+int check(char* name) {
+    union {
+        char s[9];
+        int x[2];
+    } name8;
+    int v1;
+    name8.s[8] = 0;
+    strupr(name8.s);
+    v1 = name8.x[0];
+    return v1;
+}
+int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("check:"));
 }
 
 #[test]

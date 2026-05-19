@@ -151,6 +151,27 @@ fn preprocessor_provides_doom_netinet_port_base() {
 }
 
 #[test]
+fn preprocessor_provides_doom_socket_constants() {
+    // given
+    let source = "#include <sys/socket.h>\n#include <netinet/in.h>\n#include <errno.h>\n#include <sys/ioctl.h>\nint socket_family = PF_INET;\nint address_family = AF_INET;\nint datagram = SOCK_DGRAM;\nint udp = IPPROTO_UDP;\nint any = INADDR_ANY;\nint would_block = EWOULDBLOCK;\nint nonblock = FIONBIO;\n";
+
+    // when
+    let unit = Preprocessor::new()
+        .preprocess_text("doom-socket.c", source)
+        .expect("preprocessor should provide Doom-era socket constants");
+
+    // then
+    assert!(unit.source.contains("#include <sys/socket.h>"));
+    assert!(unit.source.contains("int socket_family = 2;"));
+    assert!(unit.source.contains("int address_family = 2;"));
+    assert!(unit.source.contains("int datagram = 2;"));
+    assert!(unit.source.contains("int udp = 17;"));
+    assert!(unit.source.contains("int any = 0;"));
+    assert!(unit.source.contains("int would_block = 11;"));
+    assert!(unit.source.contains("int nonblock = 21537;"));
+}
+
+#[test]
 fn preprocessor_provides_doom_fcntl_open_constants() {
     // given
     let source = "#include <fcntl.h>\nint flags = O_WRONLY | O_CREAT | O_TRUNC | O_BINARY;\nint read = O_RDONLY;\n";
