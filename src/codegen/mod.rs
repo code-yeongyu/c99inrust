@@ -7,6 +7,8 @@ use crate::ir::{
 };
 use crate::parser::{BinaryOp, ScalarType, UnaryOp};
 
+mod struct_globals;
+
 macro_rules! write_assembly {
     ($assembly:expr, $($argument:tt)*) => {
         write_assembly($assembly, format_args!($($argument)*))
@@ -28,6 +30,9 @@ enum ValueWidth {
 }
 
 const TEMPORARY_BYTES: usize = 8;
+const X86_64_VARIADIC_GP_SAVE_BYTES: usize = 48;
+const X86_64_VARIADIC_FP_OFFSET: usize = 48;
+const X86_64_VARIADIC_GP_REGISTERS: [&str; 6] = ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
 
 #[derive(Clone, Copy)]
 struct BinaryExpr<'a> {
@@ -74,7 +79,7 @@ struct PointerFieldExpr<'a> {
 const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
     match scalar_type {
         ScalarType::Int => ValueWidth::I32,
-        ScalarType::LongLong | ScalarType::Pointer => ValueWidth::I64,
+        ScalarType::LongLong | ScalarType::Pointer | ScalarType::VaList => ValueWidth::I64,
         ScalarType::Double => ValueWidth::F64,
     }
 }
@@ -89,21 +94,23 @@ fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         | LoweredExpr::GlobalPointerSubscript { .. }
         | LoweredExpr::PointerOffset { .. }
         | LoweredExpr::PointerFieldAddress { .. } => ValueWidth::I64,
-        LoweredExpr::Global { scalar_type, .. } | LoweredExpr::Local { scalar_type, .. } => {
-            scalar_width(*scalar_type)
+        LoweredExpr::Global { scalar_type, .. }
+        | LoweredExpr::Local { scalar_type, .. }
+        | LoweredExpr::Call {
+            return_type: scalar_type,
+            ..
         }
-        LoweredExpr::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
+        | LoweredExpr::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
         LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::GlobalIntSubscript { .. }
         | LoweredExpr::PointerSubscript {
             element_type: ScalarType::Int,
             ..
         }
-        | LoweredExpr::Call { .. }
         | LoweredExpr::IndirectCall { .. }
         | LoweredExpr::Integer(_) => ValueWidth::I32,
         LoweredExpr::PointerSubscript { element_type, .. } => scalar_width(*element_type),
-        LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
+        LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target, .. } => {
             lowered_lvalue_width(target)
         }
         LoweredExpr::Unary { op, expr } => match op {
@@ -288,6 +295,9 @@ fn emit_globals(
             LoweredGlobalInitializer::PointerNameArray { values, length } => {
                 emit_pointer_name_array_global(&global.name, values, *length, target, assembly)?;
             }
+            LoweredGlobalInitializer::StructArray { byte_len, values } => {
+                struct_globals::emit(&global.name, *byte_len, values, target, assembly)?;
+            }
             LoweredGlobalInitializer::ZeroBytes(byte_len) => {
                 assembly.push_str(".p2align 3\n");
                 write_assembly!(assembly, "{label}:\n")?;
@@ -408,6 +418,15 @@ struct LabelAllocator<'a> {
     function: &'a str,
     target: Target,
     next_label: usize,
+    x86_64_variadic: Option<X86_64VariadicFrame>,
+}
+
+#[derive(Clone, Copy)]
+struct X86_64VariadicFrame {
+    gp_offset: usize,
+    overflow_arg_offset: usize,
+    register_save_offset: usize,
+    register_save_size: usize,
 }
 
 impl<'a> LabelAllocator<'a> {
@@ -416,6 +435,7 @@ impl<'a> LabelAllocator<'a> {
             function: &function.name,
             target,
             next_label: next_available_label(function),
+            x86_64_variadic: None,
         }
     }
 
@@ -639,6 +659,7 @@ fn emit_x86_64_function(
     let temporary_base = align_to(local_bytes, TEMPORARY_BYTES);
     let stack_bytes = align_to(temporary_base + (temporary_count * TEMPORARY_BYTES), 16);
     let mut labels = LabelAllocator::new(function, target);
+    labels.x86_64_variadic = x86_64_variadic_frame(function)?;
     write_assembly!(assembly, ".globl {label}\n")?;
     write_assembly!(assembly, "{label}:\n")?;
     assembly.push_str("\tpushq %rbp\n");
@@ -646,6 +667,7 @@ fn emit_x86_64_function(
     if stack_bytes > 0 {
         write_assembly!(assembly, "\tsubq ${stack_bytes}, %rsp\n")?;
     }
+    emit_x86_64_variadic_register_saves(function, assembly)?;
     emit_x86_64_parameter_stores(function, assembly)?;
     for instruction in &function.instructions {
         match instruction {
@@ -764,6 +786,52 @@ fn emit_x86_64_parameter_stores(
             x86_64_instruction_suffix(width),
             x86_stack_offset(local_offset(function, slot)?, width)
         )?;
+    }
+    Ok(())
+}
+
+fn x86_64_variadic_frame(function: &LoweredFunction) -> CompileResult<Option<X86_64VariadicFrame>> {
+    let Some(slot) = function.variadic_save_slot else {
+        return Ok(None);
+    };
+    let register_save_offset = local_offset(function, slot)?;
+    let named_gp_args = function
+        .parameter_count
+        .min(X86_64_VARIADIC_GP_REGISTERS.len());
+    let stack_named_args = function
+        .parameter_count
+        .saturating_sub(X86_64_VARIADIC_GP_REGISTERS.len());
+    Ok(Some(X86_64VariadicFrame {
+        gp_offset: named_gp_args
+            .checked_mul(TEMPORARY_BYTES)
+            .ok_or_else(|| CompileError::new("variadic gp offset overflow"))?,
+        overflow_arg_offset: 16usize
+            .checked_add(
+                stack_named_args
+                    .checked_mul(TEMPORARY_BYTES)
+                    .ok_or_else(|| CompileError::new("variadic overflow offset overflow"))?,
+            )
+            .ok_or_else(|| CompileError::new("variadic overflow offset overflow"))?,
+        register_save_offset,
+        register_save_size: X86_64_VARIADIC_GP_SAVE_BYTES,
+    }))
+}
+
+fn emit_x86_64_variadic_register_saves(
+    function: &LoweredFunction,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let Some(frame) = x86_64_variadic_frame(function)? else {
+        return Ok(());
+    };
+    for (index, register) in X86_64_VARIADIC_GP_REGISTERS.iter().enumerate() {
+        let offset = frame
+            .register_save_offset
+            .checked_add(index * TEMPORARY_BYTES)
+            .ok_or_else(|| CompileError::new("variadic register save offset overflow"))?;
+        let destination =
+            x86_stack_byte_offset(frame.register_save_offset, frame.register_save_size, offset);
+        write_assembly!(assembly, "\tmovq {register}, {destination}(%rbp)\n")?;
     }
     Ok(())
 }
@@ -1001,8 +1069,8 @@ fn emit_aarch64_memory_expr(
         LoweredExpr::Assign { target, value } => {
             emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
         }
-        LoweredExpr::PostIncrement { target } => {
-            emit_aarch64_post_increment(target, temporary_base, depth, labels, assembly)
+        LoweredExpr::PostIncrement { target, increment } => {
+            emit_aarch64_post_increment(target, *increment, temporary_base, depth, labels, assembly)
         }
         _ => Err(CompileError::new(
             "internal error: expected aarch64 memory expression",
@@ -1127,7 +1195,7 @@ fn emit_aarch64_call_expr(
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
-        LoweredExpr::Call { callee, args } => {
+        LoweredExpr::Call { callee, args, .. } => {
             emit_aarch64_call(callee, args, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::IndirectCall { callee, args } => {
@@ -1720,6 +1788,7 @@ fn emit_aarch64_assign(
 
 fn emit_aarch64_post_increment(
     target: &LoweredLValue,
+    increment: i64,
     temporary_base: usize,
     depth: usize,
     labels: &mut LabelAllocator<'_>,
@@ -1731,14 +1800,14 @@ fn emit_aarch64_post_increment(
         LoweredLValue::Local { offset, .. } => {
             emit_aarch64_load_temporary(width, *offset, assembly)?;
             emit_aarch64_store_temporary(width, value_offset, assembly)?;
-            emit_aarch64_increment_result(width, assembly)?;
+            emit_aarch64_increment_result(width, increment, assembly)?;
             emit_aarch64_store_result(width, *offset, assembly)?;
             emit_aarch64_load_temporary(width, value_offset, assembly)
         }
         LoweredLValue::Global { name, .. } => {
             emit_aarch64_load_global(name, width, labels.target, assembly)?;
             emit_aarch64_store_temporary(width, value_offset, assembly)?;
-            emit_aarch64_increment_result(width, assembly)?;
+            emit_aarch64_increment_result(width, increment, assembly)?;
             emit_aarch64_store_global(name, width, labels.target, assembly)?;
             emit_aarch64_load_temporary(width, value_offset, assembly)
         }
@@ -1755,6 +1824,7 @@ fn emit_aarch64_post_increment(
             temporary_base,
             depth,
             labels,
+            increment,
             assembly,
         ),
         LoweredLValue::PointerSubscript {
@@ -1772,6 +1842,7 @@ fn emit_aarch64_post_increment(
             temporary_base,
             depth,
             labels,
+            increment,
             assembly,
         ),
         LoweredLValue::GlobalByteSubscript { .. }
@@ -1787,6 +1858,7 @@ fn emit_aarch64_post_increment_pointer_subscript(
     temporary_base: usize,
     depth: usize,
     labels: &mut LabelAllocator<'_>,
+    increment: i64,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = scalar_width(subscript.element_type);
@@ -1813,7 +1885,7 @@ fn emit_aarch64_post_increment_pointer_subscript(
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
     emit_aarch64_load_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
     emit_aarch64_store_temporary(width, value_offset, assembly)?;
-    emit_aarch64_increment_result(width, assembly)?;
+    emit_aarch64_increment_result(width, increment, assembly)?;
     emit_aarch64_store_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
     emit_aarch64_load_temporary(width, value_offset, assembly)
 }
@@ -1823,6 +1895,7 @@ fn emit_aarch64_post_increment_pointer_field(
     temporary_base: usize,
     depth: usize,
     labels: &mut LabelAllocator<'_>,
+    increment: i64,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = scalar_width(field.scalar_type);
@@ -1845,7 +1918,7 @@ fn emit_aarch64_post_increment_pointer_field(
         field.offset
     )?;
     emit_aarch64_store_temporary(width, value_offset, assembly)?;
-    emit_aarch64_increment_result(width, assembly)?;
+    emit_aarch64_increment_result(width, increment, assembly)?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
     write_assembly!(
         assembly,
@@ -1856,15 +1929,24 @@ fn emit_aarch64_post_increment_pointer_field(
     emit_aarch64_load_temporary(width, value_offset, assembly)
 }
 
-fn emit_aarch64_increment_result(width: ValueWidth, assembly: &mut String) -> CompileResult<()> {
+fn emit_aarch64_increment_result(
+    width: ValueWidth,
+    increment: i64,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let immediate = u16::try_from(increment)
+        .map_err(|_| CompileError::new("post-increment value does not fit aarch64 immediate"))?;
+    if immediate > 4095 {
+        return Err(CompileError::new(
+            "post-increment value does not fit aarch64 immediate",
+        ));
+    }
     match width {
         ValueWidth::I32 => {
-            assembly.push_str("\tadd w0, w0, #1\n");
-            Ok(())
+            write_assembly!(assembly, "\tadd w0, w0, #{immediate}\n")
         }
         ValueWidth::I64 => {
-            assembly.push_str("\tadd x0, x0, #1\n");
-            Ok(())
+            write_assembly!(assembly, "\tadd x0, x0, #{immediate}\n")
         }
         ValueWidth::F64 => Err(CompileError::new("unsupported double post-increment")),
     }
@@ -2542,9 +2624,18 @@ fn emit_x86_64_global_or_assignment_expr(
             labels,
             assembly,
         ),
-        LoweredExpr::PostIncrement { target: lvalue } => {
-            emit_x86_64_post_increment(lvalue, temporary_base, depth, target, labels, assembly)
-        }
+        LoweredExpr::PostIncrement {
+            target: lvalue,
+            increment,
+        } => emit_x86_64_post_increment(
+            lvalue,
+            *increment,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
         _ => Err(CompileError::new(
             "internal error: expected x86-64 global expression",
         )),
@@ -2636,7 +2727,10 @@ fn emit_x86_64_call(
     if callee == "alloca" {
         return emit_x86_64_alloca(args, temporary_base, depth, target, labels, assembly);
     }
-    if matches!(callee, "va_start" | "va_end") {
+    if callee == "va_start" {
+        return emit_x86_64_va_start(args, temporary_base, depth, target, labels, assembly);
+    }
+    if callee == "va_end" {
         assembly.push_str("\txorl %eax, %eax\n");
         return Ok(());
     }
@@ -2675,6 +2769,48 @@ fn emit_x86_64_call(
     emit_x86_64_pop_call_stack(stack_bytes, assembly)
 }
 
+fn emit_x86_64_va_start(
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if args.len() != 2 {
+        return Err(CompileError::new("va_start expects two arguments"));
+    }
+    let Some(frame) = labels.x86_64_variadic else {
+        return Err(CompileError::new("va_start used outside variadic function"));
+    };
+    emit_x86_64_expr_with_width(
+        &args[0],
+        ValueWidth::I64,
+        temporary_base,
+        depth,
+        target,
+        labels,
+        assembly,
+    )?;
+    assembly.push_str("\tmovq %rax, %r10\n");
+    write_assembly!(assembly, "\tmovl ${}, 0(%r10)\n", frame.gp_offset)?;
+    write_assembly!(assembly, "\tmovl ${X86_64_VARIADIC_FP_OFFSET}, 4(%r10)\n")?;
+    write_assembly!(
+        assembly,
+        "\tleaq {}(%rbp), %rax\n",
+        frame.overflow_arg_offset
+    )?;
+    assembly.push_str("\tmovq %rax, 8(%r10)\n");
+    write_assembly!(
+        assembly,
+        "\tleaq {}(%rbp), %rax\n",
+        x86_stack_object_offset(frame.register_save_offset, frame.register_save_size)
+    )?;
+    assembly.push_str("\tmovq %rax, 16(%r10)\n");
+    assembly.push_str("\txorl %eax, %eax\n");
+    Ok(())
+}
+
 fn emit_x86_64_alloca(
     args: &[LoweredExpr],
     temporary_base: usize,
@@ -2705,7 +2841,7 @@ fn emit_x86_64_call_expr(
     assembly: &mut String,
 ) -> CompileResult<()> {
     match expr {
-        LoweredExpr::Call { callee, args } => emit_x86_64_call(
+        LoweredExpr::Call { callee, args, .. } => emit_x86_64_call(
             callee,
             args,
             temporary_base,
@@ -3445,6 +3581,7 @@ fn emit_x86_64_assign(
 
 fn emit_x86_64_post_increment(
     target: &LoweredLValue,
+    increment: i64,
     temporary_base: usize,
     depth: usize,
     codegen_target: Target,
@@ -3457,14 +3594,14 @@ fn emit_x86_64_post_increment(
         LoweredLValue::Local { offset, .. } => {
             emit_x86_64_load_temporary(width, *offset, assembly)?;
             emit_x86_64_store_temporary(width, value_offset, assembly)?;
-            emit_x86_64_increment_result(width, assembly)?;
+            emit_x86_64_increment_result(width, increment, assembly)?;
             emit_x86_64_store_result(width, *offset, assembly)?;
             emit_x86_64_load_temporary(width, value_offset, assembly)
         }
         LoweredLValue::Global { name, .. } => {
             emit_x86_64_load_global(name, width, codegen_target, assembly)?;
             emit_x86_64_store_temporary(width, value_offset, assembly)?;
-            emit_x86_64_increment_result(width, assembly)?;
+            emit_x86_64_increment_result(width, increment, assembly)?;
             emit_x86_64_store_global(name, width, codegen_target, assembly)?;
             emit_x86_64_load_temporary(width, value_offset, assembly)
         }
@@ -3482,6 +3619,7 @@ fn emit_x86_64_post_increment(
             depth,
             codegen_target,
             labels,
+            increment,
             assembly,
         ),
         LoweredLValue::PointerSubscript {
@@ -3500,6 +3638,7 @@ fn emit_x86_64_post_increment(
             depth,
             codegen_target,
             labels,
+            increment,
             assembly,
         ),
         LoweredLValue::GlobalByteSubscript { .. }
@@ -3516,6 +3655,7 @@ fn emit_x86_64_post_increment_pointer_subscript(
     depth: usize,
     target: Target,
     labels: &mut LabelAllocator<'_>,
+    increment: i64,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = scalar_width(subscript.element_type);
@@ -3545,7 +3685,7 @@ fn emit_x86_64_post_increment_pointer_subscript(
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
     emit_x86_64_load_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
     emit_x86_64_store_temporary(width, value_offset, assembly)?;
-    emit_x86_64_increment_result(width, assembly)?;
+    emit_x86_64_increment_result(width, increment, assembly)?;
     emit_x86_64_store_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
     emit_x86_64_load_temporary(width, value_offset, assembly)
 }
@@ -3556,6 +3696,7 @@ fn emit_x86_64_post_increment_pointer_field(
     depth: usize,
     target: Target,
     labels: &mut LabelAllocator<'_>,
+    increment: i64,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = scalar_width(field.scalar_type);
@@ -3580,7 +3721,7 @@ fn emit_x86_64_post_increment_pointer_field(
         x86_64_result_register(width)
     )?;
     emit_x86_64_store_temporary(width, value_offset, assembly)?;
-    emit_x86_64_increment_result(width, assembly)?;
+    emit_x86_64_increment_result(width, increment, assembly)?;
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
     write_assembly!(
         assembly,
@@ -3592,16 +3733,16 @@ fn emit_x86_64_post_increment_pointer_field(
     emit_x86_64_load_temporary(width, value_offset, assembly)
 }
 
-fn emit_x86_64_increment_result(width: ValueWidth, assembly: &mut String) -> CompileResult<()> {
+fn emit_x86_64_increment_result(
+    width: ValueWidth,
+    increment: i64,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let immediate = i32::try_from(increment)
+        .map_err(|_| CompileError::new("post-increment value does not fit x86-64 immediate"))?;
     match width {
-        ValueWidth::I32 => {
-            assembly.push_str("\taddl $1, %eax\n");
-            Ok(())
-        }
-        ValueWidth::I64 => {
-            assembly.push_str("\taddq $1, %rax\n");
-            Ok(())
-        }
+        ValueWidth::I32 => write_assembly!(assembly, "\taddl ${immediate}, %eax\n"),
+        ValueWidth::I64 => write_assembly!(assembly, "\taddq ${immediate}, %rax\n"),
         ValueWidth::F64 => Err(CompileError::new("unsupported double post-increment")),
     }
 }
@@ -4212,7 +4353,7 @@ fn expr_depth(expr: &LoweredExpr) -> usize {
         LoweredExpr::PointerFieldAddress { pointer, .. }
         | LoweredExpr::PointerField { pointer, .. } => 1 + expr_depth(pointer),
         LoweredExpr::Assign { target, value } => assign_expr_depth(target, value),
-        LoweredExpr::PostIncrement { target } => 1 + lvalue_address_depth(target),
+        LoweredExpr::PostIncrement { target, .. } => 1 + lvalue_address_depth(target),
         LoweredExpr::Binary {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
             left,
@@ -4316,7 +4457,7 @@ fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool {
         LoweredExpr::Assign { target, value } => {
             lvalue_needs_preserved_temp(target) || expr_needs_preserved_temp(value)
         }
-        LoweredExpr::PostIncrement { target } => lvalue_needs_preserved_temp(target),
+        LoweredExpr::PostIncrement { target, .. } => lvalue_needs_preserved_temp(target),
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
         LoweredExpr::IndirectCall { callee, args } => {
             expr_needs_preserved_temp(callee) || args.iter().any(expr_needs_preserved_temp)
@@ -4389,7 +4530,7 @@ fn expr_uses_call(expr: &LoweredExpr) -> bool {
         LoweredExpr::PointerFieldAddress { pointer, .. }
         | LoweredExpr::PointerField { pointer, .. } => expr_uses_call(pointer),
         LoweredExpr::Assign { target, value } => lvalue_uses_call(target) || expr_uses_call(value),
-        LoweredExpr::PostIncrement { target } => lvalue_uses_call(target),
+        LoweredExpr::PostIncrement { target, .. } => lvalue_uses_call(target),
         LoweredExpr::Conditional {
             condition,
             then_expr,

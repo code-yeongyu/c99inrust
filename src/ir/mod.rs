@@ -7,7 +7,10 @@ use crate::parser::{
     StructLayout, SwitchCase, UnaryOp,
 };
 
+mod struct_initializer;
+
 const POINTER_REFERENT: &str = "*";
+const X86_64_VARIADIC_GP_SAVE_BYTES: usize = 48;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredProgram {
@@ -28,12 +31,40 @@ pub enum LoweredGlobalInitializer {
     IntArray(Vec<i32>),
     PointerNull,
     PointerString(String),
-    PointerGlobalOffset { base: String, byte_offset: usize },
+    PointerGlobalOffset {
+        base: String,
+        byte_offset: usize,
+    },
     PointerArray(usize),
     PointerStringArray(Vec<String>),
-    PointerNameArray { values: Vec<String>, length: usize },
+    PointerNameArray {
+        values: Vec<String>,
+        length: usize,
+    },
+    StructArray {
+        byte_len: usize,
+        values: Vec<LoweredStructInitializerValue>,
+    },
     ZeroBytes(usize),
     UnsignedCharArray(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweredStructInitializerValue {
+    pub byte_offset: usize,
+    pub value: LoweredStructInitializerScalar,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoweredStructInitializerScalar {
+    Int(i32),
+    IntString(String),
+    LongLong(i64),
+    Bytes { values: Vec<u8>, byte_len: usize },
+    PointerNull,
+    PointerInteger(i64),
+    PointerString(String),
+    PointerGlobalOffset { base: String, byte_offset: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +72,8 @@ pub struct LoweredFunction {
     pub name: String,
     pub return_type: ReturnType,
     pub parameter_count: usize,
+    pub is_variadic: bool,
+    pub variadic_save_slot: Option<usize>,
     pub local_slots: Vec<LocalSlot>,
     pub instructions: Vec<Instruction>,
 }
@@ -92,6 +125,7 @@ pub enum LoweredExpr {
     Call {
         callee: String,
         args: Vec<Self>,
+        return_type: ScalarType,
     },
     IndirectCall {
         callee: Box<Self>,
@@ -145,6 +179,7 @@ pub enum LoweredExpr {
     },
     PostIncrement {
         target: LoweredLValue,
+        increment: i64,
     },
     Local {
         offset: usize,
@@ -256,7 +291,8 @@ fn lower_globals(
             insert_global_binding(&mut bindings, &global.name, binding)?;
             continue;
         }
-        let (initializer, binding) = lower_defined_global_initializer(global, constants, structs)?;
+        let (initializer, binding) =
+            lower_defined_global_initializer(global, constants, structs, &bindings)?;
         if !definitions.insert(global.name.clone()) {
             return Err(CompileError::new(format!(
                 "duplicate global declaration: {}",
@@ -335,6 +371,7 @@ fn lower_defined_global_initializer(
     global: &Global,
     constants: &HashMap<String, i64>,
     structs: &HashMap<String, StructLayout>,
+    global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
     if let Some(lowered) = lower_pointer_array_initializer(&global.initializer) {
         return lowered;
@@ -398,7 +435,15 @@ fn lower_defined_global_initializer(
             struct_name,
             length,
             columns,
-        } => lower_struct_array_global(struct_name, *length, *columns, structs),
+            values,
+        } => struct_initializer::lower_struct_array_global(
+            struct_name,
+            *length,
+            *columns,
+            values,
+            structs,
+            global_bindings,
+        ),
         GlobalInitializer::UnsignedCharArray(values) => Ok((
             LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
             GlobalBinding::UnsignedCharArray,
@@ -514,29 +559,6 @@ fn lower_struct_object_global(
         GlobalBinding::StructObject {
             struct_name: struct_name.to_owned(),
             byte_size: layout.size,
-        },
-    ))
-}
-
-fn lower_struct_array_global(
-    struct_name: &str,
-    length: usize,
-    columns: Option<usize>,
-    structs: &HashMap<String, StructLayout>,
-) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
-    let layout = structs
-        .get(struct_name)
-        .ok_or_else(|| CompileError::new(format!("unknown struct-array type: {struct_name}")))?;
-    let byte_len = length
-        .checked_mul(layout.size)
-        .ok_or_else(|| CompileError::new("global struct-array size overflow"))?;
-    Ok((
-        LoweredGlobalInitializer::ZeroBytes(byte_len),
-        GlobalBinding::StructArray {
-            struct_name: struct_name.to_owned(),
-            byte_size: layout.size,
-            length: Some(length),
-            columns,
         },
     ))
 }
@@ -817,6 +839,15 @@ fn lower_function_with_globals(
             parameter.referent.clone(),
         )?;
     }
+    let variadic_save_slot = if function.is_variadic {
+        Some(context.declare_anonymous_slot(
+            ScalarType::Pointer,
+            X86_64_VARIADIC_GP_SAVE_BYTES,
+            scalar_size(ScalarType::Pointer),
+        )?)
+    } else {
+        None
+    };
     for statement in &function.statements {
         context.lower_statement(statement)?;
     }
@@ -834,6 +865,8 @@ fn lower_function_with_globals(
         name: function.name.clone(),
         return_type: function.return_type,
         parameter_count: function.parameters.len(),
+        is_variadic: function.is_variadic,
+        variadic_save_slot,
         local_slots: context.local_slots,
         instructions: context.instructions,
     })
@@ -867,6 +900,9 @@ enum LocalBinding {
         slot: usize,
         struct_name: String,
         byte_size: usize,
+    },
+    VaList {
+        slot: usize,
     },
 }
 
@@ -906,7 +942,7 @@ impl GlobalBinding {
         match scalar_type {
             ScalarType::Int => Ok(Self::Int),
             ScalarType::Pointer => Ok(Self::Pointer { referent: None }),
-            ScalarType::LongLong | ScalarType::Double => {
+            ScalarType::LongLong | ScalarType::Double | ScalarType::VaList => {
                 Err(CompileError::new("unsupported extern global scalar type"))
             }
         }
@@ -1449,6 +1485,17 @@ impl LoweringContext {
         scalar_type: ScalarType,
         referent: Option<String>,
     ) -> CompileResult<usize> {
+        if scalar_type == ScalarType::VaList {
+            return self.declare_slot(
+                name,
+                scalar_type,
+                scalar_size(scalar_type),
+                scalar_size(ScalarType::Pointer),
+                LocalBinding::VaList {
+                    slot: self.local_slots.len(),
+                },
+            );
+        }
         self.declare_slot(
             name,
             scalar_type,
@@ -1460,6 +1507,25 @@ impl LoweringContext {
                 referent,
             },
         )
+    }
+
+    fn declare_anonymous_slot(
+        &mut self,
+        scalar_type: ScalarType,
+        byte_size: usize,
+        alignment: usize,
+    ) -> CompileResult<usize> {
+        let slot = self.local_slots.len();
+        let offset = align_to(self.next_local_offset, alignment);
+        self.next_local_offset = offset
+            .checked_add(byte_size)
+            .ok_or_else(|| CompileError::new("local stack size overflow"))?;
+        self.local_slots.push(LocalSlot {
+            offset,
+            scalar_type,
+            byte_size,
+        });
+        Ok(slot)
     }
 
     fn declare_char_array(&mut self, name: &str, length: usize) -> CompileResult<usize> {
@@ -1660,7 +1726,18 @@ impl LoweringContext {
                 .iter()
                 .map(|arg| self.lower_expr(arg))
                 .collect::<CompileResult<Vec<_>>>()?,
+            return_type: self.direct_call_return_type(callee),
         })
+    }
+
+    fn direct_call_return_type(&self, callee: &str) -> ScalarType {
+        if self.pointer_return_functions.contains_key(callee)
+            || builtin_pointer_return_function(callee)
+        {
+            ScalarType::Pointer
+        } else {
+            ScalarType::Int
+        }
     }
 
     fn callee_is_pointer_binding(&self, callee: &str) -> bool {
@@ -1786,6 +1863,10 @@ impl LoweringContext {
                 offset: self.local_offset(*slot)?,
                 byte_size: *byte_size,
             }),
+            LocalBinding::VaList { slot } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: scalar_size(ScalarType::VaList),
+            }),
         }
     }
 
@@ -1905,6 +1986,9 @@ impl LoweringContext {
                         LocalBinding::StructObject { .. } => Err(CompileError::new(
                             "direct assignment to local struct object is not supported",
                         )),
+                        LocalBinding::VaList { .. } => {
+                            Err(CompileError::new("assignment to va_list is not supported"))
+                        }
                     };
                 }
                 if let Some(scalar_type) = self
@@ -2004,6 +2088,7 @@ impl LoweringContext {
                 LocalBinding::IntArray { length, .. } => local_int_array_byte_size(length)?,
                 LocalBinding::PointerArray { length, .. } => local_pointer_array_byte_size(length)?,
                 LocalBinding::StructObject { byte_size, .. } => byte_size,
+                LocalBinding::VaList { .. } => scalar_size(ScalarType::VaList),
             };
             return i64::try_from(size)
                 .map(LoweredExpr::Integer)
@@ -2020,6 +2105,15 @@ impl LoweringContext {
                 .checked_mul(*length)
                 .ok_or_else(|| CompileError::new("sizeof global array overflow"))?;
             return i64::try_from(size)
+                .map(LoweredExpr::Integer)
+                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
+        }
+        if let Expr::Subscript { array, .. } = expr
+            && let Expr::Identifier(name) = array.as_ref()
+            && let Some(GlobalBinding::StructArray { byte_size, .. }) =
+                self.global_bindings.get(name)
+        {
+            return i64::try_from(*byte_size)
                 .map(LoweredExpr::Integer)
                 .map_err(|_| CompileError::new("sizeof result does not fit i64"));
         }
@@ -2313,6 +2407,10 @@ impl LoweringContext {
                         offset: self.local_offset(slot)?,
                         byte_size,
                     }),
+                    LocalBinding::VaList { slot } => Ok(LoweredExpr::LocalAddress {
+                        offset: self.local_offset(slot)?,
+                        byte_size: scalar_size(ScalarType::VaList),
+                    }),
                 }
             }
             LValue::Member {
@@ -2436,13 +2534,18 @@ impl LoweringContext {
             return Ok(None);
         };
         let member = self.resolve_member_access(base, field, *dereference)?;
-        let FieldType::Array { element_type, .. } = member.field_type else {
+        let FieldType::Array {
+            element_type,
+            element_size,
+            ..
+        } = member.field_type
+        else {
             return Ok(None);
         };
         Ok(Some((
             pointer_field_address(member.pointer, member.offset),
             element_type,
-            scalar_size(element_type),
+            element_size,
         )))
     }
 
@@ -2469,6 +2572,7 @@ impl LoweringContext {
         let member = self.resolve_member_access(base, field, *dereference)?;
         let FieldType::Array {
             element_type,
+            element_size,
             columns: Some(columns),
             ..
         } = member.field_type
@@ -2491,7 +2595,7 @@ impl LoweringContext {
             pointer_field_address(member.pointer, member.offset),
             flat_index,
             element_type,
-            scalar_size(element_type),
+            element_size,
         )))
     }
 
@@ -2962,10 +3066,10 @@ impl LoweringContext {
                 ),
                 FieldType::Array {
                     element_type,
+                    element_size,
                     length,
                     ..
                 } => {
-                    let element_size = scalar_size(element_type);
                     for index in 0..length {
                         let element_offset = index
                             .checked_mul(element_size)
@@ -3054,24 +3158,63 @@ impl LoweringContext {
     }
 
     fn lower_post_increment_statement(&mut self, target: &LValue) -> CompileResult<()> {
-        let target = self.lower_lvalue(target)?;
-        ensure_post_increment_scalar(&target)?;
-        let current = lowered_lvalue_to_expr(&target);
+        let lowered = self.lower_lvalue(target)?;
+        ensure_post_increment_scalar(&lowered)?;
+        let increment = self.post_increment_amount(target, &lowered)?;
+        let current = lowered_lvalue_to_expr(&lowered);
         self.push_store(
-            target,
+            lowered,
             LoweredExpr::Binary {
                 op: BinaryOp::Add,
                 left: Box::new(current),
-                right: Box::new(LoweredExpr::Integer(1)),
+                right: Box::new(LoweredExpr::Integer(increment)),
             },
         );
         Ok(())
     }
 
     fn lower_post_increment_expr(&self, target: &LValue) -> CompileResult<LoweredExpr> {
-        let target = self.lower_lvalue(target)?;
-        ensure_post_increment_scalar(&target)?;
-        Ok(LoweredExpr::PostIncrement { target })
+        let lowered = self.lower_lvalue(target)?;
+        ensure_post_increment_scalar(&lowered)?;
+        let increment = self.post_increment_amount(target, &lowered)?;
+        Ok(LoweredExpr::PostIncrement {
+            target: lowered,
+            increment,
+        })
+    }
+
+    fn post_increment_amount(
+        &self,
+        target: &LValue,
+        lowered: &LoweredLValue,
+    ) -> CompileResult<i64> {
+        if lowered_lvalue_scalar_type(lowered) != ScalarType::Pointer {
+            return Ok(1);
+        }
+        let Some(referent) = self.pointer_referent_for_lvalue(target)? else {
+            return Ok(1);
+        };
+        let stride = self.pointer_referent_stride(&referent)?;
+        i64::try_from(stride).map_err(|_| CompileError::new("pointer stride does not fit i64"))
+    }
+
+    fn pointer_referent_for_lvalue(&self, target: &LValue) -> CompileResult<Option<String>> {
+        match target {
+            LValue::Identifier(name) => Ok(self.pointer_referent_for_identifier(name)),
+            LValue::Member {
+                base,
+                field,
+                dereference,
+            } => {
+                let member = self.resolve_member_access(base, field, *dereference)?;
+                if let FieldType::Pointer { referent } = member.field_type {
+                    Ok(referent)
+                } else {
+                    Ok(None)
+                }
+            }
+            LValue::Subscript { .. } => Ok(None),
+        }
     }
 }
 
@@ -3091,6 +3234,10 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
     match expr {
         LoweredExpr::Global { scalar_type, .. }
         | LoweredExpr::Local { scalar_type, .. }
+        | LoweredExpr::Call {
+            return_type: scalar_type,
+            ..
+        }
         | LoweredExpr::Cast {
             target: scalar_type,
             ..
@@ -3103,13 +3250,12 @@ const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Option<ScalarType> {
         | LoweredExpr::PointerOffset { .. }
         | LoweredExpr::PointerFieldAddress { .. } => Some(ScalarType::Pointer),
         LoweredExpr::PointerSubscript { element_type, .. } => Some(*element_type),
-        LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target } => {
+        LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target, .. } => {
             Some(lowered_lvalue_scalar_type(target))
         }
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
-        | LoweredExpr::Call { .. }
         | LoweredExpr::IndirectCall { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::Unary { .. }
@@ -3202,7 +3348,7 @@ fn cast_const_value(target: ScalarType, value: i64) -> CompileResult<i64> {
             .map(i64::from)
             .map_err(|_| CompileError::new("integer cast result does not fit i32")),
         ScalarType::LongLong => Ok(value),
-        ScalarType::Double | ScalarType::Pointer => Err(CompileError::new(
+        ScalarType::Double | ScalarType::Pointer | ScalarType::VaList => Err(CompileError::new(
             "non-integer cast is not an integer constant expression",
         )),
     }
@@ -3211,7 +3357,9 @@ fn cast_const_value(target: ScalarType, value: i64) -> CompileResult<i64> {
 fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
     match scalar_type {
         ScalarType::Double => LoweredExpr::DoubleLiteral("0.0".to_string()),
-        ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer => LoweredExpr::Integer(0),
+        ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer | ScalarType::VaList => {
+            LoweredExpr::Integer(0)
+        }
     }
 }
 
@@ -3304,6 +3452,7 @@ const fn scalar_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+        ScalarType::VaList => 24,
     }
 }
 
@@ -3433,7 +3582,7 @@ fn inline_constant_calls_in_instruction(
 
 fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<String, i64>) {
     match expr {
-        LoweredExpr::Call { callee, args } => {
+        LoweredExpr::Call { callee, args, .. } => {
             if args.is_empty()
                 && let Some(value) = constants.get(callee)
             {
@@ -3492,6 +3641,25 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => {}
     }
+}
+
+fn builtin_pointer_return_function(name: &str) -> bool {
+    matches!(
+        name,
+        "calloc"
+            | "fopen"
+            | "fdopen"
+            | "getenv"
+            | "gethostbyname"
+            | "malloc"
+            | "realloc"
+            | "strerror"
+            | "XCreateGC"
+            | "XCreateImage"
+            | "XGetVisualInfo"
+            | "XOpenDisplay"
+            | "XShmCreateImage"
+    )
 }
 
 const fn ends_with_return(instructions: &[Instruction]) -> bool {

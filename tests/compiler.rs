@@ -284,7 +284,7 @@ fn compiler_accepts_pointer_post_increment_dereference_slice() {
 
     // then
     assert!(assembly.contains("skip:"));
-    assert!(assembly.contains("\taddq $1, %rax\n"));
+    assert!(assembly.contains("\taddq $4, %rax\n"));
     assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
 }
 
@@ -480,7 +480,7 @@ fn compiler_accepts_doom_do_while_pointer_copy_slice() {
 
     // then
     assert!(assembly.contains("copy:"));
-    assert!(assembly.contains("\taddq $1, %rax\n"));
+    assert!(assembly.contains("\taddq $4, %rax\n"));
     assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
 }
 
@@ -1308,6 +1308,61 @@ int main(void) {
 }
 
 #[test]
+fn compiler_emits_global_struct_array_initializers_slice() {
+    // given
+    let source = r#"typedef struct {
+    char* name;
+    int* location;
+    int defaultvalue;
+} default_t;
+int mouseSensitivity;
+default_t defaults[] = {
+    { "mouse_sensitivity", &mouseSensitivity, 5 }
+};
+int main(void) { return defaults[0].defaultvalue; }"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("defaults:\n"));
+    assert!(assembly.contains("\t.quad .Ldefaults_str0\n"));
+    assert!(assembly.contains("\t.quad mouseSensitivity\n"));
+    assert!(assembly.contains("\t.long 5\n"));
+    assert!(!assembly.contains("defaults:\n\t.zero 24\n"));
+}
+
+#[test]
+fn compiler_sizes_global_struct_array_elements_slice() {
+    // given
+    let source = r#"typedef struct {
+    char* name;
+    int* location;
+    int defaultvalue;
+} default_t;
+int mouseSensitivity;
+default_t defaults[] = {
+    { "mouse_sensitivity", &mouseSensitivity, 5 }
+};
+int main(void) { return sizeof(defaults) / sizeof(defaults[0]); }"#;
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("\tmovl $24, %eax\n"));
+    assert!(!assembly.contains("\tmovl $8, %eax\n"));
+}
+
+#[test]
 fn compiler_accepts_extern_struct_array_before_definition_slice() {
     // given
     let source = r"typedef struct {
@@ -1333,7 +1388,8 @@ int main(void) {
 
     // then
     assert_eq!(assembly.matches("weaponinfo:\n").count(), 1);
-    assert!(assembly.contains("\t.zero 24\n"));
+    assert!(assembly.contains("\t.long 1\n"));
+    assert!(assembly.contains("\t.long 6\n"));
     assert!(assembly.contains("\tmovl $24, %eax\n"));
 }
 
@@ -2827,6 +2883,28 @@ fn compiler_emits_x86_64_alloca_without_external_call_slice() {
 }
 
 #[test]
+fn compiler_preserves_x86_64_builtin_pointer_call_returns_slice() {
+    // given
+    let source =
+        "char* probe(int size) { return (char*) malloc(size); } int main(void) { return 0; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    let call_index = assembly
+        .find("\tcall malloc\n")
+        .expect("assembly should call malloc");
+    let call_tail = &assembly[call_index..];
+    let return_index = call_tail.find("\tret\n").expect("probe should return");
+    assert!(!call_tail[..return_index].contains("\tcltq\n"));
+}
+
+#[test]
 fn compiler_emits_x86_64_va_start_end_without_external_calls_slice() {
     // given
     let source = "void probe(char* fmt, ...) { va_list ap; va_start(ap, fmt); va_end(ap); } int main(void) { return 0; }";
@@ -2840,6 +2918,9 @@ fn compiler_emits_x86_64_va_start_end_without_external_calls_slice() {
 
     // then
     assert!(assembly.contains("probe:"));
+    assert!(assembly.contains("\tmovl $8, 0(%r10)\n"));
+    assert!(assembly.contains("\tmovl $48, 4(%r10)\n"));
+    assert!(assembly.contains("\tmovq %rax, 16(%r10)\n"));
     assert!(!assembly.contains("\tcall va_start\n"));
     assert!(!assembly.contains("\tcall va_end\n"));
 }

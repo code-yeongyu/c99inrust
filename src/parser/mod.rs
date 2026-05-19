@@ -1,6 +1,8 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
+mod global_struct_initializer;
+
 const DOOM_EXPAND_PIXEL_UNION: &str = "__doom_expand_pixel_union";
 const DOOM_NAME8_UNION: &str = "__doom_name8_union";
 
@@ -37,6 +39,7 @@ pub enum FieldType {
     },
     Array {
         element_type: ScalarType,
+        element_size: usize,
         length: usize,
         columns: Option<usize>,
     },
@@ -138,12 +141,26 @@ pub enum GlobalInitializer {
         struct_name: String,
         length: usize,
         columns: Option<usize>,
+        values: Vec<Vec<GlobalStructInitializerValue>>,
     },
     UnsignedCharArray(Vec<u8>),
     UnsignedCharMatrix {
         values: Vec<u8>,
         columns: usize,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlobalStructInitializerValue {
+    Integer(i64),
+    String(String),
+    Address(GlobalStructInitializerAddress),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalStructInitializerAddress {
+    pub base: String,
+    pub index: Option<usize>,
 }
 
 impl GlobalInitializer {
@@ -167,6 +184,7 @@ pub struct Function {
     pub name: String,
     pub return_type: ReturnType,
     pub parameters: Vec<Parameter>,
+    pub is_variadic: bool,
     pub statements: Vec<Statement>,
 }
 
@@ -196,6 +214,7 @@ pub enum ScalarType {
     LongLong,
     Double,
     Pointer,
+    VaList,
 }
 
 const POINTER_REFERENT: &str = "*";
@@ -669,7 +688,7 @@ impl Parser<'_> {
 
     fn function(&mut self) -> CompileResult<Function> {
         let (return_type, name) = self.function_signature()?;
-        let parameters = self.parameter_list()?;
+        let (parameters, is_variadic) = self.parameter_list()?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
         while !self.check_punctuator("}") {
@@ -680,6 +699,7 @@ impl Parser<'_> {
             name,
             return_type,
             parameters,
+            is_variadic,
             statements,
         })
     }
@@ -701,8 +721,9 @@ impl Parser<'_> {
         Ok((return_type, name))
     }
 
-    fn parameter_list(&mut self) -> CompileResult<Vec<Parameter>> {
+    fn parameter_list(&mut self) -> CompileResult<(Vec<Parameter>, bool)> {
         let mut parameters = Vec::new();
+        let mut is_variadic = false;
         let mut parameter_start = self.index;
         let mut depth = 0usize;
         while !self.check_end() {
@@ -715,18 +736,19 @@ impl Parser<'_> {
                 if depth == 0 {
                     if parameter_start == self.index {
                         self.advance();
-                        return Ok(parameters);
+                        return Ok((parameters, is_variadic));
                     }
-                    self.push_parameter(&mut parameters, parameter_start, self.index)?;
+                    is_variadic |=
+                        self.push_parameter(&mut parameters, parameter_start, self.index)?;
                     self.advance();
-                    return Ok(parameters);
+                    return Ok((parameters, is_variadic));
                 }
                 depth -= 1;
                 self.advance();
                 continue;
             }
             if depth == 0 && self.check_punctuator(",") {
-                self.push_parameter(&mut parameters, parameter_start, self.index)?;
+                is_variadic |= self.push_parameter(&mut parameters, parameter_start, self.index)?;
                 self.advance();
                 parameter_start = self.index;
                 continue;
@@ -741,13 +763,13 @@ impl Parser<'_> {
         parameters: &mut Vec<Parameter>,
         start: usize,
         end: usize,
-    ) -> CompileResult<()> {
+    ) -> CompileResult<bool> {
         let tokens = &self.tokens[start..end];
         if parameter_is_void(tokens) {
-            return Ok(());
+            return Ok(false);
         }
         if parameter_is_variadic(tokens) {
-            return Ok(());
+            return Ok(true);
         }
         if let Some(name) = function_pointer_name(tokens) {
             parameters.push(Parameter {
@@ -755,7 +777,7 @@ impl Parser<'_> {
                 scalar_type: ScalarType::Pointer,
                 referent: None,
             });
-            return Ok(());
+            return Ok(false);
         }
         let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
             return Err(CompileError::new("unsupported function parameter"));
@@ -771,7 +793,7 @@ impl Parser<'_> {
             scalar_type,
             referent: pointer_referent_type(tokens),
         });
-        Ok(())
+        Ok(false)
     }
 
     fn statement(&mut self) -> CompileResult<Statement> {
@@ -2142,6 +2164,9 @@ impl Parser<'_> {
                     } else if let Some(scalar_type) =
                         self.supported_declaration_typedef_scalar(name)
                     {
+                        if scalar_type == ScalarType::VaList {
+                            return Some((ScalarType::VaList, index + 1));
+                        }
                         if scalar_type != ScalarType::Int {
                             return None;
                         }
@@ -2808,11 +2833,13 @@ fn parse_struct_field_declaration(
             match field_type {
                 FieldType::Scalar(element_type) => FieldType::Array {
                     element_type,
+                    element_size: array_element_size(element_type, base_specifiers),
                     length: shape.length,
                     columns: shape.columns,
                 },
                 FieldType::Pointer { .. } => FieldType::Array {
                     element_type: ScalarType::Pointer,
+                    element_size: scalar_size_for_layout(ScalarType::Pointer),
                     length: shape.length,
                     columns: shape.columns,
                 },
@@ -3024,10 +3051,10 @@ fn field_type_size(field_type: &FieldType, known_structs: &[StructLayout]) -> Co
         FieldType::Scalar(scalar_type) => Ok(scalar_size_for_layout(*scalar_type)),
         FieldType::Pointer { .. } => Ok(8),
         FieldType::Array {
-            element_type,
+            element_size,
             length,
             ..
-        } => scalar_size_for_layout(*element_type)
+        } => element_size
             .checked_mul(*length)
             .ok_or_else(|| CompileError::new("struct array field size overflow")),
         FieldType::StructArray {
@@ -3053,7 +3080,7 @@ fn field_type_alignment(
     known_structs: &[StructLayout],
 ) -> CompileResult<usize> {
     match field_type {
-        FieldType::Array { element_type, .. } => Ok(scalar_size_for_layout(*element_type)),
+        FieldType::Array { element_size, .. } => Ok((*element_size).clamp(1, 8)),
         FieldType::StructArray { struct_name, .. } => known_structs
             .iter()
             .find(|layout| layout.name == *struct_name)
@@ -3063,10 +3090,25 @@ fn field_type_alignment(
     }
 }
 
+fn array_element_size(element_type: ScalarType, specifiers: &[Token]) -> usize {
+    if matches!(element_type, ScalarType::Int) && specifiers_include_char(specifiers) {
+        1
+    } else {
+        scalar_size_for_layout(element_type)
+    }
+}
+
+fn specifiers_include_char(specifiers: &[Token]) -> bool {
+    specifiers
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)))
+}
+
 const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+        ScalarType::VaList => 24,
     }
 }
 
@@ -3799,72 +3841,122 @@ fn parse_global_struct_array(
         .ok_or_else(|| CompileError::new("expected global struct-array name"))?
         .to_owned();
     let is_extern = token_has_keyword(&declaration[..name_index], Keyword::Extern);
-    let columns = if declaration
-        .get(close_bracket + 1)
-        .is_some_and(|token| token_is_punctuator(token, "["))
-    {
-        let second_open = close_bracket + 1;
-        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
-            return Err(
-                CompileError::new("unterminated global struct-matrix declarator").at(
-                    declaration[second_open].line,
-                    declaration[second_open].column,
-                ),
-            );
-        };
-        if is_extern {
-            parse_optional_symbolic_array_length(
-                &declaration[second_open + 1..second_close],
-                constants,
-            )?
-        } else {
-            Some(parse_unsigned_char_array_length(
-                &declaration[second_open + 1..second_close],
-                constants,
-            )?)
-        }
-    } else {
-        None
-    };
+    let columns =
+        parse_global_struct_array_columns(declaration, close_bracket, is_extern, constants)?;
     let assign_index = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
         .map(|offset| close_bracket + 1 + offset);
     let initializer = if is_extern {
         GlobalInitializer::ExternStructArray { struct_name }
     } else {
-        let length = if let Some(columns) = columns {
-            if open_bracket + 1 == close_bracket {
-                return Err(CompileError::new("expected global struct-matrix row count"));
-            }
-            let rows = parse_unsigned_char_array_length(
-                &declaration[open_bracket + 1..close_bracket],
-                constants,
-            )?;
-            rows.checked_mul(columns)
-                .ok_or_else(|| CompileError::new("global struct-matrix size overflow"))?
-        } else if let Some(assign_index) = assign_index {
-            let initializer = &declaration[assign_index + 1..];
-            aggregate_initializer_length(initializer).ok_or_else(|| {
-                CompileError::new("expected global struct-array initializer").at(
-                    declaration[assign_index].line,
-                    declaration[assign_index].column,
-                )
-            })?
-        } else {
-            if open_bracket + 1 == close_bracket {
-                return Err(CompileError::new("expected global struct-array length"));
-            }
-            parse_unsigned_char_array_length(
-                &declaration[open_bracket + 1..close_bracket],
-                constants,
-            )?
-        };
+        let length = parse_global_struct_array_length(
+            declaration,
+            open_bracket,
+            close_bracket,
+            columns,
+            assign_index,
+            constants,
+        )?;
+        let values = parse_global_struct_array_values(
+            declaration,
+            columns,
+            assign_index,
+            known_structs,
+            constants,
+        );
+        if values.len() > length {
+            return Err(CompileError::new(
+                "too many global struct-array initializers",
+            ));
+        }
         GlobalInitializer::StructArray {
             struct_name,
             length,
             columns,
+            values,
         }
     };
     Ok(Some(Global::new(name, initializer)))
+}
+
+fn parse_global_struct_array_columns(
+    declaration: &[Token],
+    close_bracket: usize,
+    is_extern: bool,
+    constants: &[Constant],
+) -> CompileResult<Option<usize>> {
+    if !declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        return Ok(None);
+    }
+    let second_open = close_bracket + 1;
+    let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+        return Err(
+            CompileError::new("unterminated global struct-matrix declarator").at(
+                declaration[second_open].line,
+                declaration[second_open].column,
+            ),
+        );
+    };
+    let tokens = &declaration[second_open + 1..second_close];
+    if is_extern {
+        parse_optional_symbolic_array_length(tokens, constants)
+    } else {
+        parse_unsigned_char_array_length(tokens, constants).map(Some)
+    }
+}
+
+fn parse_global_struct_array_length(
+    declaration: &[Token],
+    open_bracket: usize,
+    close_bracket: usize,
+    columns: Option<usize>,
+    assign_index: Option<usize>,
+    constants: &[Constant],
+) -> CompileResult<usize> {
+    if let Some(columns) = columns {
+        if open_bracket + 1 == close_bracket {
+            return Err(CompileError::new("expected global struct-matrix row count"));
+        }
+        let rows = parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?;
+        return rows
+            .checked_mul(columns)
+            .ok_or_else(|| CompileError::new("global struct-matrix size overflow"));
+    }
+    if let Some(assign_index) = assign_index {
+        let initializer = &declaration[assign_index + 1..];
+        return aggregate_initializer_length(initializer).ok_or_else(|| {
+            CompileError::new("expected global struct-array initializer").at(
+                declaration[assign_index].line,
+                declaration[assign_index].column,
+            )
+        });
+    }
+    if open_bracket + 1 == close_bracket {
+        return Err(CompileError::new("expected global struct-array length"));
+    }
+    parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket], constants)
+}
+
+fn parse_global_struct_array_values(
+    declaration: &[Token],
+    columns: Option<usize>,
+    assign_index: Option<usize>,
+    known_structs: &[StructLayout],
+    constants: &[Constant],
+) -> Vec<Vec<GlobalStructInitializerValue>> {
+    if columns.is_some() {
+        return Vec::new();
+    }
+    let Some(assign_index) = assign_index else {
+        return Vec::new();
+    };
+    global_struct_initializer::parse(&declaration[assign_index + 1..], known_structs, constants)
+        .unwrap_or_default()
 }
 
 fn parse_optional_symbolic_array_length(
@@ -5180,9 +5272,10 @@ fn eval_integer_initializer_expr_with_context(
             let value =
                 eval_integer_initializer_expr_with_context(expr, constants, sizeof_symbols)?;
             match target {
-                ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer => {
-                    Ok(InitializerNumber::integer(value.to_i64_trunc()?))
-                }
+                ScalarType::Int
+                | ScalarType::LongLong
+                | ScalarType::Pointer
+                | ScalarType::VaList => Ok(InitializerNumber::integer(value.to_i64_trunc()?)),
                 ScalarType::Double => Ok(value),
             }
         }
@@ -5863,8 +5956,9 @@ fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
         | "angle_t" | "boolean" | "buttoncode_t" | "byte" | "card_t" | "cheat_t" | "command_t"
         | "evtype_t" | "fixed_t" | "gameaction_t" | "gamestate_t" | "key_t" | "lighttable_t"
         | "mobjflag_t" | "mobjtype_t" | "playerstate_t" | "powerduration_t" | "powertype_t"
-        | "psprnum_t" | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t" | "va_list"
+        | "psprnum_t" | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t"
         | "weapontype_t" => Some(ScalarType::Int),
+        "va_list" => Some(ScalarType::VaList),
         _ => None,
     }
 }
@@ -6099,6 +6193,7 @@ fn array_field(name: &str, element_type: ScalarType, length: usize, offset: usiz
         name: name.to_owned(),
         field_type: FieldType::Array {
             element_type,
+            element_size: scalar_size_for_layout(element_type),
             length,
             columns: None,
         },
