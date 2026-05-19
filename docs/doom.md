@@ -302,6 +302,13 @@ the `r_things.c` sprite sort path now accepts scaled struct-pointer arithmetic
 before `->` member access.
 The former `hu_lib.c` blocker moved past double-pointer parameter referents for
 `patch_t** font` and indexed member chains such as `font[0]->height`.
+The former `i_video.c` blocker moved past Doom's X11 and SysV surface shapes:
+X11 opaque scalar parameters, the XEvent/XImage/XColor/XVisualInfo member
+chains used by the Linux video backend, local `struct shmid_ds` declarations,
+function-pointer casts such as `(void (*)(int)) I_Quit`, extern byte matrices
+such as `gammatable[usegamma][...]`, global unsigned and double stretch tables,
+local anonymous union `pixel`, many-argument Xlib calls, and post-increment of
+pointer elements such as `olineptrs[0]++`.
 The former `r_draw.c` blockers have moved past `(unsigned)dc_x`, the first
 `do { ... } while (...)` loops, prefix increment in `R_DrawFuzzColumn`, local
 char-array string initializers in `R_FillBackScreen`, the `unsigned ofs`

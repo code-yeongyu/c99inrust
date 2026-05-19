@@ -1301,6 +1301,95 @@ This is still not a playable Doom claim. Full success still requires compiling
 all translation units, linking the Doom executable, and manually running a
 playable public Doom target.
 
+## Compile Scan After X11 Video Slice
+
+The Linux video translation unit now reaches assembly generation. This slice
+adds the Doom-specific X11/System V surface needed by `i_video.c`: opaque X11
+scalar typedefs, minimal X11 struct layouts for the accessed fields, local
+`struct shmid_ds` declarations, function-pointer casts, X11/SysV preprocessor
+constants, extern byte matrices, global unsigned/double stretch tables,
+many-argument calls, and post-increment of pointer elements stored in pointer
+arrays.
+
+Regression coverage added:
+
+```text
+compiler_accepts_many_argument_calls
+compiler_accepts_x11_opaque_doom_video_slice
+preprocessor_provides_doom_x11_and_sysv_constants
+```
+
+Focused CLI QA:
+
+```text
+target/debug/c99inrust compile -S \
+  -D NORMALUNIX -D LINUX \
+  -I /tmp/c99inrust-doom-src/linuxdoom-1.10 \
+  /tmp/c99inrust-doom-src/linuxdoom-1.10/i_video.c \
+  -o /tmp/i_video.s
+```
+
+The focused compile now reaches assembly generation.
+
+Current compile scan was run inside tmux session
+`c99inrust-doom-scan-1779149967`, then the session exited naturally without
+`tmux kill-server`:
+
+```text
+scan=/tmp/c99inrust-doom-scan-1779149967.txt
+ok=45
+fail=17
+```
+
+Moved translation unit:
+
+```text
+OK i_video.c
+```
+
+Remaining blockers:
+
+```text
+FAIL g_game.c
+  error: 9119:5: expected expression
+FAIL hu_stuff.c
+  error: 5841:5: expected expression
+FAIL i_net.c
+  error: 3905:5: expected expression
+FAIL i_sound.c
+  error: 4750:43: expected expression
+FAIL i_system.c
+  error: 4552:5: expected expression
+FAIL info.c
+  error: translation unit has no supported function definitions
+FAIL m_misc.c
+  error: 5541:5: expected expression
+FAIL p_mobj.c
+  error: struct member value is not supported
+FAIL p_setup.c
+  error: assignment to non-pointer subscript targets is not supported
+FAIL p_switch.c
+  error: pointer member access requires a typed pointer
+FAIL r_bsp.c
+  error: 5355:5: expected expression
+FAIL s_sound.c
+  error: pointer member access requires a typed pointer
+FAIL sounds.c
+  error: 450:3: expected expression
+FAIL st_stuff.c
+  error: 8149:5: expected expression
+FAIL v_video.c
+  error: 5145:5: expected expression
+FAIL w_wad.c
+  error: 602:5: expected expression
+FAIL wi_stuff.c
+  error: unsupported global integer initializer
+```
+
+This is still not a playable Doom claim. Full success still requires compiling
+all translation units, linking the Doom executable, and manually running a
+playable public Doom target.
+
 ## Compile Scan After Doom Action Function Pointer Slice
 
 Doom action-function pointer typedefs are now treated as pointer types in casts,
