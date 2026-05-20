@@ -1,8 +1,7 @@
 use super::{
     CompileError, CompileResult, Expr, Keyword, Parser, ScalarType, Token, TokenKind,
-    function_pointer_cast_type, lvalue_from_expr, matching_top_level_bracket,
-    matching_top_level_paren, pointer_referent_from_specifiers, sizeof_type,
-    supported_cast_type_with_typedefs, token_identifier, top_level_punctuator_index,
+    function_pointer_cast_type, lvalue_from_expr, matching_top_level_paren,
+    pointer_referent_from_specifiers, supported_cast_type_with_typedefs,
 };
 
 impl Parser<'_> {
@@ -23,18 +22,6 @@ impl Parser<'_> {
         Ok(Expr::SizeOfExpr {
             expr: Box::new(self.unary()?),
         })
-    }
-
-    pub(super) fn sizeof_type(&self, tokens: &[Token]) -> Option<usize> {
-        let (base_tokens, length) = type_array_suffix(tokens).unwrap_or((tokens, 1));
-        let base_size = sizeof_type(base_tokens).or_else(|| {
-            let name = base_tokens.iter().rev().find_map(token_identifier)?;
-            self.known_structs
-                .iter()
-                .find(|layout| layout.name == name)
-                .map(|layout| layout.size)
-        })?;
-        base_size.checked_mul(length)
     }
 
     pub(super) fn postfix(&mut self) -> CompileResult<Expr> {
@@ -234,25 +221,4 @@ impl Parser<'_> {
         let exponent = self.expect_integer()?;
         Ok(Some(format!("e{sign}{exponent}")))
     }
-}
-
-fn type_array_suffix(tokens: &[Token]) -> Option<(&[Token], usize)> {
-    let open = top_level_punctuator_index(tokens, "[")?;
-    let close = matching_top_level_bracket(tokens, open)?;
-    if close + 1 != tokens.len() {
-        return None;
-    }
-    let [
-        Token {
-            kind: TokenKind::Integer(length),
-            ..
-        },
-    ] = &tokens[open + 1..close]
-    else {
-        return None;
-    };
-    usize::try_from(*length)
-        .ok()
-        .filter(|length| *length > 0)
-        .map(|length| (&tokens[..open], length))
 }

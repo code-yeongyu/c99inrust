@@ -38,6 +38,7 @@ mod parser_functions;
 mod parser_local_arrays;
 mod parser_local_declarations;
 mod parser_local_pointer_arrays;
+mod parser_sizeof_type;
 mod parser_statement_dispatch;
 mod parser_token_stream;
 mod program;
