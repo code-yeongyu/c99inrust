@@ -53,6 +53,25 @@ fn lexer_accepts_integer_literal_suffixes() {
 }
 
 #[test]
+fn lexer_parses_c_octal_integer_literals() {
+    // given
+    let source = "int mode = 0777;\n";
+
+    // when
+    let tokens = lex(source).expect("lexer should tokenize octal integer literals");
+
+    // then
+    let integers = tokens
+        .into_iter()
+        .filter_map(|token| match token.kind {
+            TokenKind::Integer(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(integers, vec![511]);
+}
+
+#[test]
 fn preprocessor_expands_object_macros_without_touching_strings() {
     // given
     let source = "#define ANSWER 42\nint main(void) { return ANSWER; }\nchar *s = \"ANSWER\";\n";

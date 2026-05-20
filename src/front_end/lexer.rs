@@ -1,5 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 
+use super::integer_literal;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Auto,
@@ -245,8 +247,7 @@ impl Lexer {
                 return Err(CompileError::new("expected hexadecimal digits").at(line, column));
             }
             self.consume_integer_suffix();
-            let parsed = i64::from_str_radix(&value, 16)
-                .map_err(|_| CompileError::new("integer literal is too large").at(line, column))?;
+            let parsed = integer_literal::parse_hexadecimal(&value, line, column)?;
             return Ok(TokenKind::Integer(parsed));
         }
         while self
@@ -259,9 +260,7 @@ impl Lexer {
             self.advance();
         }
         self.consume_integer_suffix();
-        let parsed = value
-            .parse::<i64>()
-            .map_err(|_| CompileError::new("integer literal is too large").at(line, column))?;
+        let parsed = integer_literal::parse_decimal_or_octal(&value, line, column)?;
         Ok(TokenKind::Integer(parsed))
     }
 
