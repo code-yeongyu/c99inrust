@@ -88,3 +88,30 @@ jobs:
           rustup run stable cargo machete
           rustup run stable cargo deny check
           rustup run stable cargo audit
+
+  doom-compile-scan:
+    name: doom compile scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        env:
+          GIT_CONFIG_COUNT: "2"
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: main
+          GIT_CONFIG_KEY_1: advice.defaultBranchName
+          GIT_CONFIG_VALUE_1: "false"
+      - name: Install stable Rust
+        run: rustup toolchain install stable
+      - name: Build compiler
+        run: rustup run stable cargo build
+      - name: Clone official Doom source
+        run: git clone --depth 1 https://github.com/id-Software/DOOM "$RUNNER_TEMP/DOOM"
+      - name: Compile official Doom translation units
+        env:
+          C99INRUST_BIN: target/debug/c99inrust
+          TMPDIR: ${{ runner.temp }}
+        run: tools/doom-compile-scan.sh "$RUNNER_TEMP/DOOM" "$RUNNER_TEMP/doom-compile-scan.txt"
+      - name: Verify Doom compile scan counts
+        run: |
+          grep -qx 'ok=62' "$RUNNER_TEMP/doom-compile-scan.txt"
+          grep -qx 'fail=0' "$RUNNER_TEMP/doom-compile-scan.txt"

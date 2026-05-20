@@ -37,6 +37,9 @@
           },
           {
             "context": "quality gates"
+          },
+          {
+            "context": "doom compile scan"
           }
         ],
         "strict_required_status_checks_policy": true
