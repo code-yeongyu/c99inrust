@@ -20,7 +20,9 @@ Expected today:
 
 - counts C and header files under `linuxdoom-1.10`
 - confirms the Makefile exists
-- reports the current compile/link/run smoke status
+- reports whether the input has the expected 62-unit official source shape
+- prints recorded compile/link/input/movement QA evidence with `recorded-*`
+  prefixes, so it is not mistaken for a live smoke run
 
 ## Frontend Surface Gate
 

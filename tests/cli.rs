@@ -98,12 +98,48 @@ fn cli_doom_audit_reports_current_doom_gate_status() {
     assert!(stdout.contains("linuxdoom-c-files=1"));
     assert!(stdout.contains("linuxdoom-h-files=1"));
     assert!(stdout.contains("linuxdoom-makefile=true"));
-    assert!(stdout.contains("compile-smoke=ok compile_ok=62 compile_fail=0"));
-    assert!(stdout.contains("link-smoke=ok link_status=0"));
-    assert!(stdout.contains("movement-smoke=ok movement_status=0"));
+    assert!(stdout.contains("official-source-shape=incomplete expected_c_files=62"));
+    assert!(stdout.contains("recorded-compile-smoke=ok compile_ok=62 compile_fail=0"));
+    assert!(stdout.contains("recorded-link-smoke=ok link_status=0"));
+    assert!(stdout.contains("recorded-movement-smoke=ok movement_status=0"));
     assert!(stdout.contains(
-        "status=official Doom compile/link/run smoke verified; human playthrough transcript pending"
+        "status=source audit incomplete; recorded QA evidence is not for this input tree"
     ));
+}
+
+#[test]
+fn cli_doom_audit_recognizes_official_source_shape() {
+    // given
+    let root = fresh_temp_dir("doom-audit-official-shape");
+    let linuxdoom = root.join("linuxdoom-1.10");
+    fs::create_dir_all(&linuxdoom).expect("linuxdoom dir should be created");
+    fs::write(linuxdoom.join("Makefile"), "all:\n").expect("Makefile should be written");
+    fs::write(linuxdoom.join("doomdef.h"), "#define DOOM 1\n").expect("header should be written");
+    for index in 0..62 {
+        fs::write(
+            linuxdoom.join(format!("unit_{index}.c")),
+            "int doom_unit(void) { return 0; }\n",
+        )
+        .expect("C source should be written");
+    }
+
+    // when
+    let output = Command::new(compiler())
+        .arg("doom-audit")
+        .arg(&root)
+        .output()
+        .expect("doom-audit command should run");
+
+    // then
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("linuxdoom-c-files=62"));
+    assert!(stdout.contains("linuxdoom-h-files=1"));
+    assert!(stdout.contains("linuxdoom-makefile=true"));
+    assert!(stdout.contains("official-source-shape=ok c_files=62"));
+    assert!(
+        stdout.contains("status=source audit ok; recorded Doom compile/link/movement QA available")
+    );
 }
 
 const fn compiler() -> &'static str {

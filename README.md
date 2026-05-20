@@ -70,6 +70,11 @@ git clone https://github.com/id-Software/DOOM /tmp/DOOM
 cargo run -- doom-audit /tmp/DOOM
 ```
 
+`doom-audit` checks that the input checkout has the expected 62-unit
+`linuxdoom-1.10` source shape and prints recorded QA evidence with
+`recorded-*` prefixes. It does not run the compile/link/movement smoke itself;
+use the smoke scripts below for live verification.
+
 Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX`
 defined, `compile -S` emits x86_64 Linux assembly for all 62 official Doom C
