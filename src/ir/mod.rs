@@ -33,6 +33,7 @@ mod global_initializers;
 mod global_lowering;
 mod local_array;
 mod local_initializer_values;
+mod local_struct_initializer;
 mod lowered_expr_helpers;
 mod pointer_arithmetic;
 mod pointer_referent;

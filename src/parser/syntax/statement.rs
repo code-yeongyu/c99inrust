@@ -48,6 +48,7 @@ pub enum Statement {
     LocalStruct {
         name: String,
         struct_name: String,
+        initializer: Option<LocalStructInitializer>,
     },
     LocalConstants(Vec<Constant>),
     DeclarationList(Vec<Self>),
@@ -93,4 +94,16 @@ pub enum Statement {
 pub enum LocalCharArrayInitializer {
     StringLiteral(String),
     Bytes(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalStructInitializer {
+    Values(Vec<LocalStructInitializerValue>),
+    Copy(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalStructInitializerValue {
+    Expr(Expr),
+    Nested(Vec<Self>),
 }

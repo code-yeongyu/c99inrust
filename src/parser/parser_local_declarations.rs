@@ -1,8 +1,7 @@
 use super::{
     CompileError, CompileResult, Constant, Keyword, Parser, ScalarType, Statement, TokenKind,
-    anonymous_union_struct_name, eval_integer_initializer_expr_with_constants,
-    matching_top_level_brace, parse_supported_global_declaration, previous_identifier_index,
-    supported_return_type, token_identifier, token_is_keyword, token_is_punctuator,
+    eval_integer_initializer_expr_with_constants, parse_supported_global_declaration,
+    previous_identifier_index, supported_return_type, token_identifier, token_is_punctuator,
     top_level_function_open_paren, top_level_punctuator_index,
 };
 
@@ -41,99 +40,6 @@ impl Parser<'_> {
         supported_return_type(&declaration[..name_index])?;
         self.index += semicolon_index + 1;
         Some(Statement::Empty)
-    }
-
-    pub(super) fn local_struct_declaration(&mut self) -> CompileResult<Option<Statement>> {
-        let type_index = if self.check_keyword(Keyword::Static) {
-            self.index + 1
-        } else {
-            self.index
-        };
-        let Some((struct_name, declarator_index)) = self.local_struct_name_at(type_index) else {
-            return Ok(None);
-        };
-        self.index = declarator_index;
-        let mut declarations = Vec::new();
-        loop {
-            let name = self.expect_identifier()?;
-            if self.check_punctuator("=") {
-                return Err(CompileError::new(
-                    "local struct initializers are not supported",
-                ));
-            }
-            declarations.push(Statement::LocalStruct {
-                name,
-                struct_name: struct_name.clone(),
-            });
-            if self.check_punctuator(",") {
-                self.advance();
-                continue;
-            }
-            self.expect_punctuator(";")?;
-            break;
-        }
-        if declarations.len() == 1 {
-            Ok(Some(declarations.remove(0)))
-        } else {
-            Ok(Some(Statement::DeclarationList(declarations)))
-        }
-    }
-
-    pub(super) fn local_struct_name_at(&self, index: usize) -> Option<(String, usize)> {
-        if token_is_keyword(self.tokens.get(index)?, Keyword::Struct) {
-            let name = token_identifier(self.tokens.get(index + 1)?)?;
-            if !self.known_structs.iter().any(|layout| layout.name == name) {
-                return None;
-            }
-            if !matches!(
-                self.tokens.get(index + 2).map(|token| &token.kind),
-                Some(TokenKind::Identifier(_))
-            ) {
-                return None;
-            }
-            return Some((name.to_owned(), index + 2));
-        }
-        let TokenKind::Identifier(name) = &self.tokens.get(index)?.kind else {
-            return None;
-        };
-        if !self.known_structs.iter().any(|layout| layout.name == *name) {
-            return None;
-        }
-        if !matches!(
-            self.tokens.get(index + 1).map(|token| &token.kind),
-            Some(TokenKind::Identifier(_))
-        ) {
-            return None;
-        }
-        Some((name.clone(), index + 1))
-    }
-
-    pub(super) fn local_anonymous_union_declaration(&mut self) -> CompileResult<Option<Statement>> {
-        if !self.check_keyword(Keyword::Union) {
-            return Ok(None);
-        }
-        let open_brace = self.index + 1;
-        if !self
-            .tokens
-            .get(open_brace)
-            .is_some_and(|token| token_is_punctuator(token, "{"))
-        {
-            return Ok(None);
-        }
-        let close_brace = matching_top_level_brace(self.tokens, open_brace)
-            .ok_or_else(|| CompileError::new("unterminated anonymous union declaration"))?;
-        let Some(struct_name) =
-            anonymous_union_struct_name(&self.tokens[open_brace + 1..close_brace])
-        else {
-            return Ok(None);
-        };
-        self.index = close_brace + 1;
-        let name = self.expect_identifier()?;
-        self.expect_punctuator(";")?;
-        Ok(Some(Statement::LocalStruct {
-            name,
-            struct_name: struct_name.to_owned(),
-        }))
     }
 
     pub(super) fn local_int_array_initializer(&mut self) -> CompileResult<Vec<i32>> {

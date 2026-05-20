@@ -47,9 +47,11 @@ impl LoweringContext {
                 length,
                 initializer,
             } => self.lower_local_pointer_array(name, *length, initializer.as_deref()),
-            Statement::LocalStruct { name, struct_name } => {
-                self.lower_local_struct_object(name, struct_name)
-            }
+            Statement::LocalStruct {
+                name,
+                struct_name,
+                initializer,
+            } => self.lower_local_struct_object(name, struct_name, initializer.as_ref()),
             Statement::LocalConstants(constants) => {
                 for constant in constants {
                     self.constants.insert(constant.name.clone(), constant.value);

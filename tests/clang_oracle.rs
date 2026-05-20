@@ -10,6 +10,8 @@ mod deep_c99_edges;
 mod deep_c99_expressions_more;
 #[path = "clang_oracle/deep_c99_layout_more.rs"]
 mod deep_c99_layout_more;
+#[path = "clang_oracle/deep_c99_local_struct_init.rs"]
+mod deep_c99_local_struct_init;
 #[path = "clang_oracle/deep_c99_numeric_more.rs"]
 mod deep_c99_numeric_more;
 #[path = "clang_oracle/deep_c99_preprocessor_more.rs"]

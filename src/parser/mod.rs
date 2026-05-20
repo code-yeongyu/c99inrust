@@ -38,6 +38,7 @@ mod parser_functions;
 mod parser_local_arrays;
 mod parser_local_declarations;
 mod parser_local_pointer_arrays;
+mod parser_local_structs;
 mod parser_sizeof_type;
 mod parser_statement_dispatch;
 mod parser_token_stream;
@@ -94,7 +95,8 @@ pub use program::{Function, Parameter, Program};
 use surface_parser::SurfaceParser;
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{
-    BinaryOp, Expr, LValue, LocalCharArrayInitializer, Statement, SwitchCase, UnaryOp,
+    BinaryOp, Expr, LValue, LocalCharArrayInitializer, LocalStructInitializer,
+    LocalStructInitializerValue, Statement, SwitchCase, UnaryOp,
 };
 use token_scan::{
     matching_top_level_brace, matching_top_level_bracket, matching_top_level_paren,

@@ -5,7 +5,9 @@ use super::{
     zero_expr_for,
 };
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, Global, LocalCharArrayInitializer, ScalarType, Statement};
+use crate::parser::{
+    Expr, Global, LocalCharArrayInitializer, LocalStructInitializer, ScalarType, Statement,
+};
 use std::collections::HashMap;
 
 impl LoweringContext {
@@ -172,8 +174,13 @@ impl LoweringContext {
         &mut self,
         name: &str,
         struct_name: &str,
+        initializer: Option<&LocalStructInitializer>,
     ) -> CompileResult<()> {
-        self.declare_struct_object(name, struct_name).map(|_| ())
+        let slot = self.declare_struct_object(name, struct_name)?;
+        if let Some(initializer) = initializer {
+            self.lower_local_struct_initializer(name, struct_name, slot, initializer)?;
+        }
+        Ok(())
     }
 
     pub(in crate::ir) fn lower_block(&mut self, statements: &[Statement]) -> CompileResult<()> {
