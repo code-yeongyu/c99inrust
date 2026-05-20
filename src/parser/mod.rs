@@ -5,6 +5,7 @@ mod anonymous_union;
 mod builtin_field;
 mod builtin_layout;
 mod doom_layout;
+mod enum_declarations;
 mod external_declarations;
 mod global_struct_initializer;
 mod global_struct_object;
@@ -20,6 +21,7 @@ mod typedef_referent;
 
 use anonymous_union::anonymous_union_struct_name;
 use builtin_layout::builtin_struct_layouts;
+use enum_declarations::{enum_typedef_name, parse_enum_constants};
 use external_declarations::{
     classify_external_item, function_definition_has_supported_signature, function_definition_name,
     function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
@@ -2183,23 +2185,6 @@ fn integer_parameter_type_with_typedefs(
     }
 }
 
-fn parse_enum_constants(
-    tokens: &[Token],
-    known_constants: &[Constant],
-) -> CompileResult<Vec<Constant>> {
-    if !tokens_start_enum_declaration(tokens) {
-        return Ok(Vec::new());
-    }
-    let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
-        return Ok(Vec::new());
-    };
-    let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
-        return Err(CompileError::new("unterminated enum declaration")
-            .at(tokens[open_brace].line, tokens[open_brace].column));
-    };
-    parse_enum_body(&tokens[open_brace + 1..close_brace], known_constants)
-}
-
 fn parse_struct_typedef(
     tokens: &[Token],
     known_structs: &[StructLayout],
@@ -2771,75 +2756,6 @@ fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> 
     offset
         .checked_add(alignment - remainder)
         .ok_or_else(|| CompileError::new("struct offset overflow"))
-}
-
-fn parse_enum_body(tokens: &[Token], known_constants: &[Constant]) -> CompileResult<Vec<Constant>> {
-    let mut constants = Vec::new();
-    let mut available_constants = known_constants.to_vec();
-    let mut value = 0i64;
-    let mut index = 0usize;
-    while index < tokens.len() {
-        if token_is_punctuator(&tokens[index], ",") {
-            index += 1;
-            continue;
-        }
-        let Some(name) = token_identifier(&tokens[index]) else {
-            return Ok(Vec::new());
-        };
-        index += 1;
-        if tokens
-            .get(index)
-            .is_some_and(|token| token_is_punctuator(token, "="))
-        {
-            let initializer_start = index + 1;
-            let initializer_end = next_enum_separator(tokens, initializer_start);
-            value = parse_integer_initializer_with_constants(
-                &tokens[initializer_start..initializer_end],
-                &available_constants,
-            )?;
-            index = initializer_end;
-        }
-        let constant = Constant {
-            name: name.to_owned(),
-            value,
-        };
-        available_constants.push(constant.clone());
-        constants.push(constant);
-        value = value
-            .checked_add(1)
-            .ok_or_else(|| CompileError::new("enum constant overflow"))?;
-    }
-    Ok(constants)
-}
-
-fn tokens_start_enum_declaration(tokens: &[Token]) -> bool {
-    matches!(
-        tokens.first().map(|token| &token.kind),
-        Some(TokenKind::Keyword(Keyword::Enum))
-    ) || matches!(
-        (
-            tokens.first().map(|token| &token.kind),
-            tokens.get(1).map(|token| &token.kind)
-        ),
-        (
-            Some(TokenKind::Keyword(Keyword::Typedef)),
-            Some(TokenKind::Keyword(Keyword::Enum))
-        )
-    )
-}
-
-fn enum_typedef_name(tokens: &[Token]) -> Option<String> {
-    if !token_has_keyword(tokens, Keyword::Typedef) || !token_has_keyword(tokens, Keyword::Enum) {
-        return None;
-    }
-    last_top_level_identifier(tokens)
-}
-
-fn next_enum_separator(tokens: &[Token], start: usize) -> usize {
-    tokens[start..]
-        .iter()
-        .position(|token| token_is_punctuator(token, ","))
-        .map_or(tokens.len(), |offset| start + offset)
 }
 
 fn parse_supported_global_declaration(
