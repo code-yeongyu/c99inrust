@@ -107,7 +107,14 @@ impl Parser<'_> {
                     self.advance();
                     if self.check_punctuator(".") {
                         self.advance();
-                        let fractional = self.expect_integer()?;
+                        let fractional = if matches!(
+                            self.peek().map(|token| &token.kind),
+                            Some(TokenKind::Integer(_))
+                        ) {
+                            self.expect_integer()?
+                        } else {
+                            0
+                        };
                         let exponent = self.decimal_exponent_suffix()?;
                         return Ok(Expr::DoubleLiteral(format!(
                             "{value}.{fractional}{exponent}"

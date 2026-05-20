@@ -8,7 +8,7 @@ use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_punctuator_index,
 };
-use super::type_recognition::supported_typedef_scalar;
+use super::type_recognition::{supported_cast_type, supported_typedef_scalar};
 use super::{Constant, FieldType, ScalarType, StructField, StructLayout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +65,9 @@ pub(super) fn struct_field_type(
             referent: pointer_referent_from_specifiers(tokens),
         });
     }
-    if let Some(scalar_type) = integer_parameter_type(tokens) {
+    if let Some(scalar_type) =
+        integer_parameter_type(tokens).or_else(|| supported_cast_type(tokens))
+    {
         return Some(FieldType::Scalar(scalar_field_type(tokens, scalar_type)));
     }
     let name = tokens.iter().rev().find_map(token_identifier)?;

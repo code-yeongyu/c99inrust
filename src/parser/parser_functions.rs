@@ -23,8 +23,8 @@ impl Parser<'_> {
 
     pub(super) fn function(&mut self) -> CompileResult<Function> {
         let (return_type, name) = self.function_signature()?;
-        let (parameters, is_variadic) = self.parameter_list()?;
-        self.skip_old_style_parameter_declarations()?;
+        let (mut parameters, is_variadic) = self.parameter_list()?;
+        self.apply_old_style_parameter_declarations(&mut parameters)?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
         while !self.check_punctuator("}") {
@@ -140,7 +140,10 @@ impl Parser<'_> {
         Ok(false)
     }
 
-    fn skip_old_style_parameter_declarations(&mut self) -> CompileResult<()> {
+    fn apply_old_style_parameter_declarations(
+        &mut self,
+        parameters: &mut [Parameter],
+    ) -> CompileResult<()> {
         while !self.check_end() && !self.check_punctuator("{") {
             let tokens = &self.tokens[self.index..];
             let Some(semicolon_index) = top_level_punctuator_index(tokens, ";") else {
@@ -148,6 +151,25 @@ impl Parser<'_> {
                     "unterminated old-style parameter declaration",
                 ));
             };
+            let declaration = &tokens[..semicolon_index];
+            let Some(name) = parameter_name(declaration) else {
+                return Err(CompileError::new(
+                    "unsupported old-style parameter declaration",
+                ));
+            };
+            let scalar_type = parameter_scalar_type(
+                declaration,
+                self.known_scalar_typedefs,
+                self.known_pointer_typedefs,
+            )
+            .ok_or_else(|| CompileError::new("unsupported old-style parameter declaration"))?;
+            if let Some(parameter) = parameters
+                .iter_mut()
+                .find(|parameter| parameter.name == name)
+            {
+                parameter.scalar_type = scalar_type;
+                parameter.referent = pointer_referent_type(declaration);
+            }
             self.index += semicolon_index + 1;
         }
         Ok(())

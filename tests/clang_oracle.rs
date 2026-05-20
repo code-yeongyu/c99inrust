@@ -22,6 +22,8 @@ mod deep_c99_requested_more;
 mod deep_c99_requested_more_eval;
 #[path = "clang_oracle/deep_c99_requested_more_layout.rs"]
 mod deep_c99_requested_more_layout;
+#[path = "clang_oracle/deep_c99_requested_ultra.rs"]
+mod deep_c99_requested_ultra;
 #[path = "clang_oracle/doom_platform_layouts.rs"]
 mod doom_platform_layouts;
 #[path = "clang_oracle/functions_and_signatures.rs"]
