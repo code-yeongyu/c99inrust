@@ -27,6 +27,7 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             })?),
             GlobalBinding::Int,
         )),
+        GlobalInitializer::LongLong(value) => Ok(lower_long_long_global_initializer(*value)),
         GlobalInitializer::IntArray(values) => Ok((
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntArray,
@@ -108,6 +109,15 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
+}
+
+const fn lower_long_long_global_initializer(
+    value: i64,
+) -> (LoweredGlobalInitializer, GlobalBinding) {
+    (
+        LoweredGlobalInitializer::LongLong(value),
+        GlobalBinding::LongLong,
+    )
 }
 
 fn lower_unsigned_char_global_initializer(

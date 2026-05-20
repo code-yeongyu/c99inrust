@@ -93,6 +93,15 @@ pub(super) fn global_specifiers_are_extern_int(tokens: &[Token]) -> bool {
     token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, true, &[])
 }
 
+pub(super) fn global_specifiers_are_long_long(tokens: &[Token]) -> bool {
+    !token_has_keyword(tokens, Keyword::Extern)
+        && global_specifiers_are_long_long_like(tokens, false)
+}
+
+pub(super) fn global_specifiers_are_extern_long_long(tokens: &[Token]) -> bool {
+    token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_long_long_like(tokens, true)
+}
+
 pub(super) fn global_specifiers_are_short(tokens: &[Token]) -> bool {
     global_specifiers_are_int_like(tokens, true, &[])
         && tokens
@@ -125,6 +134,25 @@ fn global_specifiers_are_int_like(
         }
     }
     saw_int
+}
+
+fn global_specifiers_are_long_long_like(tokens: &[Token], allow_extern: bool) -> bool {
+    let mut long_count = 0usize;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Extern) if allow_extern => {}
+            TokenKind::Keyword(
+                Keyword::Static
+                | Keyword::Const
+                | Keyword::Volatile
+                | Keyword::Signed
+                | Keyword::Int,
+            ) => {}
+            TokenKind::Keyword(Keyword::Long) => long_count += 1,
+            _ => return false,
+        }
+    }
+    long_count > 0
 }
 
 pub(super) fn global_specifiers_are_double(tokens: &[Token]) -> bool {

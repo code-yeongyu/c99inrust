@@ -94,6 +94,7 @@ pub(in crate::ir) fn lower_extern_global_binding(
             }
         }
         GlobalInitializer::Int(_)
+        | GlobalInitializer::LongLong(_)
         | GlobalInitializer::IntArray(_)
         | GlobalInitializer::ShortArray { .. }
         | GlobalInitializer::IntMatrix { .. }

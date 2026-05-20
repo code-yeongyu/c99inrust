@@ -58,6 +58,7 @@ pub enum GlobalInitializer {
         struct_name: String,
     },
     Int(i64),
+    LongLong(i64),
     IntArray(Vec<i32>),
     ShortArray {
         values: Vec<i32>,

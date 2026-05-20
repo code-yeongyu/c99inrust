@@ -27,6 +27,7 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::Int(_) | GlobalInitializer::IntConstant(_) => {
             scalar_size_for_layout(ScalarType::Int)
         }
+        GlobalInitializer::LongLong(_) => scalar_size_for_layout(ScalarType::LongLong),
         GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
         | GlobalInitializer::PointerSubscriptAddress { .. } => {

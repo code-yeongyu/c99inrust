@@ -1,8 +1,8 @@
 use super::{
     CompileError, CompileResult, Expr, Keyword, Parser, ScalarType, Token, TokenKind,
-    function_pointer_cast_type, lvalue_from_expr, matching_top_level_paren,
-    pointer_referent_from_specifiers, sizeof_type, supported_cast_type_with_typedefs,
-    token_identifier, token_is_punctuator,
+    function_pointer_cast_type, lvalue_from_expr, matching_top_level_bracket,
+    matching_top_level_paren, pointer_referent_from_specifiers, sizeof_type,
+    supported_cast_type_with_typedefs, token_identifier, top_level_punctuator_index,
 };
 
 impl Parser<'_> {
@@ -10,10 +10,7 @@ impl Parser<'_> {
         self.expect_keyword(Keyword::Sizeof)?;
         if self.check_punctuator("(") {
             let start = self.index + 1;
-            let close = self.tokens[start..]
-                .iter()
-                .position(|token| token_is_punctuator(token, ")"))
-                .map(|offset| start + offset);
+            let close = matching_top_level_paren(self.tokens, self.index);
             if let Some(close) = close
                 && let Some(size) = self.sizeof_type(&self.tokens[start..close])
             {
@@ -29,14 +26,15 @@ impl Parser<'_> {
     }
 
     pub(super) fn sizeof_type(&self, tokens: &[Token]) -> Option<usize> {
-        if let Some(size) = sizeof_type(tokens) {
-            return Some(size);
-        }
-        let name = tokens.iter().rev().find_map(token_identifier)?;
-        self.known_structs
-            .iter()
-            .find(|layout| layout.name == name)
-            .map(|layout| layout.size)
+        let (base_tokens, length) = type_array_suffix(tokens).unwrap_or((tokens, 1));
+        let base_size = sizeof_type(base_tokens).or_else(|| {
+            let name = base_tokens.iter().rev().find_map(token_identifier)?;
+            self.known_structs
+                .iter()
+                .find(|layout| layout.name == name)
+                .map(|layout| layout.size)
+        })?;
+        base_size.checked_mul(length)
     }
 
     pub(super) fn postfix(&mut self) -> CompileResult<Expr> {
@@ -123,7 +121,13 @@ impl Parser<'_> {
                     if self.check_punctuator(".") {
                         self.advance();
                         let fractional = self.expect_integer()?;
-                        return Ok(Expr::DoubleLiteral(format!("{value}.{fractional}")));
+                        let exponent = self.decimal_exponent_suffix()?;
+                        return Ok(Expr::DoubleLiteral(format!(
+                            "{value}.{fractional}{exponent}"
+                        )));
+                    }
+                    if let Some(exponent) = self.optional_decimal_exponent_suffix()? {
+                        return Ok(Expr::DoubleLiteral(format!("{value}{exponent}")));
                     }
                     Ok(Expr::Integer(value))
                 }
@@ -159,7 +163,8 @@ impl Parser<'_> {
                 TokenKind::Punctuator(value) if value == "." => {
                     self.advance();
                     let fractional = self.expect_integer()?;
-                    Ok(Expr::DoubleLiteral(format!("0.{fractional}")))
+                    let exponent = self.decimal_exponent_suffix()?;
+                    Ok(Expr::DoubleLiteral(format!("0.{fractional}{exponent}")))
                 }
                 TokenKind::Punctuator(value) if value == "(" => {
                     self.advance();
@@ -190,4 +195,64 @@ impl Parser<'_> {
             self.expect_punctuator(",")?;
         }
     }
+
+    fn decimal_exponent_suffix(&mut self) -> CompileResult<String> {
+        Ok(self.optional_decimal_exponent_suffix()?.unwrap_or_default())
+    }
+
+    fn optional_decimal_exponent_suffix(&mut self) -> CompileResult<Option<String>> {
+        let Some(Token {
+            kind: TokenKind::Identifier(value),
+            ..
+        }) = self.peek()
+        else {
+            return Ok(None);
+        };
+        let value = value.clone();
+        let Some(rest) = value.strip_prefix('e').or_else(|| value.strip_prefix('E')) else {
+            return Ok(None);
+        };
+        self.advance();
+        if !rest.is_empty() {
+            return rest
+                .chars()
+                .all(|current| current.is_ascii_digit())
+                .then(|| Some(format!("e{rest}")))
+                .ok_or_else(|| CompileError::new("invalid decimal exponent"));
+        }
+        let sign = match self.peek() {
+            Some(Token {
+                kind: TokenKind::Punctuator(value),
+                ..
+            }) if value == "+" || value == "-" => {
+                let sign = value.clone();
+                self.advance();
+                sign
+            }
+            _ => String::new(),
+        };
+        let exponent = self.expect_integer()?;
+        Ok(Some(format!("e{sign}{exponent}")))
+    }
+}
+
+fn type_array_suffix(tokens: &[Token]) -> Option<(&[Token], usize)> {
+    let open = top_level_punctuator_index(tokens, "[")?;
+    let close = matching_top_level_bracket(tokens, open)?;
+    if close + 1 != tokens.len() {
+        return None;
+    }
+    let [
+        Token {
+            kind: TokenKind::Integer(length),
+            ..
+        },
+    ] = &tokens[open + 1..close]
+    else {
+        return None;
+    };
+    usize::try_from(*length)
+        .ok()
+        .filter(|length| *length > 0)
+        .map(|length| (&tokens[..open], length))
 }

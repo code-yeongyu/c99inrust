@@ -16,6 +16,7 @@ pub struct LoweredGlobal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredGlobalInitializer {
     Int(i32),
+    LongLong(i64),
     IntArray(Vec<i32>),
     ShortArray(Vec<i32>),
     PointerNull,

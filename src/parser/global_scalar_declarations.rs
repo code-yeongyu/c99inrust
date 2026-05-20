@@ -4,8 +4,9 @@ use crate::front_end::lexer::Token;
 use super::declarator_types::pointer_referent_from_specifiers;
 use super::global_int_initializers::parse_global_int_initializer;
 use super::global_specifiers::{
-    global_specifiers_are_extern_int, global_specifiers_are_extern_pointer,
-    global_specifiers_are_int, global_specifiers_are_pointer, global_struct_specifier_name,
+    global_specifiers_are_extern_int, global_specifiers_are_extern_long_long,
+    global_specifiers_are_extern_pointer, global_specifiers_are_int,
+    global_specifiers_are_long_long, global_specifiers_are_pointer, global_struct_specifier_name,
 };
 use super::global_string_initializers::parse_string_initializer;
 use super::integer_initializer::{
@@ -15,7 +16,10 @@ use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_comma_ranges, top_level_punctuator_index,
 };
-use super::{Constant, Global, GlobalInitializer, ScalarType, StructLayout};
+use super::{
+    Constant, Global, GlobalInitializer, ScalarType, StructLayout,
+    parse_integer_initializer_with_context,
+};
 
 pub(super) fn parse_global_extern_scalar(
     tokens: &[Token],
@@ -41,6 +45,8 @@ pub(super) fn parse_global_extern_scalar(
         GlobalInitializer::ExternStructObject { struct_name }
     } else if global_specifiers_are_extern_int(specifiers) {
         GlobalInitializer::Extern(ScalarType::Int)
+    } else if global_specifiers_are_extern_long_long(specifiers) {
+        GlobalInitializer::Extern(ScalarType::LongLong)
     } else {
         return Ok(None);
     };
@@ -160,7 +166,9 @@ pub(super) fn parse_global_int(
     let Some(name_index) = previous_identifier_index(declaration, end_index) else {
         return Ok(None);
     };
-    if !global_specifiers_are_int(&declaration[..name_index], known_structs) {
+    let specifiers = &declaration[..name_index];
+    let is_long_long = global_specifiers_are_long_long(specifiers);
+    if !is_long_long && !global_specifiers_are_int(specifiers, known_structs) {
         return Ok(None);
     }
     if declaration
@@ -169,7 +177,18 @@ pub(super) fn parse_global_int(
     {
         return Ok(None);
     }
-    let initializer = if end_index == declaration.len() {
+    let initializer = if is_long_long {
+        let value = if end_index == declaration.len() {
+            0
+        } else {
+            parse_integer_initializer_with_context(
+                &declaration[end_index + 1..],
+                constants,
+                sizeof_symbols,
+            )?
+        };
+        GlobalInitializer::LongLong(value)
+    } else if end_index == declaration.len() {
         GlobalInitializer::Int(0)
     } else {
         parse_global_int_initializer(&declaration[end_index + 1..], constants, sizeof_symbols)?

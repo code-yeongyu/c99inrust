@@ -42,6 +42,7 @@ mod parser_statement_dispatch;
 mod parser_token_stream;
 mod program;
 mod scalar_layout;
+mod struct_anonymous_fields;
 mod struct_bitfields;
 mod struct_fields;
 mod struct_layout_helpers;
@@ -95,9 +96,10 @@ pub use syntax::{
     BinaryOp, Expr, LValue, LocalCharArrayInitializer, Statement, SwitchCase, UnaryOp,
 };
 use token_scan::{
-    matching_top_level_brace, matching_top_level_paren, parameter_is_variadic, parameter_is_void,
-    previous_identifier_index, token_identifier, token_is_assignment_operator, token_is_keyword,
-    token_is_punctuator, top_level_punctuator_index,
+    matching_top_level_brace, matching_top_level_bracket, matching_top_level_paren,
+    parameter_is_variadic, parameter_is_void, previous_identifier_index, token_identifier,
+    token_is_assignment_operator, token_is_keyword, token_is_punctuator,
+    top_level_punctuator_index,
 };
 pub use translation_unit_parser::parse_supported_translation_unit;
 use type_recognition::{

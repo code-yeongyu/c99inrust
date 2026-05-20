@@ -139,6 +139,12 @@ pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String>
     }
     if tokens
         .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Long)))
+    {
+        return Some("long long".to_owned());
+    }
+    if tokens
+        .iter()
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Void)))
     {
         return Some("void".to_owned());

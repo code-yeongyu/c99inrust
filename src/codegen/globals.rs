@@ -26,6 +26,11 @@ pub(in crate::codegen) fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.long {value}\n")?;
             }
+            LoweredGlobalInitializer::LongLong(value) => {
+                assembly.push_str(".p2align 3\n");
+                write_assembly!(assembly, "{label}:\n")?;
+                write_assembly!(assembly, "\t.quad {value}\n")?;
+            }
             LoweredGlobalInitializer::IntArray(values) => {
                 if values.iter().all(|value| *value == 0) {
                     let byte_len = values
