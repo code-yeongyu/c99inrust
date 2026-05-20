@@ -9,6 +9,7 @@ mod enum_declarations;
 mod external_declarations;
 mod global_struct_initializer;
 mod global_struct_object;
+mod local_arrays;
 mod model;
 mod program;
 mod scalar_layout;
@@ -26,6 +27,10 @@ use external_declarations::{
     classify_external_item, function_definition_has_supported_signature, function_definition_name,
     function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
     function_prototype_name, pointer_return_function, top_level_function_open_paren,
+};
+use local_arrays::{
+    inferred_local_char_array_length, local_array_length, validate_local_char_array_initializer,
+    validate_local_char_array_initializer_size,
 };
 pub use model::{
     Constant, FieldType, Global, GlobalInitializer, GlobalStructInitializerAddress,
@@ -2703,49 +2708,6 @@ fn struct_layout_alignment(
         field_type_alignment(&field.field_type, known_structs)
             .map(|field_alignment| alignment.max(field_alignment))
     })
-}
-
-fn local_array_length(expr: &Expr, constants: &[Constant]) -> CompileResult<usize> {
-    let value = eval_integer_initializer_expr_with_constants(expr, constants)?.to_i64_trunc()?;
-    if value <= 0 {
-        return Err(CompileError::new("local char array size must be positive"));
-    }
-    usize::try_from(value).map_err(|_| CompileError::new("local char array size is too large"))
-}
-
-fn inferred_local_char_array_length(value: &str) -> CompileResult<usize> {
-    value
-        .len()
-        .checked_add(1)
-        .ok_or_else(|| CompileError::new("local char array size overflow"))
-}
-
-fn validate_local_char_array_initializer(value: &str, length: usize) -> CompileResult<()> {
-    if value.len() > length {
-        return Err(CompileError::new(
-            "local char array initializer is too large",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_local_char_array_initializer_size(
-    initializer: &LocalCharArrayInitializer,
-    length: usize,
-) -> CompileResult<()> {
-    match initializer {
-        LocalCharArrayInitializer::StringLiteral(value) => {
-            validate_local_char_array_initializer(value, length)
-        }
-        LocalCharArrayInitializer::Bytes(values) => {
-            if values.len() > length {
-                return Err(CompileError::new(
-                    "local char array initializer is too large",
-                ));
-            }
-            Ok(())
-        }
-    }
 }
 
 fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> {
