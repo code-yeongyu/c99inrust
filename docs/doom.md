@@ -349,8 +349,17 @@ ok=62
 fail=0
 ```
 
-Evidence is recorded in
-`docs/qa/2026-05-18-doom-translation-unit.md`.
+The same compile surface was rechecked after the deeper C99 oracle expansion on
+commit `deea66e`:
+
+```text
+scan=/tmp/c99inrust-doom-compile-scan-deea66e.txt
+ok=62
+fail=0
+```
+
+Evidence is recorded in `docs/qa/2026-05-18-doom-translation-unit.md` and
+`docs/qa/2026-05-21-doom-compile-scan.md`.
 
 Repeat the compile-progress scan with:
 

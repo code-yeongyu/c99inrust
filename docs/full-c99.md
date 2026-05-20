@@ -15,13 +15,20 @@ Each new language feature needs:
 3. A target note when behavior is implementation-defined or undefined by C.
 4. Doom-source evidence when the feature is required by `linuxdoom-1.10`.
 
-The first oracle tests live in `tests/clang_oracle.rs`. They compile a C snippet
-with both compilers, link both outputs through the platform toolchain, run both
-executables, and compare exit codes. Current covered slices include constant
-returns, arithmetic precedence, local `int` declarations/assignments, and
-`if`/`else`, `while`, and `for` control flow over integer comparisons and
-short-circuit `&&`/`||`, plus direct zero-argument calls between supported
-`int` functions.
+The oracle harness lives in `tests/clang_oracle.rs` and split modules under
+`tests/clang_oracle/`. Each case compiles a C snippet with both compilers, links
+both outputs through the platform toolchain, runs both executables, and compares
+observable stdout plus exit code. The suite currently contains 174 oracle tests.
+
+Current covered slices include fundamentals, control flow, calls, multi-file
+extern linkage, Doom-shaped globals, pointer and array operations, undefined or
+implementation-defined C behavior captured in Clang-compatible mode, and deeper
+C99 edges such as sequence points, aliasing/type punning, K&R definitions,
+function-pointer arrays, struct/union layouts, VLA shapes, `_Bool`, enums,
+Duff-style fallthrough, `goto` out of VLA scope, volatile access, macro
+stringification/token pasting/variadics, predefined macros, trigraphs/digraphs,
+wide-character literals, signed bitwise operations, initializer nesting,
+`sizeof`, char signedness, `long long`, decimal floats, and hex float constants.
 
 ## Undefined Behavior Policy
 
