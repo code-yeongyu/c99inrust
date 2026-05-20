@@ -63,6 +63,7 @@ struct PointerSubscriptExpr<'a> {
     index: &'a LoweredExpr,
     element_type: ScalarType,
     element_byte_size: usize,
+    element_unsigned: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +85,7 @@ struct PointerFieldExpr<'a> {
     offset: usize,
     scalar_type: ScalarType,
     byte_size: usize,
+    is_unsigned: bool,
 }
 
 const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
@@ -284,6 +286,21 @@ fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 emit_int_values(values, assembly)?;
             }
+            LoweredGlobalInitializer::ShortArray(values) => {
+                if values.iter().all(|value| *value == 0) {
+                    let byte_len = values
+                        .len()
+                        .checked_mul(2)
+                        .ok_or_else(|| CompileError::new("global short-array size overflow"))?;
+                    assembly.push_str(".p2align 1\n");
+                    write_assembly!(assembly, "{label}:\n")?;
+                    write_assembly!(assembly, "\t.zero {byte_len}\n")?;
+                    continue;
+                }
+                assembly.push_str(".p2align 1\n");
+                write_assembly!(assembly, "{label}:\n")?;
+                emit_short_values(values, assembly)?;
+            }
             LoweredGlobalInitializer::PointerNull => {
                 assembly.push_str(".p2align 3\n");
                 write_assembly!(assembly, "{label}:\n")?;
@@ -400,6 +417,21 @@ fn emit_pointer_name_array_global(
 
 fn emit_int_values(values: &[i32], assembly: &mut String) -> CompileResult<()> {
     assembly.push_str("\t.long ");
+    let mut first = true;
+    for value in values {
+        if first {
+            first = false;
+        } else {
+            assembly.push(',');
+        }
+        write_assembly!(assembly, "{value}")?;
+    }
+    assembly.push('\n');
+    Ok(())
+}
+
+fn emit_short_values(values: &[i32], assembly: &mut String) -> CompileResult<()> {
+    assembly.push_str("\t.short ");
     let mut first = true;
     for value in values {
         if first {
@@ -1053,12 +1085,14 @@ fn emit_aarch64_memory_expr(
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => emit_aarch64_load_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
                 element_byte_size: *element_byte_size,
+                element_unsigned: *element_unsigned,
             },
             temporary_base,
             depth,
@@ -1070,12 +1104,14 @@ fn emit_aarch64_memory_expr(
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => emit_aarch64_load_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
                 byte_size: *byte_size,
+                is_unsigned: *is_unsigned,
             },
             temporary_base,
             depth,
@@ -1658,6 +1694,9 @@ fn emit_aarch64_load_pointer_subscript(
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tldrb w0, [x16, w0, sxtw]\n");
     }
+    if subscript.element_byte_size == 2 && width == ValueWidth::I32 && subscript.element_unsigned {
+        return write_assembly!(assembly, "\tldrh w0, [x16, w0, sxtw #1]\n");
+    }
     if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tldrsh w0, [x16, w0, sxtw #1]\n");
     }
@@ -1770,12 +1809,14 @@ fn emit_aarch64_assign(
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => emit_aarch64_store_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
                 element_byte_size: *element_byte_size,
+                element_unsigned: *element_unsigned,
             },
             value,
             temporary_base,
@@ -1788,12 +1829,14 @@ fn emit_aarch64_assign(
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => emit_aarch64_store_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
                 byte_size: *byte_size,
+                is_unsigned: *is_unsigned,
             },
             value,
             temporary_base,
@@ -1834,12 +1877,14 @@ fn emit_aarch64_post_increment(
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => emit_aarch64_post_increment_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
                 byte_size: *byte_size,
+                is_unsigned: *is_unsigned,
             },
             temporary_base,
             depth,
@@ -1852,12 +1897,14 @@ fn emit_aarch64_post_increment(
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => emit_aarch64_post_increment_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
                 element_byte_size: *element_byte_size,
+                element_unsigned: *element_unsigned,
             },
             temporary_base,
             depth,
@@ -1903,7 +1950,12 @@ fn emit_aarch64_post_increment_pointer_subscript(
     )?;
     assembly.push_str("\tmov w17, w0\n");
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
-    emit_aarch64_load_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
+    emit_aarch64_load_pointer_subscript_result(
+        subscript.element_byte_size,
+        width,
+        subscript.element_unsigned,
+        assembly,
+    )?;
     emit_aarch64_store_temporary(width, value_offset, assembly)?;
     emit_aarch64_increment_result(width, increment, assembly)?;
     emit_aarch64_store_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
@@ -1931,7 +1983,14 @@ fn emit_aarch64_post_increment_pointer_field(
     )?;
     emit_aarch64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
-    emit_aarch64_load_sized_field(field.byte_size, width, "x16", field.offset, assembly)?;
+    emit_aarch64_load_sized_field(
+        field.byte_size,
+        width,
+        field.is_unsigned,
+        "x16",
+        field.offset,
+        assembly,
+    )?;
     emit_aarch64_store_temporary(width, value_offset, assembly)?;
     emit_aarch64_increment_result(width, increment, assembly)?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
@@ -2021,10 +2080,14 @@ fn emit_aarch64_store_pointer_subscript(
 fn emit_aarch64_load_pointer_subscript_result(
     element_byte_size: usize,
     width: ValueWidth,
+    element_unsigned: bool,
     assembly: &mut String,
 ) -> CompileResult<()> {
     if element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tldrb w0, [x16, w17, sxtw]\n");
+    }
+    if element_byte_size == 2 && width == ValueWidth::I32 && element_unsigned {
+        return write_assembly!(assembly, "\tldrh w0, [x16, w17, sxtw #1]\n");
     }
     if element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tldrsh w0, [x16, w17, sxtw #1]\n");
@@ -2187,7 +2250,14 @@ fn emit_aarch64_load_pointer_field(
         labels,
         assembly,
     )?;
-    emit_aarch64_load_sized_field(field.byte_size, width, "x0", field.offset, assembly)
+    emit_aarch64_load_sized_field(
+        field.byte_size,
+        width,
+        field.is_unsigned,
+        "x0",
+        field.offset,
+        assembly,
+    )
 }
 
 fn emit_aarch64_store_pointer_field(
@@ -2587,12 +2657,14 @@ fn emit_x86_64_global_or_assignment_expr(
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => emit_x86_64_load_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
                 element_byte_size: *element_byte_size,
+                element_unsigned: *element_unsigned,
             },
             temporary_base,
             depth,
@@ -2600,17 +2672,39 @@ fn emit_x86_64_global_or_assignment_expr(
             labels,
             assembly,
         ),
+        _ => emit_x86_64_pointer_field_or_assignment_expr(
+            expr,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_x86_64_pointer_field_or_assignment_expr(
+    expr: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match expr {
         LoweredExpr::PointerField {
             pointer,
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => emit_x86_64_load_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
                 byte_size: *byte_size,
+                is_unsigned: *is_unsigned,
             },
             temporary_base,
             depth,
@@ -3350,6 +3444,9 @@ fn emit_x86_64_load_pointer_subscript(
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovzbl (%rcx,%rax,1), %eax\n");
     }
+    if subscript.element_byte_size == 2 && width == ValueWidth::I32 && subscript.element_unsigned {
+        return write_assembly!(assembly, "\tmovzwl (%rcx,%rax,2), %eax\n");
+    }
     if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovswl (%rcx,%rax,2), %eax\n");
     }
@@ -3469,7 +3566,14 @@ fn emit_x86_64_load_pointer_field(
         labels,
         assembly,
     )?;
-    emit_x86_64_load_sized_field(field.byte_size, width, "%rax", field.offset, assembly)
+    emit_x86_64_load_sized_field(
+        field.byte_size,
+        width,
+        field.is_unsigned,
+        "%rax",
+        field.offset,
+        assembly,
+    )
 }
 
 fn emit_x86_64_assign(
@@ -3507,6 +3611,28 @@ fn emit_x86_64_assign(
             )?;
             emit_x86_64_store_global(name, width, codegen_target, assembly)
         }
+        _ => emit_x86_64_assign_indirect(
+            target,
+            value,
+            temporary_base,
+            depth,
+            codegen_target,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_x86_64_assign_indirect(
+    target: &LoweredLValue,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    depth: usize,
+    codegen_target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    match target {
         LoweredLValue::GlobalByteSubscript { name, index } => {
             emit_x86_64_store_global_byte_subscript(
                 GlobalByteSubscriptExpr { name, index },
@@ -3545,12 +3671,14 @@ fn emit_x86_64_assign(
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => emit_x86_64_store_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
                 element_byte_size: *element_byte_size,
+                element_unsigned: *element_unsigned,
             },
             value,
             temporary_base,
@@ -3564,12 +3692,14 @@ fn emit_x86_64_assign(
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => emit_x86_64_store_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
                 byte_size: *byte_size,
+                is_unsigned: *is_unsigned,
             },
             value,
             temporary_base,
@@ -3578,6 +3708,9 @@ fn emit_x86_64_assign(
             labels,
             assembly,
         ),
+        LoweredLValue::Local { .. } | LoweredLValue::Global { .. } => Err(CompileError::new(
+            "internal error: expected indirect assignment target",
+        )),
     }
 }
 
@@ -3612,12 +3745,14 @@ fn emit_x86_64_post_increment(
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => emit_x86_64_post_increment_pointer_field(
             PointerFieldExpr {
                 pointer,
                 offset: *offset,
                 scalar_type: *scalar_type,
                 byte_size: *byte_size,
+                is_unsigned: *is_unsigned,
             },
             temporary_base,
             depth,
@@ -3631,12 +3766,14 @@ fn emit_x86_64_post_increment(
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => emit_x86_64_post_increment_pointer_subscript(
             PointerSubscriptExpr {
                 pointer,
                 index,
                 element_type: *element_type,
                 element_byte_size: *element_byte_size,
+                element_unsigned: *element_unsigned,
             },
             temporary_base,
             depth,
@@ -3687,7 +3824,12 @@ fn emit_x86_64_post_increment_pointer_subscript(
     assembly.push_str("\tcltq\n");
     assembly.push_str("\tmovq %rax, %rdx\n");
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
-    emit_x86_64_load_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
+    emit_x86_64_load_pointer_subscript_result(
+        subscript.element_byte_size,
+        width,
+        subscript.element_unsigned,
+        assembly,
+    )?;
     emit_x86_64_store_temporary(width, value_offset, assembly)?;
     emit_x86_64_increment_result(width, increment, assembly)?;
     emit_x86_64_store_pointer_subscript_result(subscript.element_byte_size, width, assembly)?;
@@ -3717,7 +3859,14 @@ fn emit_x86_64_post_increment_pointer_field(
     )?;
     emit_x86_64_store_temporary(ValueWidth::I64, base_offset, assembly)?;
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
-    emit_x86_64_load_sized_field(field.byte_size, width, "%rcx", field.offset, assembly)?;
+    emit_x86_64_load_sized_field(
+        field.byte_size,
+        width,
+        field.is_unsigned,
+        "%rcx",
+        field.offset,
+        assembly,
+    )?;
     emit_x86_64_store_temporary(width, value_offset, assembly)?;
     emit_x86_64_increment_result(width, increment, assembly)?;
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
@@ -3807,10 +3956,14 @@ fn emit_x86_64_store_pointer_subscript(
 fn emit_x86_64_load_pointer_subscript_result(
     element_byte_size: usize,
     width: ValueWidth,
+    element_unsigned: bool,
     assembly: &mut String,
 ) -> CompileResult<()> {
     if element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovzbl (%rcx,%rdx,1), %eax\n");
+    }
+    if element_byte_size == 2 && width == ValueWidth::I32 && element_unsigned {
+        return write_assembly!(assembly, "\tmovzwl (%rcx,%rdx,2), %eax\n");
     }
     if element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovswl (%rcx,%rdx,2), %eax\n");

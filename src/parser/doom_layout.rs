@@ -67,6 +67,7 @@ fn scalar_field(
         field_type: FieldType::Scalar(ScalarFieldType {
             scalar_type,
             byte_size,
+            is_unsigned: false,
         }),
         offset,
     }
@@ -84,6 +85,7 @@ fn array_field(
         field_type: FieldType::Array {
             element_type,
             element_size,
+            element_unsigned: false,
             length,
             columns: None,
         },

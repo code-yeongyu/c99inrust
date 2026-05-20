@@ -7,9 +7,13 @@ use crate::parser::{
     StructLayout, SwitchCase, UnaryOp,
 };
 
+mod builtin_calls;
+mod call_args;
 mod doom_alloc;
 mod local_array;
 mod pointer_arithmetic;
+mod pointer_referent;
+mod sizeof_expr;
 mod struct_initializer;
 
 const POINTER_REFERENT: &str = "*";
@@ -32,6 +36,7 @@ pub struct LoweredGlobal {
 pub enum LoweredGlobalInitializer {
     Int(i32),
     IntArray(Vec<i32>),
+    ShortArray(Vec<i32>),
     PointerNull,
     PointerString(String),
     PointerGlobalOffset {
@@ -161,6 +166,7 @@ pub enum LoweredExpr {
         index: Box<Self>,
         element_type: ScalarType,
         element_byte_size: usize,
+        element_unsigned: bool,
     },
     PointerOffset {
         pointer: Box<Self>,
@@ -172,6 +178,7 @@ pub enum LoweredExpr {
         offset: usize,
         scalar_type: ScalarType,
         byte_size: usize,
+        is_unsigned: bool,
     },
     PointerFieldAddress {
         pointer: Box<Self>,
@@ -241,12 +248,14 @@ pub enum LoweredLValue {
         index: Box<LoweredExpr>,
         element_type: ScalarType,
         element_byte_size: usize,
+        element_unsigned: bool,
     },
     PointerField {
         pointer: Box<LoweredExpr>,
         offset: usize,
         scalar_type: ScalarType,
         byte_size: usize,
+        is_unsigned: bool,
     },
 }
 
@@ -325,10 +334,19 @@ fn lower_extern_global_binding(
             referent: referent.clone(),
         },
         GlobalInitializer::ExternIntArray => GlobalBinding::IntArray,
-        GlobalInitializer::ExternPointerArray { referent } => GlobalBinding::PointerArray {
-            referent: referent.clone(),
-            columns: None,
+        GlobalInitializer::ExternShortArray {
+            is_unsigned,
+            columns,
+        } => GlobalBinding::ShortArray {
+            is_unsigned: *is_unsigned,
+            columns: *columns,
         },
+        GlobalInitializer::ExternPointerArray { referent, columns } => {
+            GlobalBinding::PointerArray {
+                referent: referent.clone(),
+                columns: *columns,
+            }
+        }
         GlobalInitializer::ExternUnsignedCharArray => GlobalBinding::UnsignedCharArray,
         GlobalInitializer::ExternUnsignedCharMatrix { columns } => {
             GlobalBinding::UnsignedCharMatrix { columns: *columns }
@@ -355,6 +373,7 @@ fn lower_extern_global_binding(
         }
         GlobalInitializer::Int(_)
         | GlobalInitializer::IntArray(_)
+        | GlobalInitializer::ShortArray { .. }
         | GlobalInitializer::IntMatrix { .. }
         | GlobalInitializer::DoubleArray { .. }
         | GlobalInitializer::IntConstant(_)
@@ -395,6 +414,7 @@ fn lower_defined_global_initializer(
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntArray,
         )),
+        GlobalInitializer::ShortArray { .. } => lower_short_array_global_initializer(global),
         GlobalInitializer::IntMatrix { values, columns } => Ok((
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntMatrix { columns: *columns },
@@ -460,6 +480,7 @@ fn lower_defined_global_initializer(
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
+        | GlobalInitializer::ExternShortArray { .. }
         | GlobalInitializer::ExternPointerArray { .. }
         | GlobalInitializer::ExternUnsignedCharArray
         | GlobalInitializer::ExternUnsignedCharMatrix { .. }
@@ -468,6 +489,26 @@ fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
+}
+
+fn lower_short_array_global_initializer(
+    global: &Global,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    let GlobalInitializer::ShortArray {
+        values,
+        is_unsigned,
+        columns,
+    } = &global.initializer
+    else {
+        return Err(CompileError::new("expected short-array global initializer"));
+    };
+    Ok((
+        LoweredGlobalInitializer::ShortArray(values.clone()),
+        GlobalBinding::ShortArray {
+            is_unsigned: *is_unsigned,
+            columns: *columns,
+        },
+    ))
 }
 
 fn lower_pointer_array_initializer(
@@ -897,6 +938,11 @@ enum LocalBinding {
         slot: usize,
         length: usize,
     },
+    ShortArray {
+        slot: usize,
+        length: usize,
+        is_unsigned: bool,
+    },
     PointerArray {
         slot: usize,
         length: usize,
@@ -915,6 +961,10 @@ enum LocalBinding {
 enum GlobalBinding {
     Int,
     IntArray,
+    ShortArray {
+        is_unsigned: bool,
+        columns: Option<usize>,
+    },
     IntMatrix {
         columns: usize,
     },
@@ -958,6 +1008,7 @@ impl GlobalBinding {
             Self::Int => Some(ScalarType::Int),
             Self::Pointer { .. } => Some(ScalarType::Pointer),
             Self::IntArray
+            | Self::ShortArray { .. }
             | Self::IntMatrix { .. }
             | Self::DoubleArray
             | Self::PointerArray { .. }
@@ -972,6 +1023,7 @@ impl GlobalBinding {
         matches!(
             self,
             Self::IntArray
+                | Self::ShortArray { .. }
                 | Self::IntMatrix { .. }
                 | Self::DoubleArray
                 | Self::PointerArray { .. }
@@ -993,6 +1045,9 @@ struct StructAddress {
     offset: usize,
     struct_name: String,
 }
+
+type ArrayFieldSubscript = (LoweredExpr, ScalarType, usize, bool);
+type NestedArrayFieldSubscript = (LoweredExpr, LoweredExpr, ScalarType, usize, bool);
 
 struct LoweringContext {
     return_type: ReturnType,
@@ -1066,6 +1121,11 @@ impl LoweringContext {
                 length,
                 initializer,
             } => self.lower_local_int_array(name, *length, initializer.as_deref()),
+            Statement::LocalShortArray {
+                name,
+                length,
+                is_unsigned,
+            } => self.lower_local_short_array(name, *length, *is_unsigned),
             Statement::LocalPointerArray {
                 name,
                 length,
@@ -1258,6 +1318,16 @@ impl LoweringContext {
         Ok(())
     }
 
+    fn lower_local_short_array(
+        &mut self,
+        name: &str,
+        length: usize,
+        is_unsigned: bool,
+    ) -> CompileResult<()> {
+        self.declare_short_array(name, length, is_unsigned)?;
+        Ok(())
+    }
+
     fn lower_local_pointer_array(
         &mut self,
         name: &str,
@@ -1281,6 +1351,7 @@ impl LoweringContext {
                     index: Box::new(LoweredExpr::Integer(index)),
                     element_type: ScalarType::Pointer,
                     element_byte_size: scalar_size(ScalarType::Pointer),
+                    element_unsigned: false,
                 };
                 let value = self.lower_expr(value)?;
                 self.push_store(target, value);
@@ -1580,6 +1651,26 @@ impl LoweringContext {
         )
     }
 
+    fn declare_short_array(
+        &mut self,
+        name: &str,
+        length: usize,
+        is_unsigned: bool,
+    ) -> CompileResult<usize> {
+        let byte_size = local_short_array_byte_size(length)?;
+        self.declare_slot(
+            name,
+            ScalarType::Int,
+            byte_size,
+            2,
+            LocalBinding::ShortArray {
+                slot: self.local_slots.len(),
+                length,
+                is_unsigned,
+            },
+        )
+    }
+
     fn declare_pointer_array(&mut self, name: &str, length: usize) -> CompileResult<usize> {
         let byte_size = local_pointer_array_byte_size(length)?;
         self.declare_slot(
@@ -1739,18 +1830,12 @@ impl LoweringContext {
     }
 
     fn lower_call_arg(&self, callee: &str, index: usize, arg: &Expr) -> CompileResult<LoweredExpr> {
-        if callee == "Z_Malloc"
-            && index == 0
-            && let Some(arg) = doom_alloc::widened_size_arg(arg)
-        {
-            return self.lower_expr(&arg);
-        }
-        self.lower_expr(arg)
+        call_args::lower(self, callee, index, arg)
     }
 
     fn direct_call_return_type(&self, callee: &str) -> ScalarType {
         if self.pointer_return_functions.contains_key(callee)
-            || builtin_pointer_return_function(callee)
+            || builtin_calls::returns_pointer(callee)
         {
             ScalarType::Pointer
         } else {
@@ -1870,6 +1955,10 @@ impl LoweringContext {
             LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,
                 byte_size: local_int_array_byte_size(*length)?,
+            }),
+            LocalBinding::ShortArray { slot, length, .. } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: local_short_array_byte_size(*length)?,
             }),
             LocalBinding::PointerArray { slot, length } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,
@@ -2021,7 +2110,8 @@ impl LoweringContext {
                         }),
                         LocalBinding::CharArray { .. }
                         | LocalBinding::CharMatrix { .. }
-                        | LocalBinding::IntArray { .. } => Err(CompileError::new(
+                        | LocalBinding::IntArray { .. }
+                        | LocalBinding::ShortArray { .. } => Err(CompileError::new(
                             "assignment to local array is not supported",
                         )),
                         LocalBinding::PointerArray { .. } => Err(CompileError::new(
@@ -2120,87 +2210,79 @@ impl LoweringContext {
     }
 
     fn lower_sizeof_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
-        if let Expr::Identifier(name) = expr
-            && let Some(binding) = self.local_binding(name)
-        {
-            let size = match binding {
-                LocalBinding::Scalar { scalar_type, .. } => scalar_size(scalar_type),
-                LocalBinding::CharArray { length, .. } => length,
-                LocalBinding::CharMatrix { rows, columns, .. } => {
-                    local_char_matrix_byte_size(rows, columns)?
-                }
-                LocalBinding::IntArray { length, .. } => local_int_array_byte_size(length)?,
-                LocalBinding::PointerArray { length, .. } => local_pointer_array_byte_size(length)?,
-                LocalBinding::StructObject { byte_size, .. } => byte_size,
-                LocalBinding::VaList { .. } => scalar_size(ScalarType::VaList),
-            };
-            return i64::try_from(size)
-                .map(LoweredExpr::Integer)
-                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
-        }
-        if let Expr::Identifier(name) = expr
-            && let Some(GlobalBinding::StructArray {
-                byte_size,
-                length: Some(length),
-                ..
-            }) = self.global_bindings.get(name)
-        {
-            let size = byte_size
-                .checked_mul(*length)
-                .ok_or_else(|| CompileError::new("sizeof global array overflow"))?;
-            return i64::try_from(size)
-                .map(LoweredExpr::Integer)
-                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
-        }
-        if let Expr::Subscript { array, .. } = expr
-            && let Expr::Identifier(name) = array.as_ref()
-            && let Some(GlobalBinding::StructArray { byte_size, .. }) =
-                self.global_bindings.get(name)
-        {
-            return i64::try_from(*byte_size)
-                .map(LoweredExpr::Integer)
-                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
-        }
-        if let Expr::Identifier(name) = expr
-            && let Some(GlobalBinding::StructObject { byte_size, .. }) =
-                self.global_bindings.get(name)
-        {
-            return i64::try_from(*byte_size)
-                .map(LoweredExpr::Integer)
-                .map_err(|_| CompileError::new("sizeof result does not fit i64"));
-        }
-        let expr = self.lower_expr(expr)?;
-        let size = lowered_expr_scalar_type(&expr).map_or(4, scalar_size);
-        i64::try_from(size)
-            .map(LoweredExpr::Integer)
-            .map_err(|_| CompileError::new("sizeof result does not fit i64"))
+        sizeof_expr::lower(self, expr)
     }
 
     fn lower_subscript(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredExpr> {
+        if let Some(subscript) = self.lower_global_array_subscript_expr(array, index)? {
+            return Ok(subscript);
+        }
+        if let Some(subscript) = self.lower_field_array_subscript_expr(array, index)? {
+            return Ok(subscript);
+        }
+        if let Some(subscript) = self.lower_struct_array_subscript_expr(array, index)? {
+            return Ok(subscript);
+        }
+        if let Some(subscript) = self.lower_local_array_subscript_expr(array, index)? {
+            return Ok(subscript);
+        }
+        self.lower_pointer_subscript_expr(array, index)
+    }
+
+    fn lower_subscript_lvalue(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredLValue> {
+        if let Some(subscript) = self.lower_global_array_subscript_lvalue(array, index)? {
+            return Ok(subscript);
+        }
+        if let Some(subscript) = self.lower_field_array_subscript_lvalue(array, index)? {
+            return Ok(subscript);
+        }
+        if let Some(subscript) = self.lower_local_array_subscript_lvalue(array, index)? {
+            return Ok(subscript);
+        }
+        self.lower_pointer_subscript_lvalue(array, index)
+    }
+
+    fn lower_global_array_subscript_expr(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
         if let Some(pointer) = self.resolve_global_int_matrix_row(array, index)? {
-            return Ok(pointer);
+            return Ok(Some(pointer));
+        }
+        if let Some(pointer) = self.resolve_global_short_matrix_row(array, index)? {
+            return Ok(Some(pointer));
         }
         if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
-            return Ok(pointer);
+            return Ok(Some(pointer));
         }
         if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
         {
-            return Ok(LoweredExpr::GlobalByteSubscript {
+            return Ok(Some(LoweredExpr::GlobalByteSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
-            });
+            }));
         }
         if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::IntArray)
         {
-            return Ok(LoweredExpr::GlobalIntSubscript {
+            return Ok(Some(LoweredExpr::GlobalIntSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
-            });
+            }));
+        }
+        if let Some((pointer, element_unsigned)) = self.resolve_global_short_array(array) {
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Int,
+                2,
+                element_unsigned,
+            )));
         }
         if let Some(pointer) = self.resolve_global_pointer_matrix_row(array, index)? {
-            return Ok(pointer);
+            return Ok(Some(pointer));
         }
         if let Expr::Identifier(name) = array
             && matches!(
@@ -2208,57 +2290,98 @@ impl LoweringContext {
                 Some(GlobalBinding::PointerArray { .. })
             )
         {
-            return Ok(LoweredExpr::GlobalPointerSubscript {
+            return Ok(Some(LoweredExpr::GlobalPointerSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
-            });
+            }));
         }
-        if let Some((pointer, element_type, element_byte_size)) =
+        Ok(None)
+    }
+
+    fn lower_field_array_subscript_expr(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        if let Some((pointer, element_type, element_byte_size, element_unsigned)) =
             self.resolve_array_field_subscript(array)?
         {
-            return Ok(LoweredExpr::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(self.lower_expr(index)?),
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                self.lower_expr(index)?,
                 element_type,
                 element_byte_size,
-            });
+                element_unsigned,
+            )));
         }
-        if let Some((pointer, flat_index, element_type, element_byte_size)) =
+        if let Some((pointer, flat_index, element_type, element_byte_size, element_unsigned)) =
             self.resolve_nested_array_field_subscript(array, index)?
         {
-            return Ok(LoweredExpr::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(flat_index),
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                flat_index,
                 element_type,
                 element_byte_size,
-            });
+                element_unsigned,
+            )));
         }
+        Ok(None)
+    }
+
+    fn lower_struct_array_subscript_expr(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
         if let Some(pointer) = self.resolve_global_struct_matrix_row(array, index)? {
-            return Ok(pointer);
+            return Ok(Some(pointer));
         }
         if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
-            return Ok(address.pointer);
+            return Ok(Some(address.pointer));
         }
-        if let Some(pointer) = self.resolve_local_char_matrix_row(array, index)? {
-            return Ok(pointer);
-        }
+        self.resolve_local_char_matrix_row(array, index)
+    }
+
+    fn lower_local_array_subscript_expr(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
         if let Some(pointer) = self.resolve_local_char_array(array)? {
-            return Ok(LoweredExpr::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(self.lower_expr(index)?),
-                element_type: ScalarType::Int,
-                element_byte_size: 1,
-            });
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Int,
+                1,
+                true,
+            )));
+        }
+        if let Some((pointer, element_unsigned)) = self.resolve_local_short_array(array)? {
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Int,
+                2,
+                element_unsigned,
+            )));
         }
         if let Some(pointer) = self.resolve_local_pointer_array(array)? {
-            return Ok(LoweredExpr::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(self.lower_expr(index)?),
-                element_type: ScalarType::Pointer,
-                element_byte_size: scalar_size(ScalarType::Pointer),
-            });
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Pointer,
+                scalar_size(ScalarType::Pointer),
+                false,
+            )));
         }
+        Ok(None)
+    }
 
+    fn lower_pointer_subscript_expr(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<LoweredExpr> {
         let pointer = self.lower_expr(array)?;
         if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer)
             && self.pointer_referent_for_expr(array).is_err()
@@ -2268,46 +2391,71 @@ impl LoweringContext {
             ));
         }
         let (element_type, element_byte_size) = self.pointer_subscript_layout(array);
-        Ok(LoweredExpr::PointerSubscript {
-            pointer: Box::new(pointer),
-            index: Box::new(self.lower_expr(index)?),
+        Ok(Self::pointer_subscript_expr(
+            pointer,
+            self.lower_expr(index)?,
             element_type,
             element_byte_size,
-        })
+            false,
+        ))
     }
 
-    fn lower_subscript_lvalue(&self, array: &Expr, index: &Expr) -> CompileResult<LoweredLValue> {
+    fn lower_global_array_subscript_lvalue(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredLValue>> {
         if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
-            return Ok(LoweredLValue::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(LoweredExpr::Integer(0)),
-                element_type: ScalarType::Int,
-                element_byte_size: 1,
-            });
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                LoweredExpr::Integer(0),
+                ScalarType::Int,
+                1,
+                true,
+            )));
+        }
+        if let Some(pointer) = self.resolve_global_short_matrix_row(array, index)? {
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                LoweredExpr::Integer(0),
+                ScalarType::Int,
+                2,
+                false,
+            )));
         }
         if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
         {
-            return Ok(LoweredLValue::GlobalByteSubscript {
+            return Ok(Some(LoweredLValue::GlobalByteSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
-            });
+            }));
         }
         if let Expr::Identifier(name) = array
             && self.global_bindings.get(name) == Some(&GlobalBinding::IntArray)
         {
-            return Ok(LoweredLValue::GlobalIntSubscript {
+            return Ok(Some(LoweredLValue::GlobalIntSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
-            });
+            }));
+        }
+        if let Some((pointer, element_unsigned)) = self.resolve_global_short_array(array) {
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Int,
+                2,
+                element_unsigned,
+            )));
         }
         if let Some(pointer) = self.resolve_global_pointer_matrix_row(array, index)? {
-            return Ok(LoweredLValue::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(LoweredExpr::Integer(0)),
-                element_type: ScalarType::Pointer,
-                element_byte_size: scalar_size(ScalarType::Pointer),
-            });
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                LoweredExpr::Integer(0),
+                ScalarType::Pointer,
+                scalar_size(ScalarType::Pointer),
+                false,
+            )));
         }
         if let Expr::Identifier(name) = array
             && matches!(
@@ -2315,48 +2463,84 @@ impl LoweringContext {
                 Some(GlobalBinding::PointerArray { .. })
             )
         {
-            return Ok(LoweredLValue::GlobalPointerSubscript {
+            return Ok(Some(LoweredLValue::GlobalPointerSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
-            });
+            }));
         }
-        if let Some((pointer, element_type, element_byte_size)) =
+        Ok(None)
+    }
+
+    fn lower_field_array_subscript_lvalue(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredLValue>> {
+        if let Some((pointer, element_type, element_byte_size, element_unsigned)) =
             self.resolve_array_field_subscript(array)?
         {
-            return Ok(LoweredLValue::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(self.lower_expr(index)?),
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                self.lower_expr(index)?,
                 element_type,
                 element_byte_size,
-            });
+                element_unsigned,
+            )));
         }
-        if let Some((pointer, flat_index, element_type, element_byte_size)) =
+        if let Some((pointer, flat_index, element_type, element_byte_size, element_unsigned)) =
             self.resolve_nested_array_field_subscript(array, index)?
         {
-            return Ok(LoweredLValue::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(flat_index),
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                flat_index,
                 element_type,
                 element_byte_size,
-            });
+                element_unsigned,
+            )));
         }
+        Ok(None)
+    }
+
+    fn lower_local_array_subscript_lvalue(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredLValue>> {
         if let Some(pointer) = self.resolve_local_char_array(array)? {
-            return Ok(LoweredLValue::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(self.lower_expr(index)?),
-                element_type: ScalarType::Int,
-                element_byte_size: 1,
-            });
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Int,
+                1,
+                true,
+            )));
+        }
+        if let Some((pointer, element_unsigned)) = self.resolve_local_short_array(array)? {
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Int,
+                2,
+                element_unsigned,
+            )));
         }
         if let Some(pointer) = self.resolve_local_pointer_array(array)? {
-            return Ok(LoweredLValue::PointerSubscript {
-                pointer: Box::new(pointer),
-                index: Box::new(self.lower_expr(index)?),
-                element_type: ScalarType::Pointer,
-                element_byte_size: scalar_size(ScalarType::Pointer),
-            });
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                pointer,
+                self.lower_expr(index)?,
+                ScalarType::Pointer,
+                scalar_size(ScalarType::Pointer),
+                false,
+            )));
         }
+        Ok(None)
+    }
 
+    fn lower_pointer_subscript_lvalue(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<LoweredLValue> {
         let pointer = self.lower_expr(array)?;
         if lowered_expr_scalar_type(&pointer) != Some(ScalarType::Pointer)
             && self.pointer_referent_for_expr(array).is_err()
@@ -2366,12 +2550,45 @@ impl LoweringContext {
             ));
         }
         let (element_type, element_byte_size) = self.pointer_subscript_layout(array);
-        Ok(LoweredLValue::PointerSubscript {
-            pointer: Box::new(pointer),
-            index: Box::new(self.lower_expr(index)?),
+        Ok(Self::pointer_subscript_lvalue(
+            pointer,
+            self.lower_expr(index)?,
             element_type,
             element_byte_size,
-        })
+            false,
+        ))
+    }
+
+    fn pointer_subscript_expr(
+        pointer: LoweredExpr,
+        index: LoweredExpr,
+        element_type: ScalarType,
+        element_byte_size: usize,
+        element_unsigned: bool,
+    ) -> LoweredExpr {
+        LoweredExpr::PointerSubscript {
+            pointer: Box::new(pointer),
+            index: Box::new(index),
+            element_type,
+            element_byte_size,
+            element_unsigned,
+        }
+    }
+
+    fn pointer_subscript_lvalue(
+        pointer: LoweredExpr,
+        index: LoweredExpr,
+        element_type: ScalarType,
+        element_byte_size: usize,
+        element_unsigned: bool,
+    ) -> LoweredLValue {
+        LoweredLValue::PointerSubscript {
+            pointer: Box::new(pointer),
+            index: Box::new(index),
+            element_type,
+            element_byte_size,
+            element_unsigned,
+        }
     }
 
     fn pointer_subscript_layout(&self, array: &Expr) -> (ScalarType, usize) {
@@ -2411,10 +2628,20 @@ impl LoweringContext {
         if let Some(pointer) = self.resolve_global_int_matrix_row(array, index)? {
             return Ok(pointer);
         }
+        if let Some(pointer) = self.resolve_global_short_matrix_row(array, index)? {
+            return Ok(pointer);
+        }
         if let Some(pointer) = self.resolve_global_byte_matrix_row(array, index)? {
             return Ok(pointer);
         }
-        if let Some((pointer, _element_type, element_byte_size)) =
+        if let Some((pointer, _element_unsigned)) = self.resolve_global_short_array(array) {
+            return Ok(LoweredExpr::PointerOffset {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size: 2,
+            });
+        }
+        if let Some((pointer, _element_type, element_byte_size, _element_unsigned)) =
             self.resolve_array_field_subscript(array)?
         {
             return Ok(LoweredExpr::PointerOffset {
@@ -2423,7 +2650,7 @@ impl LoweringContext {
                 byte_size: element_byte_size,
             });
         }
-        if let Some((pointer, flat_index, _element_type, element_byte_size)) =
+        if let Some((pointer, flat_index, _element_type, element_byte_size, _element_unsigned)) =
             self.resolve_nested_array_field_subscript(array, index)?
         {
             return Ok(LoweredExpr::PointerOffset {
@@ -2437,6 +2664,13 @@ impl LoweringContext {
                 pointer: Box::new(pointer),
                 index: Box::new(self.lower_expr(index)?),
                 byte_size: 1,
+            });
+        }
+        if let Some((pointer, _element_unsigned)) = self.resolve_local_short_array(array)? {
+            return Ok(LoweredExpr::PointerOffset {
+                pointer: Box::new(pointer),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size: 2,
             });
         }
         self.lower_address_of_struct_subscript(array, index)?
@@ -2498,6 +2732,9 @@ impl LoweringContext {
             } => (*slot, scalar_size(*scalar_type)),
             LocalBinding::CharArray { slot, length } => (*slot, *length),
             LocalBinding::IntArray { slot, length } => (*slot, local_int_array_byte_size(*length)?),
+            LocalBinding::ShortArray { slot, length, .. } => {
+                (*slot, local_short_array_byte_size(*length)?)
+            }
             LocalBinding::CharMatrix {
                 slot,
                 rows,
@@ -2534,9 +2771,11 @@ impl LoweringContext {
         dereference: bool,
     ) -> CompileResult<LoweredExpr> {
         let member = self.resolve_member_access(base, field, dereference)?;
-        let (scalar_type, byte_size) = match member.field_type {
-            FieldType::Scalar(field) => (field.scalar_type, field.byte_size),
-            FieldType::Pointer { .. } => (ScalarType::Pointer, scalar_size(ScalarType::Pointer)),
+        let (scalar_type, byte_size, is_unsigned) = match member.field_type {
+            FieldType::Scalar(field) => (field.scalar_type, field.byte_size, field.is_unsigned),
+            FieldType::Pointer { .. } => {
+                (ScalarType::Pointer, scalar_size(ScalarType::Pointer), false)
+            }
             FieldType::Array { .. } | FieldType::StructArray { .. } => {
                 return Ok(pointer_field_address(member.pointer, member.offset));
             }
@@ -2549,6 +2788,7 @@ impl LoweringContext {
             offset: member.offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         })
     }
 
@@ -2559,9 +2799,11 @@ impl LoweringContext {
         dereference: bool,
     ) -> CompileResult<LoweredLValue> {
         let member = self.resolve_member_access(base, field, dereference)?;
-        let (scalar_type, byte_size) = match member.field_type {
-            FieldType::Scalar(field) => (field.scalar_type, field.byte_size),
-            FieldType::Pointer { .. } => (ScalarType::Pointer, scalar_size(ScalarType::Pointer)),
+        let (scalar_type, byte_size, is_unsigned) = match member.field_type {
+            FieldType::Scalar(field) => (field.scalar_type, field.byte_size, field.is_unsigned),
+            FieldType::Pointer { .. } => {
+                (ScalarType::Pointer, scalar_size(ScalarType::Pointer), false)
+            }
             FieldType::Array { .. } | FieldType::StructArray { .. } => {
                 return Err(CompileError::new(
                     "assignment to array member is not supported",
@@ -2578,6 +2820,7 @@ impl LoweringContext {
             offset: member.offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         })
     }
 
@@ -2629,7 +2872,7 @@ impl LoweringContext {
     fn resolve_array_field_subscript(
         &self,
         array: &Expr,
-    ) -> CompileResult<Option<(LoweredExpr, ScalarType, usize)>> {
+    ) -> CompileResult<Option<ArrayFieldSubscript>> {
         let Expr::Member {
             base,
             field,
@@ -2642,6 +2885,7 @@ impl LoweringContext {
         let FieldType::Array {
             element_type,
             element_size,
+            element_unsigned,
             ..
         } = member.field_type
         else {
@@ -2651,6 +2895,7 @@ impl LoweringContext {
             pointer_field_address(member.pointer, member.offset),
             element_type,
             element_size,
+            element_unsigned,
         )))
     }
 
@@ -2658,7 +2903,7 @@ impl LoweringContext {
         &self,
         array: &Expr,
         index: &Expr,
-    ) -> CompileResult<Option<(LoweredExpr, LoweredExpr, ScalarType, usize)>> {
+    ) -> CompileResult<Option<NestedArrayFieldSubscript>> {
         let Expr::Subscript {
             array: nested_array,
             index: row_index,
@@ -2678,6 +2923,7 @@ impl LoweringContext {
         let FieldType::Array {
             element_type,
             element_size,
+            element_unsigned,
             columns: Some(columns),
             ..
         } = member.field_type
@@ -2701,6 +2947,7 @@ impl LoweringContext {
             flat_index,
             element_type,
             element_size,
+            element_unsigned,
         )))
     }
 
@@ -2746,6 +2993,30 @@ impl LoweringContext {
         }))
     }
 
+    fn resolve_local_short_array(
+        &self,
+        array: &Expr,
+    ) -> CompileResult<Option<(LoweredExpr, bool)>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(LocalBinding::ShortArray {
+            slot,
+            length,
+            is_unsigned,
+        }) = self.local_binding(name)
+        else {
+            return Ok(None);
+        };
+        Ok(Some((
+            LoweredExpr::LocalAddress {
+                offset: self.local_offset(slot)?,
+                byte_size: local_short_array_byte_size(length)?,
+            },
+            is_unsigned,
+        )))
+    }
+
     fn resolve_local_char_array(&self, array: &Expr) -> CompileResult<Option<LoweredExpr>> {
         let binding = if let Expr::Identifier(name) = array {
             self.local_binding(name)
@@ -2753,6 +3024,23 @@ impl LoweringContext {
             None
         };
         local_array::char_array_pointer(array, binding.as_ref(), |slot| self.local_offset(slot))
+    }
+
+    fn resolve_global_short_array(&self, array: &Expr) -> Option<(LoweredExpr, bool)> {
+        let Expr::Identifier(name) = array else {
+            return None;
+        };
+        let Some(GlobalBinding::ShortArray {
+            is_unsigned,
+            columns: None,
+        }) = self.global_bindings.get(name)
+        else {
+            return None;
+        };
+        Some((
+            LoweredExpr::GlobalAddress { name: name.clone() },
+            *is_unsigned,
+        ))
     }
 
     fn resolve_local_char_matrix_row(
@@ -2814,6 +3102,31 @@ impl LoweringContext {
         let byte_size = columns
             .checked_mul(scalar_size(ScalarType::Int))
             .ok_or_else(|| CompileError::new("global int matrix row size overflow"))?;
+        Ok(Some(LoweredExpr::PointerOffset {
+            pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size,
+        }))
+    }
+
+    fn resolve_global_short_matrix_row(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<LoweredExpr>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(GlobalBinding::ShortArray {
+            columns: Some(columns),
+            ..
+        }) = self.global_bindings.get(name)
+        else {
+            return Ok(None);
+        };
+        let byte_size = columns
+            .checked_mul(2)
+            .ok_or_else(|| CompileError::new("global short matrix row size overflow"))?;
         Ok(Some(LoweredExpr::PointerOffset {
             pointer: Box::new(LoweredExpr::GlobalAddress { name: name.clone() }),
             index: Box::new(self.lower_expr(index)?),
@@ -2989,13 +3302,15 @@ impl LoweringContext {
     }
 
     fn pointer_referent_for_identifier(&self, name: &str) -> Option<String> {
-        if let Some(binding) = self.local_binding(name)
-            && let LocalBinding::Scalar {
-                referent: Some(referent),
-                ..
-            } = binding
-        {
-            return Some(referent);
+        if let Some(binding) = self.local_binding(name) {
+            return match binding {
+                LocalBinding::Scalar {
+                    referent: Some(referent),
+                    ..
+                } => Some(referent),
+                LocalBinding::ShortArray { .. } => Some("short".to_owned()),
+                _ => None,
+            };
         }
         if let Some(GlobalBinding::Pointer {
             referent: Some(referent),
@@ -3007,99 +3322,17 @@ impl LoweringContext {
         {
             return Some(struct_name.clone());
         }
+        if matches!(
+            self.global_bindings.get(name),
+            Some(GlobalBinding::ShortArray { .. })
+        ) {
+            return Some("short".to_owned());
+        }
         None
     }
 
     fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
-        if let Expr::Identifier(name) = expr
-            && let Some(referent) = self.pointer_referent_for_identifier(name)
-        {
-            return Ok(referent);
-        }
-        if let Expr::Call { callee, .. } = expr
-            && let Some(Some(referent)) = self.pointer_return_functions.get(callee)
-        {
-            return Ok(referent.clone());
-        }
-        if let Expr::Member {
-            base,
-            field,
-            dereference,
-        } = expr
-        {
-            let member = self.resolve_member_access(base, field, *dereference)?;
-            if let FieldType::Pointer {
-                referent: Some(referent),
-            } = member.field_type
-            {
-                return Ok(referent);
-            }
-        }
-        if let Expr::Cast {
-            target: ScalarType::Pointer,
-            referent: Some(referent),
-            ..
-        } = expr
-        {
-            return Ok(referent.clone());
-        }
-        if let Expr::Dereference { pointer } = expr {
-            let referent = self.pointer_referent_for_expr(pointer)?;
-            if let Some(nested) = referent.strip_prefix(POINTER_REFERENT)
-                && !nested.is_empty()
-            {
-                return Ok(nested.to_owned());
-            }
-        }
-        if let Expr::Subscript { array, .. } = expr {
-            if let Expr::Identifier(name) = array.as_ref()
-                && matches!(
-                    self.global_bindings.get(name),
-                    Some(GlobalBinding::UnsignedCharMatrix { .. })
-                )
-            {
-                return Ok("char".to_owned());
-            }
-            if let Expr::Identifier(name) = array.as_ref()
-                && let Some(GlobalBinding::PointerArray { referent, columns }) =
-                    self.global_bindings.get(name)
-            {
-                if columns.is_some() {
-                    return Ok(pointer_arithmetic::nested_referent(referent.as_deref()));
-                }
-                if let Some(referent) = referent {
-                    return Ok(referent.clone());
-                }
-            }
-            if let Expr::Identifier(name) = array.as_ref()
-                && let Some(GlobalBinding::StructArray {
-                    struct_name,
-                    columns: Some(_),
-                    ..
-                }) = self.global_bindings.get(name)
-            {
-                return Ok(struct_name.clone());
-            }
-            let referent = self.pointer_referent_for_expr(array)?;
-            if let Some(nested) = referent.strip_prefix(POINTER_REFERENT)
-                && !nested.is_empty()
-            {
-                return Ok(nested.to_owned());
-            }
-        }
-        if let Expr::Binary { op, left, right } = expr {
-            if *op == BinaryOp::Add {
-                return self
-                    .pointer_referent_for_expr(left)
-                    .or_else(|_error| self.pointer_referent_for_expr(right));
-            }
-            if *op == BinaryOp::Sub {
-                return self.pointer_referent_for_expr(left);
-            }
-        }
-        Err(CompileError::new(
-            "pointer member access requires a typed pointer",
-        ))
+        pointer_referent::for_expr(self, expr)
     }
 
     fn pointer_referent_stride(&self, referent: &str) -> CompileResult<usize> {
@@ -3278,12 +3511,14 @@ impl LoweringContext {
                 offset: target_offset,
                 scalar_type,
                 byte_size,
+                is_unsigned: false,
             },
             LoweredExpr::PointerField {
                 pointer: Box::new(source.pointer.clone()),
                 offset: source_offset,
                 scalar_type,
                 byte_size,
+                is_unsigned: false,
             },
         );
     }
@@ -3456,22 +3691,26 @@ fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredExpr {
             index,
             element_type,
             element_byte_size,
+            element_unsigned,
         } => LoweredExpr::PointerSubscript {
             pointer: pointer.clone(),
             index: index.clone(),
             element_type: *element_type,
             element_byte_size: *element_byte_size,
+            element_unsigned: *element_unsigned,
         },
         LoweredLValue::PointerField {
             pointer,
             offset,
             scalar_type,
             byte_size,
+            is_unsigned,
         } => LoweredExpr::PointerField {
             pointer: pointer.clone(),
             offset: *offset,
             scalar_type: *scalar_type,
             byte_size: *byte_size,
+            is_unsigned: *is_unsigned,
         },
     }
 }
@@ -3581,6 +3820,12 @@ fn local_int_array_byte_size(length: usize) -> CompileResult<usize> {
     length
         .checked_mul(scalar_size(ScalarType::Int))
         .ok_or_else(|| CompileError::new("local int array size overflow"))
+}
+
+fn local_short_array_byte_size(length: usize) -> CompileResult<usize> {
+    length
+        .checked_mul(2)
+        .ok_or_else(|| CompileError::new("local short array size overflow"))
 }
 
 fn local_pointer_array_byte_size(length: usize) -> CompileResult<usize> {
@@ -3760,26 +4005,6 @@ fn inline_constant_calls_in_expr(expr: &mut LoweredExpr, constants: &HashMap<Str
         | LoweredExpr::Local { .. }
         | LoweredExpr::LocalAddress { .. } => {}
     }
-}
-
-fn builtin_pointer_return_function(name: &str) -> bool {
-    matches!(
-        name,
-        "alloca"
-            | "calloc"
-            | "fopen"
-            | "fdopen"
-            | "getenv"
-            | "gethostbyname"
-            | "malloc"
-            | "realloc"
-            | "strerror"
-            | "XCreateGC"
-            | "XCreateImage"
-            | "XGetVisualInfo"
-            | "XOpenDisplay"
-            | "XShmCreateImage"
-    )
 }
 
 const fn ends_with_return(instructions: &[Instruction]) -> bool {

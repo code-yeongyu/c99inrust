@@ -45,6 +45,7 @@ pub enum FieldType {
     Array {
         element_type: ScalarType,
         element_size: usize,
+        element_unsigned: bool,
         length: usize,
         columns: Option<usize>,
     },
@@ -90,8 +91,13 @@ pub enum GlobalInitializer {
         referent: Option<String>,
     },
     ExternIntArray,
+    ExternShortArray {
+        is_unsigned: bool,
+        columns: Option<usize>,
+    },
     ExternPointerArray {
         referent: Option<String>,
+        columns: Option<usize>,
     },
     ExternUnsignedCharArray,
     ExternUnsignedCharMatrix {
@@ -105,6 +111,11 @@ pub enum GlobalInitializer {
     },
     Int(i64),
     IntArray(Vec<i32>),
+    ShortArray {
+        values: Vec<i32>,
+        is_unsigned: bool,
+        columns: Option<usize>,
+    },
     IntMatrix {
         values: Vec<i32>,
         columns: usize,
@@ -175,6 +186,7 @@ impl GlobalInitializer {
             Self::Extern(_)
                 | Self::ExternPointer { .. }
                 | Self::ExternIntArray
+                | Self::ExternShortArray { .. }
                 | Self::ExternPointerArray { .. }
                 | Self::ExternUnsignedCharArray
                 | Self::ExternUnsignedCharMatrix { .. }
@@ -226,6 +238,7 @@ pub enum ScalarType {
 pub struct ScalarFieldType {
     pub scalar_type: ScalarType,
     pub byte_size: usize,
+    pub is_unsigned: bool,
 }
 
 const POINTER_REFERENT: &str = "*";
@@ -255,6 +268,11 @@ pub enum Statement {
         name: String,
         length: usize,
         initializer: Option<Vec<i32>>,
+    },
+    LocalShortArray {
+        name: String,
+        length: usize,
+        is_unsigned: bool,
     },
     LocalPointerArray {
         name: String,
@@ -939,7 +957,14 @@ impl Parser<'_> {
         let Some((_actual, type_end)) = self.declaration_type_span_at_current() else {
             return self.expected("declaration type");
         };
-        let base_referent = declaration_base_referent_type(&self.tokens[self.index..type_end]);
+        let type_tokens = &self.tokens[self.index..type_end];
+        let base_referent = declaration_base_referent_type(type_tokens);
+        let type_includes_short = type_tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Short)));
+        let type_is_unsigned = type_tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Unsigned)));
         let type_includes_char = self.consume_declaration_type(base_type)?;
         let mut declarations = Vec::new();
         loop {
@@ -957,7 +982,13 @@ impl Parser<'_> {
                 None
             };
             let statement = if self.check_punctuator("[") {
-                self.local_array_declaration(type_includes_char, scalar_type, name)?
+                self.local_array_declaration(
+                    type_includes_char,
+                    type_includes_short,
+                    type_is_unsigned,
+                    scalar_type,
+                    name,
+                )?
             } else if self.check_punctuator("=") {
                 self.advance();
                 Statement::Declaration {
@@ -992,6 +1023,8 @@ impl Parser<'_> {
     fn local_array_declaration(
         &mut self,
         type_includes_char: bool,
+        type_includes_short: bool,
+        type_is_unsigned: bool,
         scalar_type: ScalarType,
         name: String,
     ) -> CompileResult<Statement> {
@@ -1018,6 +1051,9 @@ impl Parser<'_> {
         }
         if type_includes_char {
             return self.local_char_array_declaration(name, explicit_length);
+        }
+        if type_includes_short {
+            return self.local_short_array_declaration(name, explicit_length, type_is_unsigned);
         }
         self.local_int_array_declaration(name, explicit_length)
     }
@@ -1193,6 +1229,27 @@ impl Parser<'_> {
             name,
             length,
             initializer,
+        })
+    }
+
+    fn local_short_array_declaration(
+        &self,
+        name: String,
+        explicit_length: Option<usize>,
+        is_unsigned: bool,
+    ) -> CompileResult<Statement> {
+        if self.check_punctuator("=") {
+            return Err(CompileError::new(
+                "local short array initializers are not supported",
+            ));
+        }
+        let Some(length) = explicit_length else {
+            return Err(CompileError::new("local short arrays require a size"));
+        };
+        Ok(Statement::LocalShortArray {
+            name,
+            length,
+            is_unsigned,
         })
     }
 
@@ -2849,12 +2906,14 @@ fn parse_struct_field_declaration(
                 FieldType::Scalar(element) => FieldType::Array {
                     element_type: element.scalar_type,
                     element_size: element.byte_size,
+                    element_unsigned: element.is_unsigned,
                     length: shape.length,
                     columns: shape.columns,
                 },
                 FieldType::Pointer { .. } => FieldType::Array {
                     element_type: ScalarType::Pointer,
                     element_size: scalar_size_for_layout(ScalarType::Pointer),
+                    element_unsigned: false,
                     length: shape.length,
                     columns: shape.columns,
                 },
@@ -3267,13 +3326,16 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_pointer_array(tokens, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_extern_pointer_array(tokens)? {
+    if let Some(global) = parse_global_extern_pointer_array(tokens, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_struct_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_struct_object(tokens, known_structs)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_short_array(tokens, constants, sizeof_symbols)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_extern_int_array(tokens)? {
@@ -3353,6 +3415,10 @@ fn global_initializer_sizeof_bytes(
             .len()
             .checked_mul(scalar_size_for_layout(ScalarType::Int))
             .ok_or_else(|| CompileError::new("global int array sizeof overflow"))?,
+        GlobalInitializer::ShortArray { values, .. } => values
+            .len()
+            .checked_mul(2)
+            .ok_or_else(|| CompileError::new("global short array sizeof overflow"))?,
         GlobalInitializer::IntMatrix { values, .. } => values
             .len()
             .checked_mul(scalar_size_for_layout(ScalarType::Int))
@@ -3385,6 +3451,7 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
+        | GlobalInitializer::ExternShortArray { .. }
         | GlobalInitializer::ExternPointerArray { .. }
         | GlobalInitializer::ExternUnsignedCharArray
         | GlobalInitializer::ExternUnsignedCharMatrix { .. }
@@ -3783,7 +3850,10 @@ fn parse_global_pointer_name_array(
     )))
 }
 
-fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<Global>> {
+fn parse_global_extern_pointer_array(
+    tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
@@ -3804,7 +3874,28 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
             ),
         );
     };
-    if top_level_punctuator_index(&declaration[close_bracket + 1..], "=").is_some() {
+    let (columns, last_dimension_close) = if declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        let second_open = close_bracket + 1;
+        let Some(second_close) = matching_top_level_bracket(declaration, second_open) else {
+            return Err(
+                CompileError::new("unterminated extern global pointer-matrix declarator").at(
+                    declaration[second_open].line,
+                    declaration[second_open].column,
+                ),
+            );
+        };
+        let columns = parse_unsigned_char_array_length(
+            &declaration[second_open + 1..second_close],
+            constants,
+        )?;
+        (Some(columns), second_close)
+    } else {
+        (None, close_bracket)
+    };
+    if top_level_punctuator_index(&declaration[last_dimension_close + 1..], "=").is_some() {
         return Ok(None);
     }
     let name = token_identifier(&declaration[name_index])
@@ -3813,7 +3904,7 @@ fn parse_global_extern_pointer_array(tokens: &[Token]) -> CompileResult<Option<G
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     Ok(Some(Global::new(
         name,
-        GlobalInitializer::ExternPointerArray { referent },
+        GlobalInitializer::ExternPointerArray { referent, columns },
     )))
 }
 
@@ -4073,6 +4164,170 @@ fn parse_global_extern_int_array(tokens: &[Token]) -> CompileResult<Option<Globa
         .ok_or_else(|| CompileError::new("expected extern global int-array name"))?
         .to_owned();
     Ok(Some(Global::new(name, GlobalInitializer::ExternIntArray)))
+}
+
+fn parse_global_short_array(
+    tokens: &[Token],
+    constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
+) -> CompileResult<Option<Global>> {
+    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
+        return Ok(None);
+    };
+    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+        return Ok(None);
+    };
+    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
+        return Ok(None);
+    };
+    let specifiers = &declaration[..name_index];
+    if !global_specifiers_are_short(specifiers) {
+        return Ok(None);
+    }
+    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
+        return Err(
+            CompileError::new("unterminated global short-array declarator").at(
+                declaration[open_bracket].line,
+                declaration[open_bracket].column,
+            ),
+        );
+    };
+    let name = token_identifier(&declaration[name_index])
+        .ok_or_else(|| CompileError::new("expected global short-array name"))?
+        .to_owned();
+    let is_extern = token_has_keyword(specifiers, Keyword::Extern);
+    let is_unsigned = token_has_keyword(specifiers, Keyword::Unsigned);
+    if declaration
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        return parse_global_short_matrix(
+            ShortArrayDeclarator {
+                declaration,
+                open_bracket,
+                close_bracket,
+                name: &name,
+                is_extern,
+                is_unsigned,
+            },
+            constants,
+            sizeof_symbols,
+        );
+    }
+    if is_extern {
+        return Ok(Some(Global::new(
+            name,
+            GlobalInitializer::ExternShortArray {
+                is_unsigned,
+                columns: None,
+            },
+        )));
+    }
+    let explicit_length = if open_bracket + 1 == close_bracket {
+        None
+    } else {
+        Some(parse_unsigned_char_array_length(
+            &declaration[open_bracket + 1..close_bracket],
+            constants,
+        )?)
+    };
+    let assign_index = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
+        .map(|offset| close_bracket + 1 + offset);
+    let values = if let Some(assign_index) = assign_index {
+        parse_short_initializer_values(
+            parse_int_array_initializer(
+                &declaration[assign_index + 1..],
+                explicit_length,
+                constants,
+                sizeof_symbols,
+            )?,
+            is_unsigned,
+        )?
+    } else {
+        let Some(length) = explicit_length else {
+            return Err(CompileError::new("expected short array length"));
+        };
+        vec![0; length]
+    };
+    Ok(Some(Global::new(
+        name,
+        GlobalInitializer::ShortArray {
+            values,
+            is_unsigned,
+            columns: None,
+        },
+    )))
+}
+
+fn parse_global_short_matrix(
+    spec: ShortArrayDeclarator<'_>,
+    constants: &[Constant],
+    sizeof_symbols: &[(String, usize)],
+) -> CompileResult<Option<Global>> {
+    let second_open = spec.close_bracket + 1;
+    let Some(second_close) = matching_top_level_bracket(spec.declaration, second_open) else {
+        return Err(
+            CompileError::new("unterminated global short-matrix declarator").at(
+                spec.declaration[second_open].line,
+                spec.declaration[second_open].column,
+            ),
+        );
+    };
+    let columns = parse_unsigned_char_array_length(
+        &spec.declaration[second_open + 1..second_close],
+        constants,
+    )?;
+    if spec.is_extern {
+        return Ok(Some(Global::new(
+            spec.name.to_owned(),
+            GlobalInitializer::ExternShortArray {
+                is_unsigned: spec.is_unsigned,
+                columns: Some(columns),
+            },
+        )));
+    }
+    let rows = parse_unsigned_char_array_length(
+        &spec.declaration[spec.open_bracket + 1..spec.close_bracket],
+        constants,
+    )?;
+    let length = rows
+        .checked_mul(columns)
+        .ok_or_else(|| CompileError::new("global short matrix size overflow"))?;
+    let values = if let Some(assign_index) =
+        top_level_punctuator_index(&spec.declaration[second_close + 1..], "=")
+    {
+        let assign_index = second_close + 1 + assign_index;
+        parse_short_initializer_values(
+            parse_int_matrix_initializer(
+                &spec.declaration[assign_index + 1..],
+                rows,
+                columns,
+                constants,
+                sizeof_symbols,
+            )?,
+            spec.is_unsigned,
+        )?
+    } else {
+        vec![0; length]
+    };
+    Ok(Some(Global::new(
+        spec.name.to_owned(),
+        GlobalInitializer::ShortArray {
+            values,
+            is_unsigned: spec.is_unsigned,
+            columns: Some(columns),
+        },
+    )))
+}
+
+#[derive(Clone, Copy)]
+struct ShortArrayDeclarator<'a> {
+    declaration: &'a [Token],
+    open_bracket: usize,
+    close_bracket: usize,
+    name: &'a str,
+    is_extern: bool,
+    is_unsigned: bool,
 }
 
 fn parse_global_int_array(
@@ -4542,6 +4797,13 @@ fn global_specifiers_are_extern_int(tokens: &[Token]) -> bool {
     token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_int_like(tokens, true, &[])
 }
 
+fn global_specifiers_are_short(tokens: &[Token]) -> bool {
+    global_specifiers_are_int_like(tokens, true, &[])
+        && tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Short)))
+}
+
 fn global_specifiers_are_int_like(
     tokens: &[Token],
     allow_extern: bool,
@@ -4658,6 +4920,19 @@ fn parse_int_array_initializer(
             .at(first.line, first.column));
     }
     values.resize(length, 0);
+    Ok(values)
+}
+
+fn parse_short_initializer_values(values: Vec<i32>, is_unsigned: bool) -> CompileResult<Vec<i32>> {
+    for value in &values {
+        if is_unsigned {
+            u16::try_from(*value)
+                .map_err(|_| CompileError::new("global unsigned short initializer too large"))?;
+        } else {
+            i16::try_from(*value)
+                .map_err(|_| CompileError::new("global short initializer too large"))?;
+        }
+    }
     Ok(values)
 }
 
@@ -6216,6 +6491,7 @@ fn sized_array_field(
         field_type: FieldType::Array {
             element_type,
             element_size,
+            element_unsigned: false,
             length,
             columns: None,
         },

@@ -10,6 +10,7 @@ use super::{
 pub(super) fn emit_aarch64_load(
     byte_size: usize,
     width: ValueWidth,
+    is_unsigned: bool,
     base_register: &str,
     offset: usize,
     assembly: &mut String,
@@ -18,6 +19,12 @@ pub(super) fn emit_aarch64_load(
         return write_assembly(
             assembly,
             format_args!("\tldrb w0, [{base_register}, #{offset}]\n"),
+        );
+    }
+    if byte_size == 2 && width == ValueWidth::I32 && is_unsigned {
+        return write_assembly(
+            assembly,
+            format_args!("\tldrh w0, [{base_register}, #{offset}]\n"),
         );
     }
     if byte_size == 2 && width == ValueWidth::I32 {
@@ -70,6 +77,7 @@ pub(super) fn emit_aarch64_store(
 pub(super) fn emit_x86_64_load(
     byte_size: usize,
     width: ValueWidth,
+    is_unsigned: bool,
     base_register: &str,
     offset: usize,
     assembly: &mut String,
@@ -78,6 +86,12 @@ pub(super) fn emit_x86_64_load(
         return write_assembly(
             assembly,
             format_args!("\tmovzbl {offset}({base_register}), %eax\n"),
+        );
+    }
+    if byte_size == 2 && width == ValueWidth::I32 && is_unsigned {
+        return write_assembly(
+            assembly,
+            format_args!("\tmovzwl {offset}({base_register}), %eax\n"),
         );
     }
     if byte_size == 2 && width == ValueWidth::I32 {

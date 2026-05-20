@@ -32,3 +32,19 @@ int main(void) {
     assert!(!assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
     assert!(!assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
 }
+
+#[test]
+fn compiler_uses_byte_stride_for_doom_byte_pointer_post_increment_slice() {
+    // given
+    let source = r"typedef unsigned char byte;
+int read(byte *palette) {
+    return *palette++;
+}";
+
+    // when
+    let assembly = compile_x86_64(source);
+
+    // then
+    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+    assert!(!assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+}

@@ -206,6 +206,7 @@ const fn global_binding_element_size(binding: &GlobalBinding) -> usize {
         GlobalBinding::Int | GlobalBinding::IntArray | GlobalBinding::IntMatrix { .. } => {
             scalar_size(ScalarType::Int)
         }
+        GlobalBinding::ShortArray { .. } => 2,
         GlobalBinding::DoubleArray => scalar_size(ScalarType::Double),
         GlobalBinding::Pointer { .. } | GlobalBinding::PointerArray { .. } => {
             scalar_size(ScalarType::Pointer)

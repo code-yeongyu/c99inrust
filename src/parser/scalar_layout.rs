@@ -6,6 +6,7 @@ pub(super) fn scalar_field_type(specifiers: &[Token], scalar_type: ScalarType) -
     ScalarFieldType {
         scalar_type,
         byte_size: scalar_byte_size(specifiers, scalar_type),
+        is_unsigned: specifiers.iter().any(is_unsigned_int),
     }
 }
 
@@ -40,4 +41,8 @@ fn is_char_sized_int(token: &Token) -> bool {
 
 const fn is_short_sized_int(token: &Token) -> bool {
     matches!(token.kind, TokenKind::Keyword(Keyword::Short))
+}
+
+const fn is_unsigned_int(token: &Token) -> bool {
+    matches!(token.kind, TokenKind::Keyword(Keyword::Unsigned))
 }

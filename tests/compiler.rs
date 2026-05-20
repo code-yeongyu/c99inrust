@@ -2616,8 +2616,8 @@ int main(void) {
 
     // then
     assert!(!assembly.contains("ceilingclip:\n"));
-    assert!(assembly.contains("\tleaq ceilingclip(%rip), %rcx\n"));
-    assert!(assembly.contains("\tmovl (%rcx,%rax,4), %eax\n"));
+    assert!(assembly.contains("\tleaq ceilingclip(%rip), %rax\n"));
+    assert!(assembly.contains("\tmovswl (%rcx,%rax,2), %eax\n"));
 }
 
 #[test]
@@ -2638,8 +2638,8 @@ int main(void) {
 
     // then
     assert!(assembly.contains("openings:"));
-    assert!(assembly.contains("\t.zero 24\n"));
-    assert!(assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
+    assert!(assembly.contains("\t.zero 12\n"));
+    assert!(assembly.contains("\tmovw %ax, (%rcx,%rdx,2)\n"));
 }
 
 #[test]
