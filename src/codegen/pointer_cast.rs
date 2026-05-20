@@ -1,9 +1,8 @@
+use super::widths::ValueWidth;
 use crate::ir::{LoweredExpr, LoweredLValue};
 use crate::parser::ScalarType;
 
-use super::ValueWidth;
-
-pub(super) fn width(target: ScalarType, expr: &LoweredExpr) -> Option<ValueWidth> {
+pub(in crate::codegen) fn width(target: ScalarType, expr: &LoweredExpr) -> Option<ValueWidth> {
     (target == ScalarType::Int && expr_is_pointer(expr)).then_some(ValueWidth::I64)
 }
 

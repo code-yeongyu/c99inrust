@@ -1,14 +1,14 @@
-use std::fmt;
-
+use super::data_literals::{
+    emit_string_literal_data_returning_to, global_string_label, label_name,
+};
+use super::globals::emit_byte_values;
+use super::target::Target;
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::{LoweredStructInitializerScalar, LoweredStructInitializerValue};
 
-use super::{
-    Target, emit_byte_values, emit_string_literal_data_returning_to, global_string_label,
-    label_name,
-};
+use std::fmt;
 
-pub(super) fn emit(
+pub(in crate::codegen) fn emit(
     name: &str,
     byte_len: usize,
     values: &[LoweredStructInitializerValue],

@@ -1,13 +1,11 @@
-use std::fmt;
-
+use super::aarch64_addressing::aarch64_result_register;
+use super::widths::{ValueWidth, width_bytes};
+use super::x86_64_addressing::{x86_64_instruction_suffix, x86_64_result_register};
 use crate::diagnostics::{CompileError, CompileResult};
 
-use super::{
-    ValueWidth, aarch64_result_register, width_bytes, x86_64_instruction_suffix,
-    x86_64_result_register,
-};
+use std::fmt;
 
-pub(super) fn emit_aarch64_load(
+pub(in crate::codegen) fn emit_aarch64_load(
     byte_size: usize,
     width: ValueWidth,
     is_unsigned: bool,
@@ -44,7 +42,7 @@ pub(super) fn emit_aarch64_load(
     )
 }
 
-pub(super) fn emit_aarch64_store(
+pub(in crate::codegen) fn emit_aarch64_store(
     byte_size: usize,
     width: ValueWidth,
     base_register: &str,
@@ -74,7 +72,7 @@ pub(super) fn emit_aarch64_store(
     )
 }
 
-pub(super) fn emit_x86_64_load(
+pub(in crate::codegen) fn emit_x86_64_load(
     byte_size: usize,
     width: ValueWidth,
     is_unsigned: bool,
@@ -113,7 +111,7 @@ pub(super) fn emit_x86_64_load(
     )
 }
 
-pub(super) fn emit_x86_64_store(
+pub(in crate::codegen) fn emit_x86_64_store(
     byte_size: usize,
     width: ValueWidth,
     base_register: &str,
