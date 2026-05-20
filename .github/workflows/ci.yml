@@ -43,8 +43,34 @@ jobs:
           GIT_CONFIG_VALUE_1: "false"
       - name: Install stable Rust
         run: rustup toolchain install stable
+      - name: Cache cargo QA tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/bin/cargo-machete
+            ~/.cargo/bin/cargo-nextest
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/git
+            ~/.cargo/registry
+            target/cargo-tools
+          key: cargo-qa-tools-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: cargo-qa-tools-${{ runner.os }}-
       - name: Install cargo QA tools
-        run: rustup run stable cargo install --locked cargo-audit cargo-deny cargo-machete cargo-nextest
+        env:
+          CARGO_TARGET_DIR: target/cargo-tools
+        run: |
+          missing=0
+          for tool in cargo-audit cargo-deny cargo-machete cargo-nextest; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            rustup run stable cargo install --locked cargo-audit cargo-deny cargo-machete cargo-nextest
+          fi
       - name: Shell syntax
         run: |
           bash -n tools/check-rust-no-excuses.sh
