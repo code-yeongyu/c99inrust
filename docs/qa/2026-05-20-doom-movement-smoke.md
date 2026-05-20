@@ -46,7 +46,7 @@ and fails unless player coordinates change while the player mobj remains active.
 Latest direct run:
 
 ```text
-out=/tmp/c99inrust-doom-movement-statefix
+out=/tmp/c99inrust-doom-movement-smoke-20260520
 compile_ok=62 compile_fail=0
 link_status=0
 display_status=0
@@ -58,7 +58,7 @@ tail_status=124
 run_status=124
 
 before 5 5 1 1 1 69206016 -236978176 0 0 0 -1
-up_11 119 119 1 1 1 69194566 -209032509 -107 261249 25 3
+up_11 120 120 1 1 1 69194459 -208771260 -97 236756 0 2
 ```
 
 Latest tmux manual QA rerun, without `tmux kill-server`:

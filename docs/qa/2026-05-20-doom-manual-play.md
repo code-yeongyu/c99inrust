@@ -29,13 +29,13 @@ reason=DOOM_MANUAL_RUN=0
 Latest tmux build-only QA, without `tmux kill-server`:
 
 ```text
-tmux_session=c99inrust-doom-manual-1779273652
-out=/tmp/c99inrust-doom-manual-1779273652-out
+tmux_session=c99inrust-doom-manual-20260520215340
+out=/tmp/c99inrust-doom-manual-20260520215340-out
 cargo_status=0
 manual_status=0
 compile_ok=62 compile_fail=0
 link_status=0
-binary=/tmp/c99inrust-doom-manual-1779273652-out/linuxdoom-c99inrust
+binary=/tmp/c99inrust-doom-manual-20260520215340-out/linuxdoom-c99inrust
 manual_run=skipped
 reason=DOOM_MANUAL_RUN=0
 ```
