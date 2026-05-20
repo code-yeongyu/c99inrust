@@ -38,6 +38,7 @@ pub(in crate::ir) const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Optio
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target, .. } => {
             Some(lowered_lvalue_scalar_type(target))
         }
+        LoweredExpr::LongInteger(_) => Some(ScalarType::LongLong),
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::IndirectCall { .. }

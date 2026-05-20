@@ -51,7 +51,7 @@ fn eval_integer_initializer_expr_with_context(
     sizeof_symbols: &[(String, usize)],
 ) -> CompileResult<InitializerNumber> {
     match expr {
-        Expr::Integer(value) => Ok(InitializerNumber::integer(*value)),
+        Expr::Integer(value) | Expr::LongInteger(value) => Ok(InitializerNumber::integer(*value)),
         Expr::DoubleLiteral(value) => InitializerNumber::decimal(value),
         Expr::Unary { op, expr } => {
             let value =

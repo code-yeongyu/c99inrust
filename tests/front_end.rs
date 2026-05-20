@@ -44,10 +44,7 @@ fn lexer_accepts_integer_literal_suffixes() {
     // then
     let integers = tokens
         .into_iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Integer(value) => Some(value),
-            _ => None,
-        })
+        .filter_map(|token| token.kind.integer_value())
         .collect::<Vec<_>>();
     assert_eq!(integers, vec![305_419_896, 42]);
 }
@@ -63,10 +60,7 @@ fn lexer_parses_c_octal_integer_literals() {
     // then
     let integers = tokens
         .into_iter()
-        .filter_map(|token| match token.kind {
-            TokenKind::Integer(value) => Some(value),
-            _ => None,
-        })
+        .filter_map(|token| token.kind.integer_value())
         .collect::<Vec<_>>();
     assert_eq!(integers, vec![511]);
 }

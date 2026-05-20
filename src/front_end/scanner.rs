@@ -115,9 +115,9 @@ impl Scanner {
             if value.is_empty() {
                 return Err(CompileError::new("expected hexadecimal digits").at(line, column));
             }
-            self.consume_integer_suffix();
+            let is_long = self.consume_integer_suffix();
             let parsed = integer_literal::parse_hexadecimal(&value, line, column)?;
-            return Ok(TokenKind::Integer(parsed));
+            return Ok(integer_token(parsed, is_long));
         }
         while self
             .current()
@@ -128,18 +128,26 @@ impl Scanner {
             }
             self.advance();
         }
-        self.consume_integer_suffix();
+        let is_long = self.consume_integer_suffix();
         let parsed = integer_literal::parse_decimal_or_octal(&value, line, column)?;
-        Ok(TokenKind::Integer(parsed))
+        Ok(integer_token(parsed, is_long))
     }
 
-    fn consume_integer_suffix(&mut self) {
+    fn consume_integer_suffix(&mut self) -> bool {
+        let mut is_long = false;
         while self
             .current()
             .is_some_and(|current| matches!(current, 'u' | 'U' | 'l' | 'L'))
         {
+            if self
+                .current()
+                .is_some_and(|current| matches!(current, 'l' | 'L'))
+            {
+                is_long = true;
+            }
             self.advance();
         }
+        is_long
     }
 
     fn string_literal(&mut self) -> CompileResult<String> {
@@ -230,5 +238,13 @@ impl Scanner {
                 self.column += 1;
             }
         }
+    }
+}
+
+const fn integer_token(value: i64, is_long: bool) -> TokenKind {
+    if is_long {
+        TokenKind::LongInteger(value)
+    } else {
+        TokenKind::Integer(value)
     }
 }

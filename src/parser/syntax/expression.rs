@@ -26,6 +26,7 @@ pub enum Expr {
     },
     Identifier(String),
     Integer(i64),
+    LongInteger(i64),
     DoubleLiteral(String),
     StringLiteral(String),
     SizeOfExpr {

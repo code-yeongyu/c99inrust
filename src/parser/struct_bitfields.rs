@@ -1,5 +1,5 @@
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::front_end::lexer::{Token, TokenKind};
+use crate::front_end::lexer::Token;
 
 use super::struct_layout_helpers::{StructFieldOutput, align_struct_offset};
 use super::top_level_punctuator_index;
@@ -23,9 +23,7 @@ impl BitFieldState {
 
 pub(super) fn bit_field_width(tokens: &[Token]) -> Option<usize> {
     let colon = top_level_punctuator_index(tokens, ":")?;
-    let TokenKind::Integer(value) = tokens.get(colon + 1)?.kind else {
-        return None;
-    };
+    let value = tokens.get(colon + 1)?.kind.integer_value()?;
     usize::try_from(value).ok()
 }
 

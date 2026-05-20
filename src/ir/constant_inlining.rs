@@ -106,6 +106,7 @@ pub(in crate::ir) fn inline_constant_calls_in_expr(
         }
         LoweredExpr::PostIncrement { .. }
         | LoweredExpr::Integer(_)
+        | LoweredExpr::LongInteger(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }

@@ -1,4 +1,4 @@
-use crate::front_end::lexer::{Keyword, Token, TokenKind};
+use crate::front_end::lexer::{Keyword, Token};
 
 use super::{
     Parser, matching_top_level_bracket, sizeof_type, token_identifier, token_is_keyword,
@@ -41,16 +41,10 @@ fn type_array_suffix(tokens: &[Token]) -> Option<(&[Token], usize)> {
     if close + 1 != tokens.len() {
         return None;
     }
-    let [
-        Token {
-            kind: TokenKind::Integer(length),
-            ..
-        },
-    ] = &tokens[open + 1..close]
-    else {
+    let [token] = &tokens[open + 1..close] else {
         return None;
     };
-    usize::try_from(*length)
+    usize::try_from(token.kind.integer_value()?)
         .ok()
         .filter(|length| *length > 0)
         .map(|length| (&tokens[..open], length))

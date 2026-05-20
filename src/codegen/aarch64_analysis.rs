@@ -57,6 +57,7 @@ pub(in crate::codegen) const fn instruction_label(instruction: &Instruction) -> 
 pub(in crate::codegen) fn expr_depth(expr: &LoweredExpr) -> usize {
     match expr {
         LoweredExpr::Integer(_)
+        | LoweredExpr::LongInteger(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }

@@ -31,10 +31,12 @@ pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
                 _ => return None,
             },
             TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
-            TokenKind::Punctuator(_) | TokenKind::Integer(_) | TokenKind::CharLiteral(_) => {
-                return None;
-            }
-            TokenKind::StringLiteral(_) | TokenKind::End => return None,
+            TokenKind::Punctuator(_)
+            | TokenKind::Integer(_)
+            | TokenKind::LongInteger(_)
+            | TokenKind::CharLiteral(_)
+            | TokenKind::StringLiteral(_)
+            | TokenKind::End => return None,
         }
     }
     match (saw_void, saw_non_void_type, saw_pointer) {
@@ -123,6 +125,7 @@ pub(super) fn supported_cast_type_with_typedefs(
                 expecting_struct_tag = false;
             }
             TokenKind::Integer(_)
+            | TokenKind::LongInteger(_)
             | TokenKind::StringLiteral(_)
             | TokenKind::CharLiteral(_)
             | TokenKind::Punctuator(_)

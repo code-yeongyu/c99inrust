@@ -43,7 +43,9 @@ pub(in crate::codegen) fn emit_aarch64_expr_with_width(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    if let (LoweredExpr::Integer(value), ValueWidth::I64) = (expr, target_width) {
+    if let (LoweredExpr::Integer(value) | LoweredExpr::LongInteger(value), ValueWidth::I64) =
+        (expr, target_width)
+    {
         return emit_aarch64_i64_to_register(*value, "x0", assembly);
     }
     if matches!(expr, LoweredExpr::IndirectCall { .. }) && target_width == ValueWidth::I64 {
@@ -67,6 +69,7 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             emit_aarch64_call_expr(expr, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::Integer(value) => emit_aarch64_i32_to_register(*value, "w0", assembly),
+        LoweredExpr::LongInteger(value) => emit_aarch64_i64_to_register(*value, "x0", assembly),
         LoweredExpr::DoubleLiteral(value) => {
             emit_aarch64_load_double_literal(value, labels, assembly)
         }

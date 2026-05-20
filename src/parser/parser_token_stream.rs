@@ -23,12 +23,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn expect_integer(&mut self) -> CompileResult<i64> {
-        if let Some(Token {
-            kind: TokenKind::Integer(value),
-            ..
-        }) = self.peek()
-        {
-            let value = *value;
+        if let Some(value) = self.peek().and_then(|token| token.kind.integer_value()) {
             self.advance();
             return Ok(value);
         }

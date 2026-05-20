@@ -74,6 +74,7 @@ pub(in crate::codegen) fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         LoweredExpr::Cast { target, expr } => cast_width(*target, expr),
         LoweredExpr::DoubleLiteral(_) => ValueWidth::F64,
         LoweredExpr::StringLiteral(_)
+        | LoweredExpr::LongInteger(_)
         | LoweredExpr::LocalAddress { .. }
         | LoweredExpr::GlobalAddress { .. }
         | LoweredExpr::GlobalPointerSubscript { .. }
@@ -147,10 +148,23 @@ pub(in crate::codegen) fn binary_operand_width(
     left: &LoweredExpr,
     right: &LoweredExpr,
 ) -> ValueWidth {
-    if matches!(op, BinaryOp::LogicalAnd | BinaryOp::LogicalOr) {
-        ValueWidth::I32
-    } else {
-        expr_width(left).max(expr_width(right))
+    match op {
+        BinaryOp::LogicalAnd | BinaryOp::LogicalOr => ValueWidth::I32,
+        BinaryOp::ShiftLeft | BinaryOp::ShiftRight => expr_width(left),
+        BinaryOp::Mul
+        | BinaryOp::Div
+        | BinaryOp::Mod
+        | BinaryOp::Add
+        | BinaryOp::Sub
+        | BinaryOp::Less
+        | BinaryOp::LessEqual
+        | BinaryOp::Greater
+        | BinaryOp::GreaterEqual
+        | BinaryOp::Equal
+        | BinaryOp::NotEqual
+        | BinaryOp::BitAnd
+        | BinaryOp::BitXor
+        | BinaryOp::BitOr => expr_width(left).max(expr_width(right)),
     }
 }
 

@@ -41,11 +41,27 @@ pub enum Keyword {
 pub enum TokenKind {
     Identifier(String),
     Integer(i64),
+    LongInteger(i64),
     StringLiteral(String),
     CharLiteral(char),
     Keyword(Keyword),
     Punctuator(String),
     End,
+}
+
+impl TokenKind {
+    #[must_use]
+    pub const fn integer_value(&self) -> Option<i64> {
+        match self {
+            Self::Integer(value) | Self::LongInteger(value) => Some(*value),
+            Self::Identifier(_)
+            | Self::StringLiteral(_)
+            | Self::CharLiteral(_)
+            | Self::Keyword(_)
+            | Self::Punctuator(_)
+            | Self::End => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

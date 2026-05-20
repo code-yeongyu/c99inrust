@@ -43,6 +43,7 @@ fn expr_is_pointer(expr: &LoweredExpr) -> bool {
         LoweredExpr::Comma { right, .. } => expr_is_pointer(right),
         LoweredExpr::IndirectCall { .. }
         | LoweredExpr::Integer(_)
+        | LoweredExpr::LongInteger(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::GlobalIntSubscript { .. }

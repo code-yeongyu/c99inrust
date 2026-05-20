@@ -18,7 +18,7 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Identifier(name) => Err(CompileError::new(format!(
             "identifier {name} is not a constant expression"
         ))),
-        Expr::Integer(value) => Ok(*value),
+        Expr::Integer(value) | Expr::LongInteger(value) => Ok(*value),
         Expr::DoubleLiteral(_) => Err(CompileError::new(
             "double literal is not an integer constant expression",
         )),

@@ -74,6 +74,7 @@ pub(in crate::codegen) fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool 
             expr_needs_preserved_temp(callee) || args.iter().any(expr_needs_preserved_temp)
         }
         LoweredExpr::Integer(_)
+        | LoweredExpr::LongInteger(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }
@@ -124,6 +125,7 @@ pub(in crate::codegen) fn expr_uses_call(expr: &LoweredExpr) -> bool {
     match expr {
         LoweredExpr::Call { .. } | LoweredExpr::IndirectCall { .. } => true,
         LoweredExpr::Integer(_)
+        | LoweredExpr::LongInteger(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::StringLiteral(_)
         | LoweredExpr::Global { .. }

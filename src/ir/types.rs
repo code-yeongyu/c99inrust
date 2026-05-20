@@ -122,6 +122,7 @@ pub enum LoweredExpr {
         args: Vec<Self>,
     },
     Integer(i64),
+    LongInteger(i64),
     DoubleLiteral(String),
     StringLiteral(String),
     Global {

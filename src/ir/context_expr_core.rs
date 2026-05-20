@@ -9,6 +9,7 @@ impl LoweringContext {
             Expr::IndirectCall { callee, args } => self.lower_indirect_call_expr(callee, args),
             Expr::Identifier(name) => self.lower_identifier_expr(name),
             Expr::Integer(value) => Ok(LoweredExpr::Integer(*value)),
+            Expr::LongInteger(value) => Ok(LoweredExpr::LongInteger(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
             Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
             Expr::Member {

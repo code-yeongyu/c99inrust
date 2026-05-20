@@ -1,5 +1,5 @@
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::front_end::lexer::{Token, TokenKind};
+use crate::front_end::lexer::Token;
 
 use super::declarator_types::{integer_parameter_type, pointer_referent_from_specifiers};
 use super::global_byte_declarations::parse_unsigned_char_array_length;
@@ -35,10 +35,13 @@ pub(super) fn struct_field_array_shape(
     } else if is_flexible_member {
         0
     } else {
-        match &tokens.get(open_bracket + 1)?.kind {
-            TokenKind::Integer(value) => usize::try_from(*value).ok().filter(|length| *length > 0),
-            _ => Some(1),
-        }?
+        tokens
+            .get(open_bracket + 1)?
+            .kind
+            .integer_value()
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|length| *length > 0)
+            .or(Some(1))?
     };
     if close_bracket <= open_bracket {
         return None;

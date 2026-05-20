@@ -107,10 +107,11 @@ impl Parser<'_> {
                     self.advance();
                     if self.check_punctuator(".") {
                         self.advance();
-                        let fractional = if matches!(
-                            self.peek().map(|token| &token.kind),
-                            Some(TokenKind::Integer(_))
-                        ) {
+                        let fractional = if self
+                            .peek()
+                            .and_then(|token| token.kind.integer_value())
+                            .is_some()
+                        {
                             self.expect_integer()?
                         } else {
                             0
@@ -124,6 +125,11 @@ impl Parser<'_> {
                         return Ok(Expr::DoubleLiteral(format!("{value}{exponent}")));
                     }
                     Ok(Expr::Integer(value))
+                }
+                TokenKind::LongInteger(value) => {
+                    let value = *value;
+                    self.advance();
+                    Ok(Expr::LongInteger(value))
                 }
                 TokenKind::CharLiteral(value) => {
                     let value = i64::from(u32::from(*value));
