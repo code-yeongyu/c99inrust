@@ -1,6 +1,6 @@
 use super::{
-    AssignmentOperator, BinaryOp, CompileResult, Expr, Keyword, Parser, UnaryOp, lvalue_from_expr,
-    prefix_update_expr,
+    AssignmentOperator, BinaryOp, CompileResult, Expr, Keyword, Parser, ScalarType, UnaryOp,
+    lvalue_from_expr, prefix_update_expr, token_is_punctuator,
 };
 
 impl Parser<'_> {
@@ -136,6 +136,14 @@ impl Parser<'_> {
 
     pub(super) fn unary(&mut self) -> CompileResult<Expr> {
         if let Some((target, referent, next_index)) = self.cast_type_at_current() {
+            if self
+                .tokens
+                .get(next_index)
+                .is_some_and(|token| token_is_punctuator(token, "{"))
+            {
+                self.index = next_index;
+                return self.scalar_compound_literal(target, referent);
+            }
             self.index = next_index;
             return Ok(Expr::Cast {
                 target,
@@ -184,5 +192,23 @@ impl Parser<'_> {
             });
         }
         self.postfix()
+    }
+
+    fn scalar_compound_literal(
+        &mut self,
+        target: ScalarType,
+        referent: Option<String>,
+    ) -> CompileResult<Expr> {
+        self.expect_punctuator("{")?;
+        let expr = self.expression()?;
+        if self.check_punctuator(",") {
+            self.advance();
+        }
+        self.expect_punctuator("}")?;
+        Ok(Expr::Cast {
+            target,
+            referent,
+            expr: Box::new(expr),
+        })
     }
 }

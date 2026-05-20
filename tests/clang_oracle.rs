@@ -1,3 +1,5 @@
+#[path = "clang_oracle/c99_edge_cases.rs"]
+mod c99_edge_cases;
 #[path = "clang_oracle/control_flow.rs"]
 mod control_flow;
 #[path = "clang_oracle/functions_and_signatures.rs"]

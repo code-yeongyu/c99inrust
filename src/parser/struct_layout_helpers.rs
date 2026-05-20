@@ -29,8 +29,11 @@ pub(super) fn struct_field_array_shape(
     let open_bracket = top_level_punctuator_index(tokens, "[")?;
     let close_bracket = matching_top_level_bracket(tokens, open_bracket)?;
     let length_tokens = &tokens[open_bracket + 1..close_bracket];
+    let is_flexible_member = length_tokens.is_empty();
     let rows = if let Ok(length) = parse_unsigned_char_array_length(length_tokens, constants) {
         length
+    } else if is_flexible_member {
+        0
     } else {
         match &tokens.get(open_bracket + 1)?.kind {
             TokenKind::Integer(value) => usize::try_from(*value).ok().filter(|length| *length > 0),

@@ -2,7 +2,8 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::token_scan::{
-    matching_top_level_brace, token_identifier, token_is_punctuator, top_level_punctuator_index,
+    matching_top_level_brace, matching_top_level_bracket, token_identifier, token_is_punctuator,
+    top_level_punctuator_index,
 };
 use super::{Constant, GlobalInitializer, parse_integer_initializer_with_context};
 
@@ -66,12 +67,35 @@ pub(super) fn parse_int_array_initializer(
                     .at(tokens[start].line, tokens[start].column),
             );
         }
+        let item = &item[..item_len];
+        let (index, value_tokens) = if token_is_punctuator(&item[0], "[") {
+            let close = matching_top_level_bracket(item, 0)
+                .ok_or_else(|| CompileError::new("unterminated global int array designator"))?;
+            let Some(_assign) = item
+                .get(close + 1)
+                .filter(|token| token_is_punctuator(token, "="))
+            else {
+                return Err(CompileError::new(
+                    "expected global int array designator assignment",
+                ));
+            };
+            let index =
+                parse_integer_initializer_with_context(&item[1..close], constants, sizeof_symbols)?;
+            let index = usize::try_from(index)
+                .map_err(|_| CompileError::new("global int array designator is negative"))?;
+            (index, &item[(close + 2)..])
+        } else {
+            (values.len(), item)
+        };
         let value =
-            parse_integer_initializer_with_context(&item[..item_len], constants, sizeof_symbols)?;
-        values.push(i32::try_from(value).map_err(|_| {
+            parse_integer_initializer_with_context(value_tokens, constants, sizeof_symbols)?;
+        if values.len() <= index {
+            values.resize(index + 1, 0);
+        }
+        values[index] = i32::try_from(value).map_err(|_| {
             CompileError::new("global int array initializer does not fit i32")
                 .at(tokens[start].line, tokens[start].column)
-        })?);
+        })?;
         start += item_len;
         if start < close_brace {
             start += 1;
