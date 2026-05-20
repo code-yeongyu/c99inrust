@@ -168,7 +168,7 @@ impl Parser<'_> {
             return Ok(values);
         }
         loop {
-            let Expr::StringLiteral(value) = self.expression()? else {
+            let Expr::StringLiteral(value) = self.assignment()? else {
                 return Err(CompileError::new(
                     "local char matrix initializers require string literals",
                 ));

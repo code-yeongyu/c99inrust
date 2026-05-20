@@ -1,7 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{BinaryOp, Expr, FieldType, ScalarType};
 
-use super::{GlobalBinding, LoweringContext, POINTER_REFERENT, pointer_arithmetic};
+use super::{GlobalBinding, LocalBinding, LoweringContext, POINTER_REFERENT, pointer_arithmetic};
 
 pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> CompileResult<String> {
     if let Expr::Identifier(name) = expr
@@ -62,6 +62,14 @@ pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> Compile
 }
 
 fn array_referent(context: &LoweringContext, array: &Expr) -> Option<String> {
+    if let Expr::Identifier(name) = array
+        && matches!(
+            context.local_binding(name),
+            Some(LocalBinding::CharMatrix { .. })
+        )
+    {
+        return Some("char".to_owned());
+    }
     if let Expr::Identifier(name) = array
         && let Some(GlobalBinding::UnsignedCharMatrix { is_unsigned, .. }) =
             context.global_bindings.get(name)

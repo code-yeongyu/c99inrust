@@ -184,7 +184,7 @@ impl Parser<'_> {
                     type_includes_char,
                     type_includes_short,
                     type_is_unsigned,
-                    self.expression()?,
+                    self.assignment()?,
                 );
                 Statement::Declaration {
                     is_static,

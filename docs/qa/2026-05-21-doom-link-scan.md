@@ -55,3 +55,31 @@ compile_ok=62 compile_fail=0
 link_status=0
 conclusion=success
 ```
+
+## Local Matrix And Static Initializer Recheck
+
+Date: 2026-05-21 08:31 KST
+Commit: working tree after `7578468 fix(c99): support next-wave oracle edges`
+
+This rechecked the no-IWAD compile/link gate after adding clang-oracle coverage
+for local `char` matrix row decay, nested byte reads, `sizeof` on matrix rows,
+and static local multi-declaration initializers. This did not run DISPLAY, VNC,
+Xvfb, manual play, or any IWAD-backed smoke.
+
+Command:
+
+```bash
+tools/doom-link-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-link-scan-7578468-edge-more
+```
+
+Result:
+
+```text
+official-doom-root=/tmp/c99inrust-doom-src
+linuxdoom=/tmp/c99inrust-doom-src/linuxdoom-1.10
+compiler=target/debug/c99inrust
+compile_ok=62 compile_fail=0
+link_status=0
+/out/linuxdoom-c99inrust: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=0559184d31ed27429c4f94a0451120a9eff614fa, for GNU/Linux 3.2.0, with debug_info, not stripped
+binary=/tmp/c99inrust-doom-link-scan-7578468-edge-more/linuxdoom-c99inrust
+```

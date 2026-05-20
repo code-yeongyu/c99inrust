@@ -21,9 +21,23 @@ fn expression_size(context: &LoweringContext, expr: &Expr) -> CompileResult<Opti
     match expr {
         Expr::Identifier(name) => identifier_size(context, name),
         Expr::Dereference { pointer } => pointer_element_size(context, pointer).map(Some),
-        Expr::Subscript { array, .. } => Ok(pointer_element_size(context, array).ok()),
+        Expr::Subscript { array, .. } => Ok(subscript_size(context, array)),
         _ => Ok(None),
     }
+}
+
+fn subscript_size(context: &LoweringContext, array: &Expr) -> Option<usize> {
+    if let Expr::Identifier(name) = array {
+        if let Some(LocalBinding::CharMatrix { columns, .. }) = context.local_binding(name) {
+            return Some(columns);
+        }
+        if let Some(GlobalBinding::UnsignedCharMatrix { columns, .. }) =
+            context.global_bindings.get(name)
+        {
+            return Some(*columns);
+        }
+    }
+    pointer_element_size(context, array).ok()
 }
 
 fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Option<usize>> {

@@ -152,3 +152,23 @@ fn comma_expression_initializer_order_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn local_char_matrix_string_rows_match_host_stdout_and_exit_code() {
+    // given
+    let name = "local_char_matrix_string_rows";
+    let source = "int puts(char*); int main(void) { char names[3][7] = { \"e2m1\", \"dphoof\", \"spida1\" }; int index = 1; puts(names[index]); return names[0][2] == 'm' && names[index][3] == 'o' && sizeof(names) == 21 && sizeof(names[0]) == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_multi_declaration_initializers_match_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_multi_declaration_initializers";
+    let source = "int puts(char*); int step(int value) { static int last = -1, seen = 2; if (last != value) { seen = seen + 3; last = value; } return seen + last; } int main(void) { puts(\"static-multi\"); return step(4) == 9 && step(4) == 9 && step(7) == 15 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
