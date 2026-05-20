@@ -14,6 +14,7 @@ mod local_array;
 mod pointer_arithmetic;
 mod pointer_referent;
 mod sizeof_expr;
+mod static_local;
 mod struct_initializer;
 
 const POINTER_REFERENT: &str = "*";
@@ -272,20 +273,22 @@ pub fn lower(program: &Program) -> CompileResult<LoweredProgram> {
         .map(|layout| (layout.name.clone(), layout.clone()))
         .collect::<HashMap<_, _>>();
     let constants = lower_constants(&program.constants)?;
-    let (globals, global_bindings) = lower_globals(&program.globals, &constants, &structs)?;
+    let (mut globals, global_bindings) = lower_globals(&program.globals, &constants, &structs)?;
     let pointer_return_functions =
         lower_pointer_return_functions(&program.pointer_return_functions);
     let function_names = lower_function_names(&program.functions, &program.function_prototypes);
     let mut functions = Vec::with_capacity(program.functions.len());
     for function in &program.functions {
-        functions.push(lower_function_with_globals(
+        let lowered = lower_function_with_globals(
             function,
             &structs,
             &global_bindings,
             &constants,
             &pointer_return_functions,
             &function_names,
-        )?);
+        )?;
+        globals.extend(lowered.static_globals);
+        functions.push(lowered.function);
     }
     let constant_returns = constant_return_functions(&functions);
     inline_constant_calls(&mut functions, &constant_returns);
@@ -860,6 +863,12 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
         &pointer_return_functions,
         &function_names,
     )
+    .map(|lowered| lowered.function)
+}
+
+struct LoweredFunctionWithStatics {
+    function: LoweredFunction,
+    static_globals: Vec<LoweredGlobal>,
 }
 
 fn lower_function_with_globals(
@@ -869,8 +878,9 @@ fn lower_function_with_globals(
     constants: &HashMap<String, i64>,
     pointer_return_functions: &HashMap<String, Option<String>>,
     function_names: &HashSet<String>,
-) -> CompileResult<LoweredFunction> {
+) -> CompileResult<LoweredFunctionWithStatics> {
     let mut context = LoweringContext::new(
+        &function.name,
         function.return_type,
         structs,
         global_bindings,
@@ -907,14 +917,17 @@ fn lower_function_with_globals(
     if function.return_type == ReturnType::Void && !ends_with_return(&context.instructions) {
         context.instructions.push(Instruction::Return(None));
     }
-    Ok(LoweredFunction {
-        name: function.name.clone(),
-        return_type: function.return_type,
-        parameter_count: function.parameters.len(),
-        is_variadic: function.is_variadic,
-        variadic_save_slot,
-        local_slots: context.local_slots,
-        instructions: context.instructions,
+    Ok(LoweredFunctionWithStatics {
+        function: LoweredFunction {
+            name: function.name.clone(),
+            return_type: function.return_type,
+            parameter_count: function.parameters.len(),
+            is_variadic: function.is_variadic,
+            variadic_save_slot,
+            local_slots: context.local_slots,
+            instructions: context.instructions,
+        },
+        static_globals: context.static_globals,
     })
 }
 
@@ -922,6 +935,11 @@ fn lower_function_with_globals(
 enum LocalBinding {
     Scalar {
         slot: usize,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    },
+    StaticScalar {
+        global_name: String,
         scalar_type: ScalarType,
         referent: Option<String>,
     },
@@ -1050,9 +1068,11 @@ type ArrayFieldSubscript = (LoweredExpr, ScalarType, usize, bool);
 type NestedArrayFieldSubscript = (LoweredExpr, LoweredExpr, ScalarType, usize, bool);
 
 struct LoweringContext {
+    function_name: String,
     return_type: ReturnType,
     structs: HashMap<String, StructLayout>,
     global_bindings: HashMap<String, GlobalBinding>,
+    static_globals: Vec<LoweredGlobal>,
     constants: HashMap<String, i64>,
     pointer_return_functions: HashMap<String, Option<String>>,
     function_names: HashSet<String>,
@@ -1069,6 +1089,7 @@ struct LoweringContext {
 
 impl LoweringContext {
     fn new(
+        function_name: &str,
         return_type: ReturnType,
         structs: &HashMap<String, StructLayout>,
         global_bindings: &HashMap<String, GlobalBinding>,
@@ -1077,9 +1098,11 @@ impl LoweringContext {
         function_names: &HashSet<String>,
     ) -> Self {
         Self {
+            function_name: function_name.to_owned(),
             return_type,
             structs: structs.clone(),
             global_bindings: global_bindings.clone(),
+            static_globals: Vec::new(),
             constants: constants.clone(),
             pointer_return_functions: pointer_return_functions.clone(),
             function_names: function_names.clone(),
@@ -1100,11 +1123,18 @@ impl LoweringContext {
             Statement::Empty => Ok(()),
             Statement::Block(statements) => self.lower_block(statements),
             Statement::Declaration {
+                is_static,
                 scalar_type,
                 name,
                 referent,
                 initializer,
-            } => self.lower_declaration(*scalar_type, name, referent.clone(), initializer.as_ref()),
+            } => self.lower_declaration(
+                *is_static,
+                *scalar_type,
+                name,
+                referent.clone(),
+                initializer.as_ref(),
+            ),
             Statement::LocalCharArray {
                 name,
                 length,
@@ -1250,11 +1280,15 @@ impl LoweringContext {
 
     fn lower_declaration(
         &mut self,
+        is_static: bool,
         scalar_type: ScalarType,
         name: &str,
         referent: Option<String>,
         initializer: Option<&Expr>,
     ) -> CompileResult<()> {
+        if is_static {
+            return self.lower_static_declaration(scalar_type, name, referent, initializer);
+        }
         let slot = self.declare_local(name, scalar_type, referent)?;
         let value = initializer.map_or_else(
             || Ok(zero_expr_for(scalar_type)),
@@ -1265,6 +1299,29 @@ impl LoweringContext {
             offset: self.local_offset(slot)?,
             scalar_type,
             value,
+        });
+        Ok(())
+    }
+
+    fn lower_static_declaration(
+        &mut self,
+        scalar_type: ScalarType,
+        name: &str,
+        referent: Option<String>,
+        initializer: Option<&Expr>,
+    ) -> CompileResult<()> {
+        if !matches!(scalar_type, ScalarType::Int | ScalarType::Pointer) {
+            return Err(CompileError::new(
+                "static local currently supports int and pointer scalars only",
+            ));
+        }
+        let initializer =
+            static_local::scalar_initializer(scalar_type, initializer, &self.constants)?;
+        let global_name = self.declare_static_scalar(name, scalar_type, referent)?;
+        self.static_globals.push(LoweredGlobal {
+            name: global_name,
+            is_static: true,
+            initializer,
         });
         Ok(())
     }
@@ -1585,6 +1642,25 @@ impl LoweringContext {
         )
     }
 
+    fn declare_static_scalar(
+        &mut self,
+        name: &str,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    ) -> CompileResult<String> {
+        self.ensure_scope_name_available(name)?;
+        let global_name = format!("{}__static__{name}", self.function_name);
+        self.insert_scope_binding(
+            name,
+            LocalBinding::StaticScalar {
+                global_name: global_name.clone(),
+                scalar_type,
+                referent,
+            },
+        )?;
+        Ok(global_name)
+    }
+
     fn declare_anonymous_slot(
         &mut self,
         scalar_type: ScalarType,
@@ -1708,14 +1784,7 @@ impl LoweringContext {
         alignment: usize,
         binding: LocalBinding,
     ) -> CompileResult<usize> {
-        let Some(scope) = self.scopes.last() else {
-            return Err(CompileError::new("internal error: no local scope"));
-        };
-        if scope.contains_key(name) {
-            return Err(CompileError::new(format!(
-                "duplicate local declaration: {name}"
-            )));
-        }
+        self.ensure_scope_name_available(name)?;
         let slot = self.local_slots.len();
         let offset = align_to(self.next_local_offset, alignment);
         self.next_local_offset = offset + byte_size;
@@ -1724,11 +1793,28 @@ impl LoweringContext {
             scalar_type,
             byte_size,
         });
+        self.insert_scope_binding(name, binding)?;
+        Ok(slot)
+    }
+
+    fn ensure_scope_name_available(&self, name: &str) -> CompileResult<()> {
+        let Some(scope) = self.scopes.last() else {
+            return Err(CompileError::new("internal error: no local scope"));
+        };
+        if scope.contains_key(name) {
+            return Err(CompileError::new(format!(
+                "duplicate local declaration: {name}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn insert_scope_binding(&mut self, name: &str, binding: LocalBinding) -> CompileResult<()> {
         let Some(scope) = self.scopes.last_mut() else {
             return Err(CompileError::new("internal error: no local scope"));
         };
         scope.insert(name.to_string(), binding);
-        Ok(slot)
+        Ok(())
     }
 
     fn pop_scope(&mut self) -> CompileResult<()> {
@@ -1844,8 +1930,17 @@ impl LoweringContext {
     }
 
     fn callee_is_pointer_binding(&self, callee: &str) -> bool {
-        if let Some(LocalBinding::Scalar { scalar_type, .. }) = self.local_binding(callee) {
-            return scalar_type == ScalarType::Pointer;
+        if let Some(binding) = self.local_binding(callee) {
+            return matches!(
+                binding,
+                LocalBinding::Scalar {
+                    scalar_type: ScalarType::Pointer,
+                    ..
+                } | LocalBinding::StaticScalar {
+                    scalar_type: ScalarType::Pointer,
+                    ..
+                }
+            );
         }
         self.global_bindings
             .get(callee)
@@ -1938,6 +2033,14 @@ impl LoweringContext {
                 slot, scalar_type, ..
             } => Ok(LoweredExpr::Local {
                 offset: self.local_offset(*slot)?,
+                scalar_type: *scalar_type,
+            }),
+            LocalBinding::StaticScalar {
+                global_name,
+                scalar_type,
+                ..
+            } => Ok(LoweredExpr::Global {
+                name: global_name.clone(),
                 scalar_type: *scalar_type,
             }),
             LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
@@ -2106,6 +2209,14 @@ impl LoweringContext {
                         } => Ok(LoweredLValue::Local {
                             slot,
                             offset: self.local_offset(slot)?,
+                            scalar_type,
+                        }),
+                        LocalBinding::StaticScalar {
+                            global_name,
+                            scalar_type,
+                            ..
+                        } => Ok(LoweredLValue::Global {
+                            name: global_name,
                             scalar_type,
                         }),
                         LocalBinding::CharArray { .. }
@@ -2727,6 +2838,11 @@ impl LoweringContext {
 
     fn lower_address_of_local_binding(&self, binding: &LocalBinding) -> CompileResult<LoweredExpr> {
         let (slot, byte_size) = match binding {
+            LocalBinding::StaticScalar { global_name, .. } => {
+                return Ok(LoweredExpr::GlobalAddress {
+                    name: global_name.clone(),
+                });
+            }
             LocalBinding::Scalar {
                 slot, scalar_type, ..
             } => (*slot, scalar_size(*scalar_type)),
@@ -3305,6 +3421,10 @@ impl LoweringContext {
         if let Some(binding) = self.local_binding(name) {
             return match binding {
                 LocalBinding::Scalar {
+                    referent: Some(referent),
+                    ..
+                }
+                | LocalBinding::StaticScalar {
                     referent: Some(referent),
                     ..
                 } => Some(referent),

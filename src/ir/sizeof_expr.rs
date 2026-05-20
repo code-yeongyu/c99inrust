@@ -46,7 +46,8 @@ fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Optio
 
 fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
     match binding {
-        LocalBinding::Scalar { scalar_type, .. } => Ok(scalar_size(*scalar_type)),
+        LocalBinding::Scalar { scalar_type, .. }
+        | LocalBinding::StaticScalar { scalar_type, .. } => Ok(scalar_size(*scalar_type)),
         LocalBinding::CharArray { length, .. } => Ok(*length),
         LocalBinding::CharMatrix { rows, columns, .. } => {
             local_char_matrix_byte_size(*rows, *columns)

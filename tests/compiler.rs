@@ -626,10 +626,45 @@ int main(void) {
         emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
 
     // then
-    assert!(assembly.contains("main:"));
-    assert!(assembly.contains("\tmovl $0, %eax\n\tmovl %eax, -4(%rbp)\n"));
-    assert!(assembly.contains("\tnegl %eax\n\tmovl %eax, -8(%rbp)\n"));
-    assert!(assembly.contains("\tnegl %eax\n\tmovl %eax, -12(%rbp)\n"));
+    assert!(assembly.contains("main__static__nexttic:\n\t.long 0\n"));
+    assert!(assembly.contains("main__static__lastlevel:\n\t.long -1\n"));
+    assert!(assembly.contains("main__static__lastepisode:\n\t.long -1\n"));
+    assert!(assembly.contains("\tmovl main__static__lastlevel(%rip), %eax\n"));
+    assert!(assembly.contains("\tmovl %eax, main__static__lastlevel(%rip)\n"));
+    assert!(!assembly.contains("\tmovl %eax, -8(%rbp)\n"));
+}
+
+#[test]
+fn compiler_persists_doom_gettime_static_basetime_slice() {
+    // given
+    let source = r"int get(void);
+int I_GetTime(void) {
+    int now;
+    int out;
+    static int basetime = 0;
+    now = get();
+    if (!basetime) basetime = now;
+    out = now - basetime;
+    return out;
+}";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse_supported_translation_unit(&tokens).expect("translation unit should parse");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let function = lowered
+        .functions
+        .iter()
+        .find(|function| function.name == "I_GetTime")
+        .expect("I_GetTime should lower");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(assembly.contains("I_GetTime__static__basetime:\n\t.long 0\n"));
+    assert!(assembly.contains("\tmovl I_GetTime__static__basetime(%rip), %eax\n"));
+    assert!(assembly.contains("\tmovl %eax, I_GetTime__static__basetime(%rip)\n"));
+    assert_eq!(function.local_slots.len(), 2);
 }
 
 #[test]
@@ -657,7 +692,8 @@ int display(skill_t skill) {
 
     // then
     assert!(assembly.contains("display:"));
-    assert!(assembly.contains("\tnegl %eax\n\tmovl %eax, -"));
+    assert!(assembly.contains("display__static__oldgamestate:\n\t.long -1\n"));
+    assert!(assembly.contains("\tmovl display__static__oldgamestate(%rip), %eax\n"));
     assert!(assembly.contains("\taddl"));
 }
 

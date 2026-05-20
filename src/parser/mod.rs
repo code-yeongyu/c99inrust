@@ -248,6 +248,7 @@ pub enum Statement {
     Empty,
     Block(Vec<Self>),
     Declaration {
+        is_static: bool,
         scalar_type: ScalarType,
         name: String,
         referent: Option<String>,
@@ -965,6 +966,9 @@ impl Parser<'_> {
         let type_is_unsigned = type_tokens
             .iter()
             .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Unsigned)));
+        let is_static = type_tokens
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Static)));
         let type_includes_char = self.consume_declaration_type(base_type)?;
         let mut declarations = Vec::new();
         loop {
@@ -992,6 +996,7 @@ impl Parser<'_> {
             } else if self.check_punctuator("=") {
                 self.advance();
                 Statement::Declaration {
+                    is_static,
                     scalar_type,
                     name,
                     referent,
@@ -999,6 +1004,7 @@ impl Parser<'_> {
                 }
             } else {
                 Statement::Declaration {
+                    is_static,
                     scalar_type,
                     name,
                     referent,
@@ -1619,6 +1625,7 @@ impl Parser<'_> {
         };
         self.index += semicolon_index + 1;
         Ok(Some(Statement::Declaration {
+            is_static: false,
             scalar_type: ScalarType::Int,
             name,
             referent: None,
