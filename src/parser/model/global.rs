@@ -1,0 +1,143 @@
+use super::ScalarType;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Constant {
+    pub name: String,
+    pub value: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Global {
+    pub name: String,
+    pub is_static: bool,
+    pub initializer: GlobalInitializer,
+}
+
+impl Global {
+    pub(in crate::parser) const fn new(name: String, initializer: GlobalInitializer) -> Self {
+        Self {
+            name,
+            is_static: false,
+            initializer,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PointerReturnFunction {
+    pub name: String,
+    pub referent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlobalInitializer {
+    Extern(ScalarType),
+    ExternPointer {
+        referent: Option<String>,
+    },
+    ExternIntArray,
+    ExternShortArray {
+        is_unsigned: bool,
+        columns: Option<usize>,
+    },
+    ExternPointerArray {
+        referent: Option<String>,
+        columns: Option<usize>,
+    },
+    ExternUnsignedCharArray,
+    ExternUnsignedCharMatrix {
+        columns: usize,
+    },
+    ExternStructArray {
+        struct_name: String,
+    },
+    ExternStructObject {
+        struct_name: String,
+    },
+    Int(i64),
+    IntArray(Vec<i32>),
+    ShortArray {
+        values: Vec<i32>,
+        is_unsigned: bool,
+        columns: Option<usize>,
+    },
+    IntMatrix {
+        values: Vec<i32>,
+        columns: usize,
+    },
+    IntConstant(String),
+    DoubleArray {
+        length: usize,
+    },
+    PointerNull {
+        referent: Option<String>,
+    },
+    PointerString {
+        referent: Option<String>,
+        value: String,
+    },
+    PointerSubscriptAddress {
+        referent: Option<String>,
+        base: String,
+        index: usize,
+    },
+    PointerArray {
+        referent: Option<String>,
+        length: usize,
+        columns: Option<usize>,
+    },
+    PointerStringArray {
+        referent: Option<String>,
+        values: Vec<String>,
+    },
+    PointerNameArray {
+        referent: Option<String>,
+        values: Vec<String>,
+        length: usize,
+    },
+    StructObject {
+        struct_name: String,
+        values: Vec<GlobalStructInitializerValue>,
+    },
+    StructArray {
+        struct_name: String,
+        length: usize,
+        columns: Option<usize>,
+        values: Vec<Vec<GlobalStructInitializerValue>>,
+    },
+    UnsignedCharArray(Vec<u8>),
+    UnsignedCharMatrix {
+        values: Vec<u8>,
+        columns: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlobalStructInitializerValue {
+    Integer(i64),
+    String(String),
+    Address(GlobalStructInitializerAddress),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalStructInitializerAddress {
+    pub base: String,
+    pub index: Option<usize>,
+}
+
+impl GlobalInitializer {
+    pub(in crate::parser) const fn is_extern(&self) -> bool {
+        matches!(
+            self,
+            Self::Extern(_)
+                | Self::ExternPointer { .. }
+                | Self::ExternIntArray
+                | Self::ExternShortArray { .. }
+                | Self::ExternPointerArray { .. }
+                | Self::ExternUnsignedCharArray
+                | Self::ExternUnsignedCharMatrix { .. }
+                | Self::ExternStructArray { .. }
+                | Self::ExternStructObject { .. }
+        )
+    }
+}
