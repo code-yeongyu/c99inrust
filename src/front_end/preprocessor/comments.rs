@@ -1,5 +1,24 @@
 use crate::diagnostics::{CompileError, CompileResult};
 
+pub(super) fn translate_trigraphs(source: &str) -> String {
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut translated = String::new();
+    let mut index = 0usize;
+    while index < chars.len() {
+        if chars.get(index) == Some(&'?')
+            && chars.get(index + 1) == Some(&'?')
+            && let Some(value) = trigraph_replacement(chars.get(index + 2).copied())
+        {
+            translated.push(value);
+            index += 3;
+            continue;
+        }
+        translated.push(chars[index]);
+        index += 1;
+    }
+    translate_digraphs(&translated)
+}
+
 pub(super) fn splice_lines(source: &str) -> String {
     source.replace("\\\r\n", "").replace("\\\n", "")
 }
@@ -100,6 +119,85 @@ fn copy_quoted_and_update_position(
         if current == quote {
             break;
         }
+    }
+}
+
+fn translate_digraphs(source: &str) -> String {
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut output = String::new();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let current = chars[index];
+        if current == '"' || current == '\'' {
+            copy_quoted(&chars, &mut index, &mut output);
+            continue;
+        }
+        if chars.get(index) == Some(&'%')
+            && chars.get(index + 1) == Some(&':')
+            && chars.get(index + 2) == Some(&'%')
+            && chars.get(index + 3) == Some(&':')
+        {
+            output.push_str("##");
+            index += 4;
+            continue;
+        }
+        if let Some((replacement, width)) = digraph_replacement(&chars[index..]) {
+            output.push_str(replacement);
+            index += width;
+            continue;
+        }
+        output.push(current);
+        index += 1;
+    }
+    output
+}
+
+fn copy_quoted(chars: &[char], index: &mut usize, output: &mut String) {
+    let quote = chars[*index];
+    let mut escaped = false;
+    output.push(quote);
+    *index += 1;
+    while *index < chars.len() {
+        let current = chars[*index];
+        output.push(current);
+        *index += 1;
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if current == '\\' {
+            escaped = true;
+            continue;
+        }
+        if current == quote {
+            break;
+        }
+    }
+}
+
+const fn trigraph_replacement(value: Option<char>) -> Option<char> {
+    match value {
+        Some('=') => Some('#'),
+        Some('/') => Some('\\'),
+        Some('\'') => Some('^'),
+        Some('(') => Some('['),
+        Some(')') => Some(']'),
+        Some('!') => Some('|'),
+        Some('<') => Some('{'),
+        Some('>') => Some('}'),
+        Some('-') => Some('~'),
+        _ => None,
+    }
+}
+
+fn digraph_replacement(chars: &[char]) -> Option<(&'static str, usize)> {
+    match (chars.first(), chars.get(1)) {
+        (Some('<'), Some(':')) => Some(("[", 2)),
+        (Some(':'), Some('>')) => Some(("]", 2)),
+        (Some('<'), Some('%')) => Some(("{", 2)),
+        (Some('%'), Some('>')) => Some(("}", 2)),
+        (Some('%'), Some(':')) => Some(("#", 2)),
+        _ => None,
     }
 }
 

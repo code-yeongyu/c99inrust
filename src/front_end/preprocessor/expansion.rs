@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::definition::MacroDefinition;
+use super::macro_operators::replace_params;
 
 pub(super) fn expand_macros(line: &str, macros: &HashMap<String, MacroDefinition>) -> String {
     let mut current = line.to_string();
@@ -138,33 +139,6 @@ fn read_macro_args(chars: &[char], index: &mut usize) -> Option<Vec<String>> {
         }
     }
     None
-}
-
-fn replace_params(replacement: &str, params: &[String], args: &[String]) -> String {
-    let chars = replacement.chars().collect::<Vec<_>>();
-    let mut output = String::new();
-    let mut index = 0usize;
-    while index < chars.len() {
-        let current = chars[index];
-        if current == '"' || current == '\'' {
-            copy_quoted(&chars, &mut index, &mut output);
-            continue;
-        }
-        if is_identifier_start(current) {
-            let identifier = read_identifier(&chars, &mut index);
-            if let Some(param_index) = params.iter().position(|param| param == &identifier) {
-                if let Some(arg) = args.get(param_index) {
-                    output.push_str(arg);
-                }
-            } else {
-                output.push_str(&identifier);
-            }
-            continue;
-        }
-        output.push(current);
-        index += 1;
-    }
-    output
 }
 
 fn copy_quoted(chars: &[char], index: &mut usize, output: &mut String) {
