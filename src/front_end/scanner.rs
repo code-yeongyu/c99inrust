@@ -31,6 +31,22 @@ impl Scanner {
                 column,
             });
         };
+        if current == 'L' && self.peek() == Some('"') {
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::StringLiteral(self.string_literal()?),
+                line,
+                column,
+            });
+        }
+        if current == 'L' && self.peek() == Some('\'') {
+            self.advance();
+            return Ok(Token {
+                kind: TokenKind::CharLiteral(self.char_literal()?),
+                line,
+                column,
+            });
+        }
         if current.is_ascii_alphabetic() || current == '_' {
             return Ok(Token {
                 kind: self.identifier_or_keyword(),
