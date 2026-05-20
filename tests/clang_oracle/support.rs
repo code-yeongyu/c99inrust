@@ -45,21 +45,21 @@ fn assert_case_matches_host(case: OracleCase, mode: C99InRustMode) {
     fs::write(&source, case.source).expect("oracle source should be written");
 
     // when
-    let c99_status = match mode {
+    let c99_output = match mode {
         C99InRustMode::Compile => compile_with_c99inrust(&source, &c99_asm)
             .and_then(|()| assemble(&c99_asm, &c99_exe))
-            .and_then(|()| run_exit_code(&c99_exe)),
+            .and_then(|()| run_program(&c99_exe)),
         C99InRustMode::Build => {
-            build_with_c99inrust(&source, &c99_exe).and_then(|()| run_exit_code(&c99_exe))
+            build_with_c99inrust(&source, &c99_exe).and_then(|()| run_program(&c99_exe))
         }
     }
     .expect("c99inrust path should compile, link, and run");
-    let clang_status = compile_with_host_c(&source, &clang_exe)
-        .and_then(|()| run_exit_code(&clang_exe))
+    let clang_output = compile_with_host_c(&source, &clang_exe)
+        .and_then(|()| run_program(&clang_exe))
         .expect("host C compiler path should compile and run");
 
     // then
-    assert_eq!(c99_status, clang_status);
+    assert_eq!(c99_output, clang_output);
 }
 
 fn compile_with_c99inrust(source: &Path, output: &Path) -> Result<(), String> {
@@ -125,11 +125,20 @@ fn assemble(source: &Path, output: &Path) -> Result<(), String> {
     }
 }
 
-fn run_exit_code(executable: &Path) -> Result<i32, String> {
-    Command::new(executable)
-        .status()
-        .map_err(|error| format!("failed to run executable: {error}"))
-        .map(|status| status.code().unwrap_or(255))
+#[derive(Debug, PartialEq, Eq)]
+struct ProgramOutput {
+    exit_code: i32,
+    stdout: Vec<u8>,
+}
+
+fn run_program(executable: &Path) -> Result<ProgramOutput, String> {
+    let output = Command::new(executable)
+        .output()
+        .map_err(|error| format!("failed to run executable: {error}"))?;
+    Ok(ProgramOutput {
+        exit_code: output.status.code().unwrap_or(255),
+        stdout: output.stdout,
+    })
 }
 
 fn command_exists(command: &str) -> bool {
