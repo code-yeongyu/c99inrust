@@ -74,7 +74,7 @@ fn cli_compile_writes_target_assembly() {
     assert!(generated.contains("movl $42, %eax"));
 }
 
-fn compiler() -> &'static str {
+const fn compiler() -> &'static str {
     env!("CARGO_BIN_EXE_c99inrust")
 }
 
