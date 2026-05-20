@@ -4,7 +4,10 @@ Recommended GitHub ruleset for `main` when branch protection is re-enabled:
 
 - Require pull request before merging.
 - Require status checks:
-  - `rust`
+  - `rust (ubuntu-24.04)`
+  - `rust (macos-15)`
+  - `rust (windows-2025-vs2026)`
+  - `quality gates`
 - Require branches to be up to date before merge.
 - Block force pushes.
 - Block deletions.

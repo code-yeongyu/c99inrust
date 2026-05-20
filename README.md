@@ -101,7 +101,7 @@ cargo nextest run --all-targets --all-features
 cargo machete
 cargo deny check
 cargo audit
-bash /Users/yeongyu/.agents/skills/rust-programmer/scripts/check-no-excuse-rules.sh src tests
+tools/check-rust-no-excuses.sh src tests
 ```
 
 Manual QA must run the CLI in tmux without `tmux kill-server`.

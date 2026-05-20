@@ -34,6 +34,9 @@
           },
           {
             "context": "rust (windows-2025-vs2026)"
+          },
+          {
+            "context": "quality gates"
           }
         ],
         "strict_required_status_checks_policy": true

@@ -29,3 +29,34 @@ jobs:
         run: rustup run stable cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery -W clippy::cargo
       - name: Test
         run: rustup run stable cargo test --all-targets --all-features
+
+  quality:
+    name: quality gates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        env:
+          GIT_CONFIG_COUNT: "2"
+          GIT_CONFIG_KEY_0: init.defaultBranch
+          GIT_CONFIG_VALUE_0: main
+          GIT_CONFIG_KEY_1: advice.defaultBranchName
+          GIT_CONFIG_VALUE_1: "false"
+      - name: Install stable Rust
+        run: rustup toolchain install stable
+      - name: Install cargo QA tools
+        run: rustup run stable cargo install --locked cargo-audit cargo-deny cargo-machete cargo-nextest
+      - name: Shell syntax
+        run: |
+          bash -n tools/check-rust-no-excuses.sh
+          bash -n tools/doom-compile-scan.sh
+          bash -n tools/doom-smoke.sh
+          bash -n tools/doom-input-smoke.sh
+      - name: Rust no-excuse rules
+        run: tools/check-rust-no-excuses.sh src tests
+      - name: Nextest
+        run: rustup run stable cargo nextest run --all-targets --all-features
+      - name: Dependency and advisory gates
+        run: |
+          rustup run stable cargo machete
+          rustup run stable cargo deny check
+          rustup run stable cargo audit
