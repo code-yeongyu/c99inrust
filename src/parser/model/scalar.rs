@@ -7,6 +7,7 @@ pub enum ReturnType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarType {
+    Bool,
     Int,
     LongLong,
     Double,

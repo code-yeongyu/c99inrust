@@ -97,6 +97,13 @@ impl LoweringContext {
         target: ScalarType,
         expr: &Expr,
     ) -> CompileResult<LoweredExpr> {
+        if target == ScalarType::Bool {
+            return Ok(LoweredExpr::Binary {
+                op: crate::parser::BinaryOp::NotEqual,
+                left: Box::new(self.lower_expr(expr)?),
+                right: Box::new(LoweredExpr::Integer(0)),
+            });
+        }
         let expr = if target == ScalarType::Pointer {
             self.lower_pointer_cast_expr(expr)?
         } else {

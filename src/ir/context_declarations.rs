@@ -21,10 +21,17 @@ impl LoweringContext {
             return self.lower_static_declaration(scalar_type, name, referent, initializer);
         }
         let slot = self.declare_local(name, scalar_type, referent)?;
-        let value = initializer.map_or_else(
-            || Ok(zero_expr_for(scalar_type)),
-            |expr| self.lower_expr(expr),
-        )?;
+        let value = if scalar_type == ScalarType::Bool {
+            initializer.map_or_else(
+                || Ok(zero_expr_for(scalar_type)),
+                |expr| self.lower_cast_expr(ScalarType::Bool, expr),
+            )?
+        } else {
+            initializer.map_or_else(
+                || Ok(zero_expr_for(scalar_type)),
+                |expr| self.lower_expr(expr),
+            )?
+        };
         self.instructions.push(Instruction::StoreLocal {
             slot,
             offset: self.local_offset(slot)?,
@@ -41,7 +48,10 @@ impl LoweringContext {
         referent: Option<String>,
         initializer: Option<&Expr>,
     ) -> CompileResult<()> {
-        if !matches!(scalar_type, ScalarType::Int | ScalarType::Pointer) {
+        if !matches!(
+            scalar_type,
+            ScalarType::Bool | ScalarType::Int | ScalarType::Pointer
+        ) {
             return Err(CompileError::new(
                 "static local currently supports int and pointer scalars only",
             ));

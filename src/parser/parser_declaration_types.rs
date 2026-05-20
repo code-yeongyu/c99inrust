@@ -26,6 +26,7 @@ impl Parser<'_> {
     pub(super) fn declaration_type_span_at_current(&self) -> Option<(ScalarType, usize)> {
         let mut index = self.index;
         let mut saw_type = false;
+        let mut saw_bool = false;
         let mut saw_double = false;
         let mut saw_storage_class = false;
         let mut saw_struct_pointer = false;
@@ -43,6 +44,10 @@ impl Parser<'_> {
                     Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Unsigned,
                 ) => {
                     saw_type = true;
+                }
+                TokenKind::Keyword(Keyword::Bool) => {
+                    saw_type = true;
+                    saw_bool = true;
                 }
                 TokenKind::Keyword(Keyword::Void) => {
                     if !self.struct_pointer_declarator_follows(index + 1) {
@@ -108,21 +113,12 @@ impl Parser<'_> {
             }
             index += 1;
         }
-        if !saw_type {
-            if saw_storage_class {
-                return Some((ScalarType::Int, index));
-            }
-            return None;
-        }
-        if saw_struct_pointer || saw_pointer_typedef {
-            Some((ScalarType::Pointer, index))
-        } else if saw_double && long_count == 0 {
-            Some((ScalarType::Double, index))
-        } else if long_count == 0 {
-            Some((ScalarType::Int, index))
-        } else {
-            Some((ScalarType::LongLong, index))
-        }
+        let flags = bool_flag(saw_type, SAW_TYPE)
+            | bool_flag(saw_storage_class, SAW_STORAGE_CLASS)
+            | bool_flag(saw_struct_pointer || saw_pointer_typedef, SAW_POINTER)
+            | bool_flag(saw_bool, SAW_BOOL)
+            | bool_flag(saw_double, SAW_DOUBLE);
+        declaration_type_from_flags(flags, long_count, index)
     }
 
     pub(super) fn supported_declaration_typedef_scalar(&self, name: &str) -> Option<ScalarType> {
@@ -146,4 +142,42 @@ impl Parser<'_> {
         }
         false
     }
+}
+
+const SAW_TYPE: u8 = 1;
+const SAW_STORAGE_CLASS: u8 = 2;
+const SAW_POINTER: u8 = 4;
+const SAW_BOOL: u8 = 8;
+const SAW_DOUBLE: u8 = 16;
+
+const fn declaration_type_from_flags(
+    flags: u8,
+    long_count: usize,
+    index: usize,
+) -> Option<(ScalarType, usize)> {
+    if !has_flag(flags, SAW_TYPE) {
+        if has_flag(flags, SAW_STORAGE_CLASS) {
+            return Some((ScalarType::Int, index));
+        }
+        return None;
+    }
+    if has_flag(flags, SAW_POINTER) {
+        Some((ScalarType::Pointer, index))
+    } else if has_flag(flags, SAW_BOOL) {
+        Some((ScalarType::Bool, index))
+    } else if has_flag(flags, SAW_DOUBLE) && long_count == 0 {
+        Some((ScalarType::Double, index))
+    } else if long_count == 0 {
+        Some((ScalarType::Int, index))
+    } else {
+        Some((ScalarType::LongLong, index))
+    }
+}
+
+const fn bool_flag(value: bool, flag: u8) -> u8 {
+    if value { flag } else { 0 }
+}
+
+const fn has_flag(flags: u8, flag: u8) -> bool {
+    flags & flag != 0
 }

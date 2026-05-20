@@ -61,6 +61,7 @@ pub(super) fn supported_cast_type_with_typedefs(
         return None;
     }
     let mut saw_type = false;
+    let mut saw_bool = false;
     let mut saw_double = false;
     let mut saw_named_type = false;
     let mut saw_pointer = false;
@@ -74,6 +75,11 @@ pub(super) fn supported_cast_type_with_typedefs(
             TokenKind::Keyword(Keyword::Double) => {
                 saw_type = true;
                 saw_double = true;
+                expecting_struct_tag = false;
+            }
+            TokenKind::Keyword(Keyword::Bool) => {
+                saw_type = true;
+                saw_bool = true;
                 expecting_struct_tag = false;
             }
             TokenKind::Keyword(
@@ -133,7 +139,9 @@ pub(super) fn supported_cast_type_with_typedefs(
     if saw_named_type {
         return None;
     }
-    if saw_double && long_count == 0 {
+    if saw_bool {
+        Some(ScalarType::Bool)
+    } else if saw_double && long_count == 0 {
         Some(ScalarType::Double)
     } else if long_count == 0 {
         Some(ScalarType::Int)

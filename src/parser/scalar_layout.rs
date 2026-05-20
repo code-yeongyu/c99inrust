@@ -16,6 +16,7 @@ pub(super) fn sizeof_scalar_type(specifiers: &[Token], scalar_type: ScalarType) 
 
 pub(super) const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
     match scalar_type {
+        ScalarType::Bool => 1,
         ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
         ScalarType::VaList => 24,

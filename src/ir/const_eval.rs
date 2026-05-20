@@ -87,6 +87,7 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
 }
 pub(in crate::ir) fn cast_const_value(target: ScalarType, value: i64) -> CompileResult<i64> {
     match target {
+        ScalarType::Bool => Ok(i64::from(value != 0)),
         ScalarType::Int => i32::try_from(value)
             .map(i64::from)
             .map_err(|_| CompileError::new("integer cast result does not fit i32")),

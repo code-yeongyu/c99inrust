@@ -13,13 +13,13 @@ impl LoweringContext {
                 slot,
                 offset,
                 scalar_type,
-                value,
+                value: store_value_for_scalar(scalar_type, value),
             }),
             LoweredLValue::Global { name, scalar_type } => {
                 self.instructions.push(Instruction::StoreGlobal {
                     name,
                     scalar_type,
-                    value,
+                    value: store_value_for_scalar(scalar_type, value),
                 });
             }
             target @ (LoweredLValue::GlobalByteSubscript { .. }
@@ -27,6 +27,7 @@ impl LoweringContext {
             | LoweredLValue::GlobalPointerSubscript { .. }
             | LoweredLValue::PointerSubscript { .. }
             | LoweredLValue::PointerField { .. }) => {
+                let value = store_value_for_lvalue(&target, value);
                 self.instructions
                     .push(Instruction::Eval(LoweredExpr::Assign {
                         target,
@@ -165,5 +166,31 @@ impl LoweringContext {
                 is_unsigned: false,
             },
         );
+    }
+}
+
+fn store_value_for_lvalue(target: &LoweredLValue, value: LoweredExpr) -> LoweredExpr {
+    match target {
+        LoweredLValue::PointerSubscript { element_type, .. }
+        | LoweredLValue::PointerField {
+            scalar_type: element_type,
+            ..
+        } => store_value_for_scalar(*element_type, value),
+        LoweredLValue::Local { .. }
+        | LoweredLValue::Global { .. }
+        | LoweredLValue::GlobalByteSubscript { .. }
+        | LoweredLValue::GlobalIntSubscript { .. }
+        | LoweredLValue::GlobalPointerSubscript { .. } => value,
+    }
+}
+
+fn store_value_for_scalar(scalar_type: ScalarType, value: LoweredExpr) -> LoweredExpr {
+    if scalar_type != ScalarType::Bool {
+        return value;
+    }
+    LoweredExpr::Binary {
+        op: crate::parser::BinaryOp::NotEqual,
+        left: Box::new(value),
+        right: Box::new(LoweredExpr::Integer(0)),
     }
 }

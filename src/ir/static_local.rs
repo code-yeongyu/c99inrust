@@ -12,6 +12,7 @@ pub(in crate::ir) fn scalar_initializer(
 ) -> CompileResult<LoweredGlobalInitializer> {
     let value = initializer.map_or(Ok(0), |expr| eval_with_constants(expr, constants))?;
     match scalar_type {
+        ScalarType::Bool => Ok(LoweredGlobalInitializer::Int(i32::from(value != 0))),
         ScalarType::Int => Ok(LoweredGlobalInitializer::Int(
             i32::try_from(value)
                 .map_err(|_| CompileError::new("static local int initializer does not fit i32"))?,

@@ -84,7 +84,7 @@ pub(in crate::ir) enum GlobalBinding {
 impl GlobalBinding {
     pub(in crate::ir) fn from_scalar_type(scalar_type: ScalarType) -> CompileResult<Self> {
         match scalar_type {
-            ScalarType::Int => Ok(Self::Int),
+            ScalarType::Bool | ScalarType::Int => Ok(Self::Int),
             ScalarType::Pointer => Ok(Self::Pointer { referent: None }),
             ScalarType::LongLong | ScalarType::Double | ScalarType::VaList => {
                 Err(CompileError::new("unsupported extern global scalar type"))

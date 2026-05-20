@@ -73,6 +73,9 @@ fn eval_integer_initializer_expr_with_context(
             let value =
                 eval_integer_initializer_expr_with_context(expr, constants, sizeof_symbols)?;
             match target {
+                ScalarType::Bool => Ok(InitializerNumber::integer(i64::from(
+                    value.to_i64_trunc()? != 0,
+                ))),
                 ScalarType::Int
                 | ScalarType::LongLong
                 | ScalarType::Pointer

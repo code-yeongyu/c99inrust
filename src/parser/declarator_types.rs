@@ -15,11 +15,7 @@ pub(super) fn parameter_scalar_type(
     if parameter_has_pointer(tokens) {
         return Some(ScalarType::Pointer);
     }
-    let name_index = tokens
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
+    let name_index = parameter_name_index(tokens)?;
     if tokens[..name_index]
         .iter()
         .rev()
@@ -43,6 +39,13 @@ fn parameter_has_pointer(tokens: &[Token]) -> bool {
         {
             return true;
         }
+        if paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+            && token_is_punctuator(token, "[")
+        {
+            return true;
+        }
         update_depths(
             token,
             &mut paren_depth,
@@ -57,11 +60,7 @@ pub(super) fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
     if !parameter_has_pointer(tokens) {
         return None;
     }
-    let name_index = tokens
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, token)| token_identifier(token).map(|_name| index))?;
+    let name_index = parameter_name_index(tokens)?;
     let specifiers = &tokens[..name_index];
     let pointer_depth = specifiers
         .iter()
@@ -76,6 +75,37 @@ pub(super) fn pointer_referent_type(tokens: &[Token]) -> Option<String> {
         .map(ToOwned::to_owned)
         .or_else(|| declaration_base_referent_type(specifiers));
     pointer_referent_for_depth(pointer_depth, base_referent.as_deref())
+}
+
+fn parameter_name_index(tokens: &[Token]) -> Option<usize> {
+    let before = parameter_array_start(tokens).unwrap_or(tokens.len());
+    tokens[..before]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, token)| token_identifier(token).map(|_name| index))
+}
+
+fn parameter_array_start(tokens: &[Token]) -> Option<usize> {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    for (index, token) in tokens.iter().enumerate() {
+        if paren_depth == 0
+            && bracket_depth == 0
+            && brace_depth == 0
+            && token_is_punctuator(token, "[")
+        {
+            return Some(index);
+        }
+        update_depths(
+            token,
+            &mut paren_depth,
+            &mut bracket_depth,
+            &mut brace_depth,
+        );
+    }
+    None
 }
 
 fn parameter_array_depth(tokens: &[Token]) -> usize {
@@ -134,12 +164,17 @@ fn integer_parameter_type_with_typedefs(
     known_scalar_typedefs: &[String],
 ) -> Option<ScalarType> {
     let mut saw_type = false;
+    let mut saw_bool = false;
     let mut long_count = 0usize;
     for token in tokens {
         match &token.kind {
             TokenKind::Keyword(
                 Keyword::Const | Keyword::Register | Keyword::Restrict | Keyword::Volatile,
             ) => {}
+            TokenKind::Keyword(Keyword::Bool) => {
+                saw_type = true;
+                saw_bool = true;
+            }
             TokenKind::Keyword(
                 Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Signed | Keyword::Unsigned,
             ) => saw_type = true,
@@ -165,7 +200,9 @@ fn integer_parameter_type_with_typedefs(
     if !saw_type {
         return None;
     }
-    if long_count == 0 {
+    if saw_bool {
+        Some(ScalarType::Bool)
+    } else if long_count == 0 {
         Some(ScalarType::Int)
     } else {
         Some(ScalarType::LongLong)

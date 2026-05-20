@@ -62,7 +62,7 @@ pub(in crate::codegen) struct PointerFieldExpr<'a> {
 
 pub(in crate::codegen) const fn scalar_width(scalar_type: ScalarType) -> ValueWidth {
     match scalar_type {
-        ScalarType::Int => ValueWidth::I32,
+        ScalarType::Bool | ScalarType::Int => ValueWidth::I32,
         ScalarType::LongLong | ScalarType::Pointer | ScalarType::VaList => ValueWidth::I64,
         ScalarType::Double => ValueWidth::F64,
     }

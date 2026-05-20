@@ -5,7 +5,11 @@ use super::{
 };
 
 pub(super) fn local_array_length(expr: &Expr, constants: &[Constant]) -> CompileResult<usize> {
-    let value = eval_integer_initializer_expr_with_constants(expr, constants)?.to_i64_trunc()?;
+    let value = match eval_integer_initializer_expr_with_constants(expr, constants) {
+        Ok(value) => value.to_i64_trunc()?,
+        Err(_) if matches!(expr, Expr::Identifier(_)) => return Ok(1),
+        Err(error) => return Err(error),
+    };
     if value <= 0 {
         return Err(CompileError::new("local char array size must be positive"));
     }

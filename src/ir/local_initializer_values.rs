@@ -5,9 +5,11 @@ use crate::parser::{LocalCharArrayInitializer, ScalarType, StructLayout};
 pub(in crate::ir) fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
     match scalar_type {
         ScalarType::Double => LoweredExpr::DoubleLiteral("0.0".to_string()),
-        ScalarType::Int | ScalarType::LongLong | ScalarType::Pointer | ScalarType::VaList => {
-            LoweredExpr::Integer(0)
-        }
+        ScalarType::Bool
+        | ScalarType::Int
+        | ScalarType::LongLong
+        | ScalarType::Pointer
+        | ScalarType::VaList => LoweredExpr::Integer(0),
     }
 }
 
@@ -107,7 +109,7 @@ pub(in crate::ir) fn struct_alignment(layout: &StructLayout) -> usize {
 
 pub(in crate::ir) const fn scalar_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
-        ScalarType::Int => 4,
+        ScalarType::Bool | ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
         ScalarType::VaList => 24,
     }

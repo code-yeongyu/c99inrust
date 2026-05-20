@@ -2,7 +2,7 @@ use super::{
     CompileError, CompileResult, Function, Parameter, Parser, Program, ReturnType, ScalarType,
     function_pointer_name, parameter_is_variadic, parameter_is_void, parameter_scalar_type,
     pointer_referent_type, previous_identifier_index, supported_return_type, token_identifier,
-    top_level_function_open_paren,
+    top_level_function_open_paren, top_level_punctuator_index,
 };
 
 impl Parser<'_> {
@@ -114,7 +114,7 @@ impl Parser<'_> {
             });
             return Ok(false);
         }
-        let Some(name) = tokens.iter().rev().find_map(token_identifier) else {
+        let Some(name) = parameter_name(tokens) else {
             return Err(CompileError::new("unsupported function parameter"));
         };
         let scalar_type = parameter_scalar_type(
@@ -130,4 +130,9 @@ impl Parser<'_> {
         });
         Ok(false)
     }
+}
+
+fn parameter_name(tokens: &[crate::front_end::lexer::Token]) -> Option<&str> {
+    let before = top_level_punctuator_index(tokens, "[").unwrap_or(tokens.len());
+    tokens[..before].iter().rev().find_map(token_identifier)
 }
