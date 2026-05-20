@@ -47,6 +47,32 @@ pub(super) fn parse(
     Ok(rows)
 }
 
+pub(super) fn parse_object(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+    constants: &[Constant],
+) -> CompileResult<Vec<GlobalStructInitializerValue>> {
+    let Some(first) = tokens.first() else {
+        return Err(CompileError::new("expected global struct initializer"));
+    };
+    if !token_is_punctuator(first, "{") {
+        return Err(
+            CompileError::new("expected global struct initializer").at(first.line, first.column)
+        );
+    }
+    let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+        return Err(CompileError::new("unterminated global struct initializer")
+            .at(first.line, first.column));
+    };
+    if let Some(token) = tokens.get(close_brace + 1) {
+        return Err(
+            CompileError::new("unsupported global struct initializer").at(token.line, token.column)
+        );
+    }
+
+    parse_values(&tokens[1..close_brace], known_structs, constants)
+}
+
 fn parse_row(
     tokens: &[Token],
     known_structs: &[StructLayout],
@@ -70,16 +96,20 @@ fn parse_row(
         );
     }
 
+    parse_values(&tokens[1..close_brace], known_structs, constants)
+}
+
+fn parse_values(
+    tokens: &[Token],
+    known_structs: &[StructLayout],
+    constants: &[Constant],
+) -> CompileResult<Vec<GlobalStructInitializerValue>> {
     let mut values = Vec::new();
-    for (start, end) in top_level_comma_ranges(&tokens[1..close_brace]) {
+    for (start, end) in top_level_comma_ranges(tokens) {
         if start == end {
             continue;
         }
-        values.push(parse_value(
-            &tokens[(start + 1)..=end],
-            known_structs,
-            constants,
-        )?);
+        values.push(parse_value(&tokens[start..end], known_structs, constants)?);
     }
     Ok(values)
 }
@@ -117,10 +147,31 @@ fn value_from_expr(
         Expr::AddressOf { target } => {
             address_from_lvalue(target, constants).map(GlobalStructInitializerValue::Address)
         }
+        Expr::Identifier(name) => constant_value(name, constants).map_or_else(
+            || {
+                Ok(GlobalStructInitializerValue::Address(
+                    GlobalStructInitializerAddress {
+                        base: name.clone(),
+                        index: None,
+                    },
+                ))
+            },
+            |value| Ok(GlobalStructInitializerValue::Integer(value)),
+        ),
+        Expr::Subscript { array, index } => address_from_subscript(array, index, constants)
+            .map(GlobalStructInitializerValue::Address),
         _ => eval_integer_initializer_expr_with_constants(expr, constants)
             .and_then(super::InitializerNumber::to_i64_trunc)
             .map(GlobalStructInitializerValue::Integer),
     }
+}
+
+fn constant_value(name: &str, constants: &[Constant]) -> Option<i64> {
+    constants
+        .iter()
+        .rev()
+        .find(|constant| constant.name == name)
+        .map(|constant| constant.value)
 }
 
 fn address_from_lvalue(
@@ -132,23 +183,28 @@ fn address_from_lvalue(
             base: base.clone(),
             index: None,
         }),
-        LValue::Subscript { array, index } => {
-            let Expr::Identifier(base) = array.as_ref() else {
-                return Err(CompileError::new(
-                    "unsupported global struct initializer address",
-                ));
-            };
-            let index =
-                eval_integer_initializer_expr_with_constants(index, constants)?.to_i64_trunc()?;
-            Ok(GlobalStructInitializerAddress {
-                base: base.clone(),
-                index: Some(usize::try_from(index).map_err(|_| {
-                    CompileError::new("global struct initializer address index is negative")
-                })?),
-            })
-        }
+        LValue::Subscript { array, index } => address_from_subscript(array, index, constants),
         LValue::Member { .. } => Err(CompileError::new(
             "unsupported global struct initializer address",
         )),
     }
+}
+
+fn address_from_subscript(
+    array: &Expr,
+    index: &Expr,
+    constants: &[Constant],
+) -> CompileResult<GlobalStructInitializerAddress> {
+    let Expr::Identifier(base) = array else {
+        return Err(CompileError::new(
+            "unsupported global struct initializer address",
+        ));
+    };
+    let index = eval_integer_initializer_expr_with_constants(index, constants)?.to_i64_trunc()?;
+    Ok(GlobalStructInitializerAddress {
+        base: base.clone(),
+        index: Some(usize::try_from(index).map_err(|_| {
+            CompileError::new("global struct initializer address index is negative")
+        })?),
+    })
 }

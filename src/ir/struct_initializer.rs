@@ -44,6 +44,33 @@ pub(super) fn lower_struct_array_global(
     ))
 }
 
+pub(super) fn lower_struct_object_global(
+    struct_name: &str,
+    values: &[GlobalStructInitializerValue],
+    structs: &HashMap<String, StructLayout>,
+    global_bindings: &HashMap<String, GlobalBinding>,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    let layout = structs
+        .get(struct_name)
+        .ok_or_else(|| CompileError::new(format!("unknown struct object type: {struct_name}")))?;
+    let initializer = if values.is_empty() {
+        LoweredGlobalInitializer::ZeroBytes(layout.size)
+    } else {
+        let rows = vec![values.to_vec()];
+        LoweredGlobalInitializer::StructArray {
+            byte_len: layout.size,
+            values: lower_initializer_values(&rows, layout, global_bindings)?,
+        }
+    };
+    Ok((
+        initializer,
+        GlobalBinding::StructObject {
+            struct_name: struct_name.to_owned(),
+            byte_size: layout.size,
+        },
+    ))
+}
+
 fn lower_initializer_values(
     rows: &[Vec<GlobalStructInitializerValue>],
     layout: &StructLayout,
@@ -201,18 +228,20 @@ fn lower_pointer_address(
     })
 }
 
-const fn global_binding_element_size(binding: &GlobalBinding) -> usize {
+fn global_binding_element_size(binding: &GlobalBinding) -> usize {
     match binding {
-        GlobalBinding::Int | GlobalBinding::IntArray | GlobalBinding::IntMatrix { .. } => {
-            scalar_size(ScalarType::Int)
-        }
-        GlobalBinding::ShortArray { .. } => 2,
+        GlobalBinding::Int | GlobalBinding::IntArray => scalar_size(ScalarType::Int),
+        GlobalBinding::IntMatrix { columns } => columns * scalar_size(ScalarType::Int),
+        GlobalBinding::ShortArray { columns, .. } => columns.map_or(2, |columns| columns * 2),
         GlobalBinding::DoubleArray => scalar_size(ScalarType::Double),
-        GlobalBinding::Pointer { .. } | GlobalBinding::PointerArray { .. } => {
-            scalar_size(ScalarType::Pointer)
-        }
+        GlobalBinding::Pointer { .. } => scalar_size(ScalarType::Pointer),
+        GlobalBinding::PointerArray { columns, .. } => columns
+            .map_or(scalar_size(ScalarType::Pointer), |columns| {
+                columns * scalar_size(ScalarType::Pointer)
+            }),
         GlobalBinding::StructObject { byte_size, .. }
         | GlobalBinding::StructArray { byte_size, .. } => *byte_size,
-        GlobalBinding::UnsignedCharArray | GlobalBinding::UnsignedCharMatrix { .. } => 1,
+        GlobalBinding::UnsignedCharArray => 1,
+        GlobalBinding::UnsignedCharMatrix { columns } => *columns,
     }
 }

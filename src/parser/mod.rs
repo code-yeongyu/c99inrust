@@ -3,6 +3,7 @@ use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 mod doom_layout;
 mod global_struct_initializer;
+mod global_struct_object;
 mod scalar_layout;
 mod typedef_referent;
 
@@ -152,6 +153,7 @@ pub enum GlobalInitializer {
     },
     StructObject {
         struct_name: String,
+        values: Vec<GlobalStructInitializerValue>,
     },
     StructArray {
         struct_name: String,
@@ -3339,7 +3341,7 @@ fn parse_supported_global_declaration(
     if let Some(global) = parse_global_struct_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_struct_object(tokens, known_structs)? {
+    if let Some(global) = global_struct_object::parse(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_short_array(tokens, constants, sizeof_symbols)? {
@@ -3443,7 +3445,7 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::PointerNameArray { length, .. } => length
             .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
             .ok_or_else(|| CompileError::new("global pointer name array sizeof overflow"))?,
-        GlobalInitializer::StructObject { struct_name } => {
+        GlobalInitializer::StructObject { struct_name, .. } => {
             struct_size_for_initializer(struct_name, known_structs)?
         }
         GlobalInitializer::StructArray {
@@ -4104,43 +4106,6 @@ fn aggregate_initializer_length(tokens: &[Token]) -> Option<usize> {
         }
     }
     Some(count)
-}
-
-fn parse_global_struct_object(
-    tokens: &[Token],
-    known_structs: &[StructLayout],
-) -> CompileResult<Option<Global>> {
-    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
-        return Ok(None);
-    };
-    let end_index = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
-    if top_level_punctuator_index(&declaration[..end_index], "[").is_some() {
-        return Ok(None);
-    }
-    if token_has_keyword(declaration, Keyword::Extern) {
-        return Ok(None);
-    }
-    if end_index != declaration.len()
-        && !declaration
-            .get(end_index + 1)
-            .is_some_and(|token| token_is_punctuator(token, "{"))
-    {
-        return Ok(None);
-    }
-    let Some(name_index) = previous_identifier_index(declaration, end_index) else {
-        return Ok(None);
-    };
-    let Some(struct_name) = global_struct_specifier_name(&declaration[..name_index], known_structs)
-    else {
-        return Ok(None);
-    };
-    let name = token_identifier(&declaration[name_index])
-        .ok_or_else(|| CompileError::new("expected global struct object name"))?
-        .to_owned();
-    Ok(Some(Global::new(
-        name,
-        GlobalInitializer::StructObject { struct_name },
-    )))
 }
 
 fn parse_global_extern_int_array(tokens: &[Token]) -> CompileResult<Option<Global>> {

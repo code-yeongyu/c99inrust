@@ -456,9 +456,15 @@ fn lower_defined_global_initializer(
         | GlobalInitializer::PointerNameArray { .. } => Err(CompileError::new(
             "internal error: pointer array global reached fallback lowering",
         )),
-        GlobalInitializer::StructObject { struct_name } => {
-            lower_struct_object_global(struct_name, structs)
-        }
+        GlobalInitializer::StructObject {
+            struct_name,
+            values,
+        } => struct_initializer::lower_struct_object_global(
+            struct_name,
+            values,
+            structs,
+            global_bindings,
+        ),
         GlobalInitializer::StructArray {
             struct_name,
             length,
@@ -593,22 +599,6 @@ fn lower_int_constant_global(
             ))
         })?),
         GlobalBinding::Int,
-    ))
-}
-
-fn lower_struct_object_global(
-    struct_name: &str,
-    structs: &HashMap<String, StructLayout>,
-) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
-    let layout = structs
-        .get(struct_name)
-        .ok_or_else(|| CompileError::new(format!("unknown struct object type: {struct_name}")))?;
-    Ok((
-        LoweredGlobalInitializer::ZeroBytes(layout.size),
-        GlobalBinding::StructObject {
-            struct_name: struct_name.to_owned(),
-            byte_size: layout.size,
-        },
     ))
 }
 
