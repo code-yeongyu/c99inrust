@@ -51,6 +51,7 @@ jobs:
           bash -n tools/doom-compile-scan.sh
           bash -n tools/doom-smoke.sh
           bash -n tools/doom-input-smoke.sh
+          bash -n tools/doom-movement-smoke.sh
       - name: Rust no-excuse rules
         run: tools/check-rust-no-excuses.sh src tests
       - name: Nextest
