@@ -26,19 +26,24 @@ manual_run=skipped
 reason=DOOM_MANUAL_RUN=0
 ```
 
-Latest tmux build-only QA, without `tmux kill-server`:
+Latest tmux manual harness QA, without `tmux kill-server`, on commit
+`d7e708e`:
 
 ```text
-tmux_session=c99inrust-doom-manual-20260520215340
-out=/tmp/c99inrust-doom-manual-20260520215340-out
+tmux_session=c99inrust-doom-manual-20260521015805
+out=/tmp/c99inrust-doom-manual-20260521015805-out
 cargo_status=0
-manual_status=0
+manual_status=20
 compile_ok=62 compile_fail=0
 link_status=0
-binary=/tmp/c99inrust-doom-manual-20260520215340-out/linuxdoom-c99inrust
-manual_run=skipped
-reason=DOOM_MANUAL_RUN=0
+binary=/tmp/c99inrust-doom-manual-20260521015805-out/linuxdoom-c99inrust
+manual_run=blocked
+reason=no DISPLAY or DOOM_DOCKER_DISPLAY
 ```
+
+This proves the manual harness still builds and links the official Doom binary
+on current `main`. The remaining blocker in this environment is host X11 display
+availability, not C compilation or Linux/X11 linking.
 
 Use interactive mode when an X11 display is available:
 
@@ -81,6 +86,29 @@ Interactive acceptance checks:
 3. Arrow keys move and turn the player.
 4. Strafe, fire, and use keys respond.
 5. The process exits cleanly from Doom's menu or by closing the tmux command.
+
+Transcript fields to record when a host X11 display is available:
+
+```text
+operator=
+date=
+commit=
+tmux_session=
+out=
+doom_source=
+iwad=
+display=
+compile_ok=62 compile_fail=0
+link_status=0
+manual_run=starting
+window_visible=
+map_started=
+arrow_keys_move=
+strafe_fire_use_respond=
+exit_method=
+final_status=
+notes=
+```
 
 ## Current Evidence Status
 

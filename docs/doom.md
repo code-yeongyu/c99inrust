@@ -486,10 +486,12 @@ cargo build
 DOOM_MANUAL_RUN=0 tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-manual-play
 ```
 
-The latest tmux build-only QA used session
-`c99inrust-doom-manual-1779273652` and produced `compile_ok=62
-compile_fail=0`, `link_status=0`, and `manual_run=skipped` because
-`DOOM_MANUAL_RUN=0` was set deliberately.
+The latest tmux manual harness QA used session
+`c99inrust-doom-manual-20260521015805` on commit `d7e708e` and produced
+`compile_ok=62 compile_fail=0`, `link_status=0`, and `manual_run=blocked` with
+`reason=no DISPLAY or DOOM_DOCKER_DISPLAY`. This confirms the current manual
+harness still builds and links the official Doom binary; the local blocker is
+host X11 display availability, not compiler or linker failure.
 
 Interactive visible-session run:
 
