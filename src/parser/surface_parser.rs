@@ -1,8 +1,9 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Token, TokenKind};
 
+use super::SurfaceTranslationUnit;
+use super::external_declarations::classify_external_item;
 use super::token_scan::{decrease_depth, last_token_is_punctuator, token_is_punctuator};
-use super::{SurfaceTranslationUnit, classify_external_item};
 
 pub(super) struct SurfaceParser<'a> {
     tokens: &'a [Token],

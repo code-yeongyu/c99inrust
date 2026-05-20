@@ -2,15 +2,14 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Token, TokenKind};
 
 use super::declarator_types::{integer_parameter_type, pointer_referent_from_specifiers};
+use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::scalar_layout::{scalar_field_type, scalar_size_for_layout};
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_punctuator_index,
 };
 use super::type_recognition::supported_typedef_scalar;
-use super::{
-    Constant, FieldType, ScalarType, StructField, StructLayout, parse_unsigned_char_array_length,
-};
+use super::{Constant, FieldType, ScalarType, StructField, StructLayout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ArrayShape {

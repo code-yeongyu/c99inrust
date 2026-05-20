@@ -1,11 +1,12 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
+use super::Constant;
+use super::integer_initializer::parse_integer_initializer_with_constants;
 use super::token_scan::{
     last_top_level_identifier, matching_top_level_brace, token_has_keyword, token_identifier,
     token_is_punctuator, top_level_punctuator_index,
 };
-use super::{Constant, parse_integer_initializer_with_constants};
 
 pub(super) fn parse_enum_constants(
     tokens: &[Token],

@@ -1,11 +1,13 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::Constant;
+use super::global_string_initializers::parse_string_array_initializer;
+use super::integer_initializer::parse_integer_initializer_with_constants;
 use super::token_scan::{
     matching_top_level_brace, token_is_punctuator, top_level_comma_ranges,
     top_level_punctuator_index,
 };
-use super::{Constant, parse_integer_initializer_with_constants, parse_string_array_initializer};
 
 pub(super) fn parse_char_matrix_initializer(
     tokens: &[Token],
