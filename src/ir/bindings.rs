@@ -1,0 +1,140 @@
+use super::LoweredExpr;
+use crate::diagnostics::{CompileError, CompileResult};
+use crate::parser::{FieldType, ScalarType};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::ir) enum LocalBinding {
+    Scalar {
+        slot: usize,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    },
+    StaticScalar {
+        global_name: String,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    },
+    CharArray {
+        slot: usize,
+        length: usize,
+    },
+    CharMatrix {
+        slot: usize,
+        rows: usize,
+        columns: usize,
+    },
+    IntArray {
+        slot: usize,
+        length: usize,
+    },
+    ShortArray {
+        slot: usize,
+        length: usize,
+        is_unsigned: bool,
+    },
+    PointerArray {
+        slot: usize,
+        length: usize,
+    },
+    StructObject {
+        slot: usize,
+        struct_name: String,
+        byte_size: usize,
+    },
+    VaList {
+        slot: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::ir) enum GlobalBinding {
+    Int,
+    IntArray,
+    ShortArray {
+        is_unsigned: bool,
+        columns: Option<usize>,
+    },
+    IntMatrix {
+        columns: usize,
+    },
+    DoubleArray,
+    Pointer {
+        referent: Option<String>,
+    },
+    PointerArray {
+        referent: Option<String>,
+        columns: Option<usize>,
+    },
+    StructObject {
+        struct_name: String,
+        byte_size: usize,
+    },
+    StructArray {
+        struct_name: String,
+        byte_size: usize,
+        length: Option<usize>,
+        columns: Option<usize>,
+    },
+    UnsignedCharArray,
+    UnsignedCharMatrix {
+        columns: usize,
+    },
+}
+
+impl GlobalBinding {
+    pub(in crate::ir) fn from_scalar_type(scalar_type: ScalarType) -> CompileResult<Self> {
+        match scalar_type {
+            ScalarType::Int => Ok(Self::Int),
+            ScalarType::Pointer => Ok(Self::Pointer { referent: None }),
+            ScalarType::LongLong | ScalarType::Double | ScalarType::VaList => {
+                Err(CompileError::new("unsupported extern global scalar type"))
+            }
+        }
+    }
+
+    pub(in crate::ir) const fn scalar_type(&self) -> Option<ScalarType> {
+        match self {
+            Self::Int => Some(ScalarType::Int),
+            Self::Pointer { .. } => Some(ScalarType::Pointer),
+            Self::IntArray
+            | Self::ShortArray { .. }
+            | Self::IntMatrix { .. }
+            | Self::DoubleArray
+            | Self::PointerArray { .. }
+            | Self::StructObject { .. }
+            | Self::StructArray { .. }
+            | Self::UnsignedCharArray
+            | Self::UnsignedCharMatrix { .. } => None,
+        }
+    }
+
+    pub(in crate::ir) const fn is_addressable_array(&self) -> bool {
+        matches!(
+            self,
+            Self::IntArray
+                | Self::ShortArray { .. }
+                | Self::IntMatrix { .. }
+                | Self::DoubleArray
+                | Self::PointerArray { .. }
+                | Self::StructArray { .. }
+                | Self::UnsignedCharArray
+                | Self::UnsignedCharMatrix { .. }
+        )
+    }
+}
+
+pub(in crate::ir) struct ResolvedMember {
+    pub(in crate::ir) pointer: LoweredExpr,
+    pub(in crate::ir) offset: usize,
+    pub(in crate::ir) field_type: FieldType,
+}
+
+pub(in crate::ir) struct StructAddress {
+    pub(in crate::ir) pointer: LoweredExpr,
+    pub(in crate::ir) offset: usize,
+    pub(in crate::ir) struct_name: String,
+}
+
+pub(in crate::ir) type ArrayFieldSubscript = (LoweredExpr, ScalarType, usize, bool);
+pub(in crate::ir) type NestedArrayFieldSubscript =
+    (LoweredExpr, LoweredExpr, ScalarType, usize, bool);

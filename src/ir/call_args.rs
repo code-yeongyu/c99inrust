@@ -3,7 +3,7 @@ use crate::parser::{Expr, FieldType};
 
 use super::{LoweredExpr, LoweringContext, doom_alloc, pointer_field_address};
 
-pub(super) fn lower(
+pub(in crate::ir) fn lower(
     context: &LoweringContext,
     callee: &str,
     index: usize,

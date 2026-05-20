@@ -1,4 +1,4 @@
-pub(super) fn returns_pointer(name: &str) -> bool {
+pub(in crate::ir) fn returns_pointer(name: &str) -> bool {
     matches!(
         name,
         "alloca"

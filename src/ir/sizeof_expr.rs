@@ -7,7 +7,7 @@ use super::{
     lowered_expr_scalar_type, scalar_size,
 };
 
-pub(super) fn lower(context: &LoweringContext, expr: &Expr) -> CompileResult<LoweredExpr> {
+pub(in crate::ir) fn lower(context: &LoweringContext, expr: &Expr) -> CompileResult<LoweredExpr> {
     if let Some(size) = expression_size(context, expr)? {
         return integer(size);
     }

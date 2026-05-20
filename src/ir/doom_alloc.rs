@@ -1,6 +1,6 @@
 use crate::parser::{BinaryOp, Expr};
 
-pub(super) fn widened_size_arg(expr: &Expr) -> Option<Expr> {
+pub(in crate::ir) fn widened_size_arg(expr: &Expr) -> Option<Expr> {
     let Expr::Binary { op, left, right } = expr else {
         return None;
     };

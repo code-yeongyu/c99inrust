@@ -5,7 +5,7 @@ use crate::parser::{BinaryOp, Expr, ScalarType, UnaryOp};
 
 use super::{LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary};
 
-pub(super) fn scalar_initializer(
+pub(in crate::ir) fn scalar_initializer(
     scalar_type: ScalarType,
     initializer: Option<&Expr>,
     constants: &HashMap<String, i64>,

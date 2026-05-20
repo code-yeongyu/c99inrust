@@ -3,7 +3,7 @@ use crate::parser::{BinaryOp, Expr, FieldType, ScalarType};
 
 use super::{GlobalBinding, LoweringContext, POINTER_REFERENT, pointer_arithmetic};
 
-pub(super) fn for_expr(context: &LoweringContext, expr: &Expr) -> CompileResult<String> {
+pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> CompileResult<String> {
     if let Expr::Identifier(name) = expr
         && let Some(referent) = context.pointer_referent_for_identifier(name)
     {

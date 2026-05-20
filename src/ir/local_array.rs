@@ -3,7 +3,7 @@ use crate::parser::Expr;
 
 use super::{LocalBinding, LoweredExpr};
 
-pub(super) fn char_array_pointer<F>(
+pub(in crate::ir) fn char_array_pointer<F>(
     array: &Expr,
     binding: Option<&LocalBinding>,
     local_offset: F,

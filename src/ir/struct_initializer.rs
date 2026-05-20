@@ -13,7 +13,7 @@ use super::{
     LoweredStructInitializerValue, scalar_size,
 };
 
-pub(super) fn lower_struct_array_global(
+pub(in crate::ir) fn lower_struct_array_global(
     struct_name: &str,
     length: usize,
     columns: Option<usize>,
@@ -46,7 +46,7 @@ pub(super) fn lower_struct_array_global(
     ))
 }
 
-pub(super) fn lower_struct_object_global(
+pub(in crate::ir) fn lower_struct_object_global(
     struct_name: &str,
     values: &[GlobalStructInitializerValue],
     structs: &HashMap<String, StructLayout>,
