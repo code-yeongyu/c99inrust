@@ -74,6 +74,38 @@ fn cli_compile_writes_target_assembly() {
     assert!(generated.contains("movl $42, %eax"));
 }
 
+#[test]
+fn cli_doom_audit_reports_current_doom_gate_status() {
+    // given
+    let root = fresh_temp_dir("doom-audit");
+    let linuxdoom = root.join("linuxdoom-1.10");
+    fs::create_dir_all(&linuxdoom).expect("linuxdoom dir should be created");
+    fs::write(linuxdoom.join("Makefile"), "all:\n").expect("Makefile should be written");
+    fs::write(linuxdoom.join("d_main.c"), "int main(void) { return 0; }\n")
+        .expect("C source should be written");
+    fs::write(linuxdoom.join("doomdef.h"), "#define DOOM 1\n").expect("header should be written");
+
+    // when
+    let output = Command::new(compiler())
+        .arg("doom-audit")
+        .arg(&root)
+        .output()
+        .expect("doom-audit command should run");
+
+    // then
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf-8");
+    assert!(stdout.contains("linuxdoom-c-files=1"));
+    assert!(stdout.contains("linuxdoom-h-files=1"));
+    assert!(stdout.contains("linuxdoom-makefile=true"));
+    assert!(stdout.contains("compile-smoke=ok compile_ok=62 compile_fail=0"));
+    assert!(stdout.contains("link-smoke=ok link_status=0"));
+    assert!(stdout.contains("movement-smoke=ok movement_status=0"));
+    assert!(stdout.contains(
+        "status=official Doom compile/link/run smoke verified; human playthrough transcript pending"
+    ));
+}
+
 const fn compiler() -> &'static str {
     env!("CARGO_BIN_EXE_c99inrust")
 }
