@@ -75,14 +75,15 @@ Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 defined, `compile -S` emits x86_64 Linux assembly for all 62 official Doom C
 translation units, those assembly files link into a Linux/X11 ELF with system
 `gcc`, and the resulting binary runs under an 8-bit Xvfb screen with a legal
-IWAD. The latest movement smoke produced `compile_ok=62 compile_fail=0`,
-`link_status=0`, `display_status=0`, `window_status=0`, `input_status=0`,
-`movement_status=0`, and `run_status=124` after dispatching `Up` to a viewable
-`320x200` Doom window. Live memory samples showed the player coordinates change
-from `69206016,-236978176` to `69194566,-209032509` while the player mobj stayed
-linked to `P_MobjThinker`. This proves visible-window startup, scripted keyboard
-delivery, keyboard-driven player movement, and survival to the QA timeout; it is
-still not a human playthrough claim.
+IWAD. The latest tmux movement smoke on commit `1d91681` produced
+`compile_ok=62 compile_fail=0`, `link_status=0`, `display_status=0`,
+`window_status=0`, `input_status=0`, `movement_status=0`, and `run_status=124`
+after dispatching `Up` to a viewable `320x200` Doom window. Live memory samples
+showed the player coordinates change from `69206016,-236978176` to
+`69194566,-209032509` while the player mobj stayed linked to
+`P_MobjThinker`. This proves visible-window startup, scripted keyboard delivery,
+keyboard-driven player movement, and survival to the QA timeout; it is still not
+a human playthrough claim.
 
 Repeat the current Doom smoke on a machine with Docker, the public Doom
 checkout, and a legal IWAD:

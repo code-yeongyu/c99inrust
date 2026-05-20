@@ -61,11 +61,12 @@ before 5 5 1 1 1 69206016 -236978176 0 0 0 -1
 up_11 120 120 1 1 1 69194459 -208771260 -97 236756 0 2
 ```
 
-Latest tmux manual QA rerun, without `tmux kill-server`:
+Latest tmux manual QA rerun, without `tmux kill-server`, on commit
+`1d91681`:
 
 ```text
-tmux_session=c99inrust-doom-movement-1779270567
-out=/tmp/c99inrust-doom-movement-1779270567-out
+tmux_session=c99inrust-doom-movement-20260521015300
+out=/tmp/c99inrust-doom-movement-20260521015300-out
 tmux_command_status=0
 compile_ok=62 compile_fail=0
 link_status=0
