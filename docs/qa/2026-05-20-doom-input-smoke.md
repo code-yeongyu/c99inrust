@@ -4,8 +4,8 @@ Public Doom checkout: `id-Software/DOOM` at `/tmp/c99inrust-doom-src`.
 
 This QA extends the earlier compile/link/Xvfb smoke with a visible-window probe
 and scripted keyboard input. It proves X11 window creation, key dispatch, and
-survival to the scripted timeout; it does not prove a human playthrough or
-player movement yet.
+survival to the scripted timeout. Player movement is covered separately by
+`docs/qa/2026-05-20-doom-movement-smoke.md`.
 
 ## Regression Found
 
@@ -93,9 +93,8 @@ cargo build
 tools/doom-input-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-input-smoke
 ```
 
-## Remaining Gate
+## Follow-Up Gate
 
-Interactive player movement is still not proven by this script. The next
-playability gate should either be a human run in a visible X11 session or an
-instrumented check that demonstrates movement/state changes after keyboard
-input.
+Interactive player movement is not proven by this input-only script. The
+follow-up movement smoke adds live state sampling and verifies coordinate
+movement after keyboard input.

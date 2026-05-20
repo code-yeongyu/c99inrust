@@ -433,10 +433,51 @@ cargo build
 tools/doom-input-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-input-smoke
 ```
 
+## Latest Movement Smoke
+
+The movement smoke compiles and links the same 62 translation units, starts
+Xvfb manually, verifies the viewable Doom window, dispatches `Up`, and reads
+live player state from `/proc/<pid>/mem`. It fails unless the player mobj stays
+in the thinker list with `P_MobjThinker` and the player coordinates change:
+
+```text
+out=/tmp/c99inrust-doom-movement-statefix
+compile_ok=62 compile_fail=0
+link_status=0
+display_status=0
+window_status=0
+window_id=0x400002
+input_status=0
+movement_status=0
+tail_status=124
+run_status=124
+before 5 5 1 1 1 69206016 -236978176 0 0 0 -1
+up_11 119 119 1 1 1 69194566 -209032509 -107 261249 25 3
+```
+
+The same movement smoke was rerun inside tmux session
+`c99inrust-doom-movement-1779270567`, with `tmux_command_status=0`,
+`movement_status=0`, and no `tmux kill-server`.
+
+This run validates the fix for Doom `state_t states[]` initializers. Before the
+fix, `states` was emitted as `.zero 54152`; movement switched the player to a
+zeroed run state and removed the player mobj from the thinker list. The repaired
+assembly emits function-pointer fields such as `.quad A_Pain`.
+
+Evidence is recorded in `docs/qa/2026-05-20-doom-movement-smoke.md`.
+
+Repeat the movement smoke with:
+
+```bash
+cargo build
+tools/doom-movement-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-movement-smoke
+```
+
 ## Playability Gate
 
 The current smokes prove visible-window startup, scripted keyboard delivery,
-and survival under Xvfb. Full human-verified playability still requires:
+keyboard-driven player movement, and survival under Xvfb. Full
+human-verified playability still requires:
 
 1. Compile `linuxdoom-1.10` with `c99inrust`.
 2. Link the executable for a Linux/X11 environment.
@@ -447,5 +488,5 @@ and survival under Xvfb. Full human-verified playability still requires:
 7. Dispatch keyboard input to the window without crashing.
 8. Start a map and verify keyboard input moves the player.
 
-Items 1 through 7 are covered by the latest Xvfb smokes; player-movement
-evidence remains open.
+Items 1 through 8 are covered by the latest Xvfb smokes. A human visible-session
+playthrough remains outside the automated smoke evidence.

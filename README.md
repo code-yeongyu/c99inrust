@@ -17,7 +17,7 @@ the official public Doom source tree:
 | Parser | Doom-shaped C declarations, typedefs, structs/unions/enums, pointers, arrays, control flow, calls, expressions, and supported C99 function bodies |
 | IR | scoped locals/globals, pointer referents, struct fields, arrays, calls, sizeof, control flow, and Doom-specific libc/X11 surface lowering |
 | Codegen | native macOS ARM64 assembly, native executable build via host `cc`, plus x86_64 Linux assembly used for official Doom linking |
-| Doom | all 62 official `linuxdoom-1.10` C translation units compile to assembly, link into a Linux/X11 executable, open a viewable X11 window under Xvfb, accept scripted keyboard input, and survive until the QA timeout |
+| Doom | all 62 official `linuxdoom-1.10` C translation units compile to assembly, link into a Linux/X11 executable, open a viewable X11 window under Xvfb, accept scripted keyboard input, move the player under live state sampling, and survive until the QA timeout |
 
 Full C99, human-verified Doom playability, all-world architecture coverage,
 and general Clang-beating optimization are still active milestones. The current
@@ -75,12 +75,14 @@ Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 defined, `compile -S` emits x86_64 Linux assembly for all 62 official Doom C
 translation units, those assembly files link into a Linux/X11 ELF with system
 `gcc`, and the resulting binary runs under an 8-bit Xvfb screen with a legal
-IWAD. The latest input smoke produced `compile_ok=62 compile_fail=0`,
-`link_status=0`, `display_status=0`, `window_status=0`, `input_status=0`, and
-`run_status=124` after dispatching `Return Up Up Left Right` to a viewable
-`320x200` Doom window. This proves visible-window startup, scripted keyboard
-delivery, and survival to the QA timeout; it is still not a human playthrough
-claim.
+IWAD. The latest movement smoke produced `compile_ok=62 compile_fail=0`,
+`link_status=0`, `display_status=0`, `window_status=0`, `input_status=0`,
+`movement_status=0`, and `run_status=124` after dispatching `Up` to a viewable
+`320x200` Doom window. Live memory samples showed the player coordinates change
+from `69206016,-236978176` to `69194566,-209032509` while the player mobj stayed
+linked to `P_MobjThinker`. This proves visible-window startup, scripted keyboard
+delivery, keyboard-driven player movement, and survival to the QA timeout; it is
+still not a human playthrough claim.
 
 Repeat the current Doom smoke on a machine with Docker, the public Doom
 checkout, and a legal IWAD:
@@ -89,6 +91,7 @@ checkout, and a legal IWAD:
 cargo build
 tools/doom-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-smoke
 tools/doom-input-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-input-smoke
+tools/doom-movement-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-movement-smoke
 ```
 
 ## Development
