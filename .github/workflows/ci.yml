@@ -75,6 +75,7 @@ jobs:
         run: |
           bash -n tools/check-rust-no-excuses.sh
           bash -n tools/doom-compile-scan.sh
+          bash -n tools/doom-link-scan.sh
           bash -n tools/doom-smoke.sh
           bash -n tools/doom-input-smoke.sh
           bash -n tools/doom-movement-smoke.sh
@@ -90,7 +91,7 @@ jobs:
           rustup run stable cargo audit
 
   doom-compile-scan:
-    name: doom compile scan
+    name: doom compile/link scan
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -115,3 +116,11 @@ jobs:
         run: |
           grep -qx 'ok=62' "$RUNNER_TEMP/doom-compile-scan.txt"
           grep -qx 'fail=0' "$RUNNER_TEMP/doom-compile-scan.txt"
+      - name: Link official Doom executable
+        env:
+          C99INRUST_BIN: target/debug/c99inrust
+        run: tools/doom-link-scan.sh "$RUNNER_TEMP/DOOM" "$RUNNER_TEMP/doom-link-scan"
+      - name: Verify Doom link scan
+        run: |
+          grep -qx 'compile_ok=62 compile_fail=0' "$RUNNER_TEMP/doom-link-scan/link-scan.log"
+          grep -qx 'link_status=0' "$RUNNER_TEMP/doom-link-scan/link-scan.log"

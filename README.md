@@ -97,11 +97,16 @@ checkout, and a legal IWAD:
 
 ```bash
 cargo build
+tools/doom-link-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-link-scan
 tools/doom-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-smoke
 tools/doom-input-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-input-smoke
 tools/doom-movement-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-movement-smoke
 DOOM_MANUAL_RUN=0 tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-manual-play
 ```
+
+The link scan is also a CI gate and does not require an IWAD: it proves that all
+62 official C translation units compile to x86_64 Linux assembly and link into a
+Linux/X11 ELF.
 
 The latest manual harness run on commit `d7e708e` compiled all 62 official C
 files and linked the Doom binary, then stopped with `manual_run=blocked` because

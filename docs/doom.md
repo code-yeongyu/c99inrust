@@ -368,6 +368,24 @@ cargo build
 tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-compile-scan.txt
 ```
 
+CI also runs a no-IWAD link scan that compiles all 62 official units to
+x86_64 Linux assembly and links them into a Linux/X11 ELF:
+
+```bash
+cargo build
+tools/doom-link-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-link-scan
+```
+
+Latest local result:
+
+```text
+compile_ok=62 compile_fail=0
+link_status=0
+ELF 64-bit LSB executable, x86-64
+```
+
+Evidence is recorded in `docs/qa/2026-05-21-doom-link-scan.md`.
+
 ## Latest Link And Run Smoke
 
 The 62 generated x86_64 Linux assembly files now link into a Linux/X11 ELF in

@@ -8,7 +8,7 @@ Recommended GitHub ruleset for `main` when branch protection is re-enabled:
   - `rust (macos-15)`
   - `rust (windows-2025-vs2026)`
   - `quality gates`
-  - `doom compile scan`
+  - `doom compile/link scan`
 - Require branches to be up to date before merge.
 - Block force pushes.
 - Block deletions.
