@@ -10,6 +10,7 @@ mod global_struct_object;
 mod model;
 mod program;
 mod scalar_layout;
+mod surface_parser;
 mod surface_types;
 mod syntax;
 mod token_scan;
@@ -25,12 +26,13 @@ pub use model::{
 };
 pub use program::{Function, Parameter, Program};
 use scalar_layout::{scalar_field_type, scalar_size_for_layout};
+use surface_parser::SurfaceParser;
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{
     BinaryOp, Expr, LValue, LocalCharArrayInitializer, Statement, SwitchCase, UnaryOp,
 };
 use token_scan::{
-    array_declarator_name, decrease_depth, last_token_is_punctuator, last_top_level_identifier,
+    array_declarator_name, last_token_is_punctuator, last_top_level_identifier,
     matching_top_level_brace, matching_top_level_bracket, matching_top_level_paren,
     parameter_is_variadic, parameter_is_void, previous_identifier, previous_identifier_index,
     token_has_keyword, token_identifier, token_is_assignment_operator, token_is_keyword,
@@ -76,7 +78,7 @@ pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
 /// Returns an error when external declarations or function-definition
 /// boundaries are structurally unbalanced.
 pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslationUnit> {
-    let mut parser = SurfaceParser { tokens, index: 0 };
+    let mut parser = SurfaceParser::new(tokens);
     parser.translation_unit()
 }
 
@@ -87,7 +89,7 @@ pub fn parse_translation_unit(tokens: &[Token]) -> CompileResult<SurfaceTranslat
 /// Returns an error when the translation unit contains a function definition
 /// outside the supported executable subset.
 pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Program> {
-    let mut parser = SurfaceParser { tokens, index: 0 };
+    let mut parser = SurfaceParser::new(tokens);
     let external_items = parser.external_token_groups()?;
     let mut structs = builtin_struct_layouts();
     let mut struct_aliases = Vec::new();
@@ -5172,133 +5174,6 @@ fn eval_integer_binary_initializer_expr(
         BinaryOp::LogicalOr => Ok(InitializerNumber::integer(i64::from(
             left.to_i128_integer()? != 0 || right.to_i128_integer()? != 0,
         ))),
-    }
-}
-
-struct SurfaceParser<'a> {
-    tokens: &'a [Token],
-    index: usize,
-}
-
-impl SurfaceParser<'_> {
-    fn translation_unit(&mut self) -> CompileResult<SurfaceTranslationUnit> {
-        let external_items = self.external_token_groups()?;
-        let mut items = Vec::new();
-        for external_tokens in external_items {
-            if let Some(item) = classify_external_item(&external_tokens) {
-                items.push(item);
-            }
-        }
-        Ok(SurfaceTranslationUnit { items })
-    }
-
-    fn external_token_groups(&mut self) -> CompileResult<Vec<Vec<Token>>> {
-        let mut items = Vec::new();
-        while !self.check_end() {
-            if self.check_punctuator("#") {
-                self.skip_directive();
-                continue;
-            }
-            if self.check_punctuator(";") {
-                self.advance();
-                continue;
-            }
-            let external_tokens = self.collect_external_item()?;
-            items.push(external_tokens);
-        }
-        Ok(items)
-    }
-
-    fn collect_external_item(&mut self) -> CompileResult<Vec<Token>> {
-        let start = self.index;
-        let mut paren_depth = 0usize;
-        let mut bracket_depth = 0usize;
-        let mut brace_depth = 0usize;
-        let mut function_body = false;
-        while !self.check_end() {
-            let Some(token) = self.peek() else {
-                break;
-            };
-            let is_top_level = paren_depth == 0 && bracket_depth == 0 && brace_depth == 0;
-            if is_top_level && token_is_punctuator(token, ";") {
-                self.advance();
-                return Ok(self.tokens[start..self.index].to_vec());
-            }
-            match &token.kind {
-                TokenKind::Punctuator(value) if value == "(" => {
-                    paren_depth += 1;
-                }
-                TokenKind::Punctuator(value) if value == ")" => {
-                    decrease_depth(&mut paren_depth, token, "parenthesis")?;
-                }
-                TokenKind::Punctuator(value) if value == "[" => {
-                    bracket_depth += 1;
-                }
-                TokenKind::Punctuator(value) if value == "]" => {
-                    decrease_depth(&mut bracket_depth, token, "bracket")?;
-                }
-                TokenKind::Punctuator(value) if value == "{" => {
-                    if is_top_level
-                        && last_token_is_punctuator(&self.tokens[start..self.index], ")")
-                    {
-                        function_body = true;
-                    }
-                    brace_depth += 1;
-                }
-                TokenKind::Punctuator(value) if value == "}" => {
-                    decrease_depth(&mut brace_depth, token, "brace")?;
-                    self.advance();
-                    if function_body && brace_depth == 0 {
-                        return Ok(self.tokens[start..self.index].to_vec());
-                    }
-                    continue;
-                }
-                _ => {}
-            }
-            self.advance();
-        }
-        if paren_depth != 0 || bracket_depth != 0 || brace_depth != 0 {
-            let error = CompileError::new("unterminated external declaration");
-            let Some(token) = self.tokens.get(start) else {
-                return Err(error);
-            };
-            return Err(error.at(token.line, token.column));
-        }
-        Ok(self.tokens[start..self.index].to_vec())
-    }
-
-    fn skip_directive(&mut self) {
-        let Some(start_line) = self.peek().map(|token| token.line) else {
-            return;
-        };
-        while let Some(token) = self.peek() {
-            if matches!(token.kind, TokenKind::End) || token.line != start_line {
-                return;
-            }
-            self.advance();
-        }
-    }
-
-    fn check_punctuator(&self, expected: &str) -> bool {
-        matches!(self.peek(), Some(token) if token_is_punctuator(token, expected))
-    }
-
-    fn check_end(&self) -> bool {
-        matches!(
-            self.peek(),
-            Some(Token {
-                kind: TokenKind::End,
-                ..
-            }) | None
-        )
-    }
-
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.index)
-    }
-
-    const fn advance(&mut self) {
-        self.index += 1;
     }
 }
 
