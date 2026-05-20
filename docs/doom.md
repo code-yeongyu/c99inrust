@@ -102,20 +102,18 @@ Doom macro builtins `__FILE__` and `__LINE__`.
 `break` statements and minimal `switch`/`case`/`default` control flow now lower
 through labels, including character-literal case values such as `case '-'`.
 Local `static` scalar declarations, including old-style implicit-int forms such
-as `static nexttic = 0`, are parsed and lowered as stack-backed locals. This is
-only a compile-progress approximation; true persistent local static storage is
-still future work.
+as `static nexttic = 0`, are parsed and lowered to internal data symbols such
+as `I_GetTime__static__basetime`, so their values persist across calls.
 Local integer arrays with initializer lists, such as
-`static int litelevels[] = { ... }`, are accepted as stack integer storage, and
-`sizeof(local_array)` reports the local array byte size for supported local
-array bindings. Local anonymous enum declarations add their constants to the
-current lowering context, and `register name = ...` is accepted as another
-old-style implicit-int local declaration.
+`static int litelevels[] = { ... }`, are still accepted as stack integer
+storage, and `sizeof(local_array)` reports the local array byte size for
+supported local array bindings. Local anonymous enum declarations add their
+constants to the current lowering context, and `register name = ...` is
+accepted as another old-style implicit-int local declaration.
 Known struct typedef locals such as `fpoint_t tmp;` and local `static` struct
 objects such as `static fline_t fl;` are accepted as stack-backed objects, with
 scalar member reads/writes and same-type struct assignment lowered as member
-copies. This is a compile-progress approximation; true persistent local static
-storage is still future work.
+copies. Aggregate local static persistence is still future work.
 `continue` statements are lowered for loops. Doom scalar typedef `angle_t` is
 accepted as an integer type, and top-level integer declarator lists such as
 `static fixed_t m_x, m_y;` emit one integer global per declarator.
@@ -142,8 +140,9 @@ function bodies that have already seen the struct typedef.
 Top-level arrays of known struct typedefs with aggregate initializers are
 accepted as zero-filled storage and decay to their global address for calls.
 Global struct objects, including brace-initialized objects such as
-`cheatseq_t cheat_amap = { ... }`, are also emitted as zero-filled storage for
-address-taking.
+`cheatseq_t cheat_amap = { cheat_amap_seq, 0 }`, now emit their scalar and
+pointer field initializers, including pointer fields that decay from global
+byte arrays.
 Extern pointers to struct typedefs retain their referent, and struct objects
 reached through pointer subscripts such as `lines[i].v1->x` are lowered through
 dynamic `base + index * sizeof(struct)` addressing. Local typed struct pointers
@@ -397,10 +396,47 @@ cargo build
 tools/doom-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-smoke
 ```
 
+## Latest Visible Window And Input Smoke
+
+The input smoke compiles and links the same 62 translation units, starts Xvfb
+manually, verifies Doom has a viewable `320x200` X11 child window, dispatches
+`Return Up Up Left Right` through `xdotool`, and waits for the binary to survive
+until the scripted timeout:
+
+```text
+tmux_session=c99inrust-doom-input-1779266316
+out=/tmp/c99inrust-doom-input-1779266316-out
+compile_ok=62 compile_fail=0
+link_status=0
+display_status=0
+window_status=0
+window_id=0x400002
+input_status=0
+tail_status=124
+run_status=124
+tmux_command_status=0
+```
+
+This run also validates the fix for global `cheatseq_t` struct object
+initializers. Before the fix, `cheat_god` and related globals were emitted as
+zeroed storage, and Up-arrow input crashed in `cht_CheckCheat` while reading a
+null `sequence` pointer. The repaired assembly now emits data such as
+`.quad cheat_god_seq`, and 2D byte-array row initializers such as
+`cheat_powerup_seq[6]` use row-sized offsets like `+60`.
+
+Evidence is recorded in `docs/qa/2026-05-20-doom-input-smoke.md`.
+
+Repeat the input smoke with:
+
+```bash
+cargo build
+tools/doom-input-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-input-smoke
+```
+
 ## Playability Gate
 
-The current smoke proves non-interactive manual running under Xvfb. Full
-interactive playability still requires:
+The current smokes prove visible-window startup, scripted keyboard delivery,
+and survival under Xvfb. Full human-verified playability still requires:
 
 1. Compile `linuxdoom-1.10` with `c99inrust`.
 2. Link the executable for a Linux/X11 environment.
@@ -408,7 +444,8 @@ interactive playability still requires:
 4. Run inside tmux without `tmux kill-server`.
 5. Verify the process survives startup and map load without segfault.
 6. Verify a visible window/title loop appears.
-7. Start a map and verify keyboard input moves the player.
+7. Dispatch keyboard input to the window without crashing.
+8. Start a map and verify keyboard input moves the player.
 
-Items 1 through 5 are covered by the latest Xvfb smoke; visible-window and
-keyboard-input evidence remain open.
+Items 1 through 7 are covered by the latest Xvfb smokes; player-movement
+evidence remains open.

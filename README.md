@@ -17,9 +17,9 @@ the official public Doom source tree:
 | Parser | Doom-shaped C declarations, typedefs, structs/unions/enums, pointers, arrays, control flow, calls, expressions, and supported C99 function bodies |
 | IR | scoped locals/globals, pointer referents, struct fields, arrays, calls, sizeof, control flow, and Doom-specific libc/X11 surface lowering |
 | Codegen | native macOS ARM64 assembly, native executable build via host `cc`, plus x86_64 Linux assembly used for official Doom linking |
-| Doom | all 62 official `linuxdoom-1.10` C translation units compile to assembly, link into a Linux/X11 executable, and run under Xvfb until the scripted QA timeout |
+| Doom | all 62 official `linuxdoom-1.10` C translation units compile to assembly, link into a Linux/X11 executable, open a viewable X11 window under Xvfb, accept scripted keyboard input, and survive until the QA timeout |
 
-Full C99, fully interactive Doom playability, all-world architecture coverage,
+Full C99, human-verified Doom playability, all-world architecture coverage,
 and general Clang-beating optimization are still active milestones. The current
 benchmark slice beats local Apple Clang for compile-to-assembly time,
 one-command binary build time, runtime, and basic assembly-shape counters; see
@@ -75,10 +75,12 @@ Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 defined, `compile -S` emits x86_64 Linux assembly for all 62 official Doom C
 translation units, those assembly files link into a Linux/X11 ELF with system
 `gcc`, and the resulting binary runs under an 8-bit Xvfb screen with a legal
-IWAD until the scripted 25 second QA timeout. The latest smoke produced
-`compile_ok=62 compile_fail=0`, `link_status=0`, and `run_status=124` with no
-`Segmentation` or Doom `Error:` line in the run log. This proves the current
-manual run smoke, not full interactive playability.
+IWAD. The latest input smoke produced `compile_ok=62 compile_fail=0`,
+`link_status=0`, `display_status=0`, `window_status=0`, `input_status=0`, and
+`run_status=124` after dispatching `Return Up Up Left Right` to a viewable
+`320x200` Doom window. This proves visible-window startup, scripted keyboard
+delivery, and survival to the QA timeout; it is still not a human playthrough
+claim.
 
 Repeat the current Doom smoke on a machine with Docker, the public Doom
 checkout, and a legal IWAD:
@@ -86,6 +88,7 @@ checkout, and a legal IWAD:
 ```bash
 cargo build
 tools/doom-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-smoke
+tools/doom-input-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-input-smoke
 ```
 
 ## Development
