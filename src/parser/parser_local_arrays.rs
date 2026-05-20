@@ -112,7 +112,7 @@ impl Parser<'_> {
         }
         loop {
             let value = eval_integer_initializer_expr_with_constants(
-                &self.expression()?,
+                &self.assignment()?,
                 self.known_constants,
             )?
             .to_i64_trunc()?;

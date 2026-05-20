@@ -56,7 +56,7 @@ impl LoweringContext {
         self.push_struct_copy(target, &source)
     }
 
-    fn push_local_struct_initializer_values(
+    pub(in crate::ir) fn push_local_struct_initializer_values(
         &mut self,
         target: &StructAddress,
         values: &[LocalStructInitializerValue],
@@ -128,11 +128,13 @@ impl LoweringContext {
                     values,
                     value_index,
                 )?,
-                FieldType::StructArray { .. } => {
-                    return Err(CompileError::new(
-                        "unsupported local struct initializer field",
-                    ));
-                }
+                FieldType::StructArray { .. } => self.push_local_struct_array_initializer(
+                    target,
+                    offset,
+                    &field.field_type,
+                    values,
+                    value_index,
+                )?,
             }
         }
         Ok(())

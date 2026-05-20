@@ -182,6 +182,7 @@ impl Parser<'_> {
                 let initializer = local_scalar_initializer(
                     scalar_type,
                     type_includes_char,
+                    type_includes_short,
                     type_is_unsigned,
                     self.expression()?,
                 );

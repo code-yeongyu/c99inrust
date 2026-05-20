@@ -40,6 +40,7 @@ fn expr_is_pointer(expr: &LoweredExpr) -> bool {
             else_expr,
             ..
         } => expr_is_pointer(then_expr) && expr_is_pointer(else_expr),
+        LoweredExpr::Comma { right, .. } => expr_is_pointer(right),
         LoweredExpr::IndirectCall { .. }
         | LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)

@@ -124,6 +124,7 @@ fn eval_integer_initializer_expr_with_context(
         | Expr::Member { .. }
         | Expr::Subscript { .. }
         | Expr::Assignment { .. }
+        | Expr::Comma { .. }
         | Expr::PostIncrement { .. } => {
             Err(CompileError::new("unsupported global integer initializer"))
         }

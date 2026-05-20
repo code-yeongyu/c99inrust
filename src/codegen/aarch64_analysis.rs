@@ -83,7 +83,8 @@ pub(in crate::codegen) fn expr_depth(expr: &LoweredExpr) -> usize {
             op: BinaryOp::LogicalAnd | BinaryOp::LogicalOr,
             left,
             right,
-        } => expr_depth(left).max(expr_depth(right)),
+        }
+        | LoweredExpr::Comma { left, right } => expr_depth(left).max(expr_depth(right)),
         LoweredExpr::Conditional {
             condition,
             then_expr,

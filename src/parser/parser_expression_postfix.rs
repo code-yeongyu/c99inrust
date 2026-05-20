@@ -181,7 +181,7 @@ impl Parser<'_> {
             return Ok(args);
         }
         loop {
-            args.push(self.expression()?);
+            args.push(self.assignment()?);
             if self.check_punctuator(")") {
                 self.advance();
                 return Ok(args);

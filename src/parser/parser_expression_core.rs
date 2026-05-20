@@ -5,7 +5,15 @@ use super::{
 
 impl Parser<'_> {
     pub(super) fn expression(&mut self) -> CompileResult<Expr> {
-        self.assignment()
+        let mut expr = self.assignment()?;
+        while self.check_punctuator(",") {
+            self.advance();
+            expr = Expr::Comma {
+                left: Box::new(expr),
+                right: Box::new(self.assignment()?),
+            };
+        }
+        Ok(expr)
     }
 
     pub(super) fn assignment(&mut self) -> CompileResult<Expr> {

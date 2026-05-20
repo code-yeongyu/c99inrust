@@ -196,6 +196,10 @@ pub enum LoweredExpr {
         then_expr: Box<Self>,
         else_expr: Box<Self>,
     },
+    Comma {
+        left: Box<Self>,
+        right: Box<Self>,
+    },
     Binary {
         op: BinaryOp,
         left: Box<Self>,

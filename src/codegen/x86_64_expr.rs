@@ -138,6 +138,10 @@ pub(in crate::codegen) fn emit_x86_64_expr_natural(
             labels,
             assembly,
         ),
+        LoweredExpr::Comma { left, right } => {
+            emit_x86_64_expr(left, temporary_base, depth, target, labels, assembly)?;
+            emit_x86_64_expr_natural(right, temporary_base, depth, target, labels, assembly)
+        }
         LoweredExpr::Binary { op, left, right } => emit_x86_64_binary_expr(
             BinaryExpr {
                 op: *op,

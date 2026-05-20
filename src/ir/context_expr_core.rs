@@ -34,6 +34,10 @@ impl LoweringContext {
                 then_expr,
                 else_expr,
             } => self.lower_conditional_expr(condition, then_expr, else_expr),
+            Expr::Comma { left, right } => Ok(LoweredExpr::Comma {
+                left: Box::new(self.lower_expr(left)?),
+                right: Box::new(self.lower_expr(right)?),
+            }),
             Expr::Binary { op, left, right } => self.lower_binary_expr(*op, left, right),
         }
     }

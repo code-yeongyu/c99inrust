@@ -107,6 +107,7 @@ pub(in crate::codegen) fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             else_expr,
             ..
         } => expr_width(then_expr).max(expr_width(else_expr)),
+        LoweredExpr::Comma { right, .. } => expr_width(right),
         LoweredExpr::Binary { op, left, right } => binary_result_width(*op, left, right),
     }
 }

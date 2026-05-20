@@ -76,11 +76,7 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
         LoweredExpr::LocalAddress { offset, .. } => {
             write_assembly!(assembly, "\tadd x0, sp, #{offset}\n")
         }
-        LoweredExpr::GlobalAddress { name } => {
-            let label = label_name(name, labels.target);
-            write_assembly!(assembly, "\tadrp x0, {label}@PAGE\n")?;
-            write_assembly!(assembly, "\tadd x0, x0, {label}@PAGEOFF\n")
-        }
+        LoweredExpr::GlobalAddress { name } => emit_aarch64_global_address(name, labels, assembly),
         LoweredExpr::PointerOffset {
             pointer,
             index,
@@ -96,17 +92,14 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             labels,
             assembly,
         ),
-        LoweredExpr::PointerFieldAddress { pointer, offset } => {
-            emit_aarch64_expr_with_width(
-                pointer,
-                ValueWidth::I64,
-                temporary_base,
-                depth + 1,
-                labels,
-                assembly,
-            )?;
-            write_assembly!(assembly, "\tadd x0, x0, #{offset}\n")
-        }
+        LoweredExpr::PointerFieldAddress { pointer, offset } => emit_aarch64_pointer_field_address(
+            pointer,
+            *offset,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         expr @ (LoweredExpr::Global { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::GlobalIntSubscript { .. }
@@ -148,6 +141,10 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             labels,
             assembly,
         ),
+        LoweredExpr::Comma { left, right } => {
+            emit_aarch64_expr(left, temporary_base, depth, labels, assembly)?;
+            emit_aarch64_expr_natural(right, temporary_base, depth, labels, assembly)
+        }
         LoweredExpr::Binary { op, left, right } => emit_aarch64_binary_expr(
             BinaryExpr {
                 op: *op,
@@ -160,4 +157,33 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             assembly,
         ),
     }
+}
+
+fn emit_aarch64_pointer_field_address(
+    pointer: &LoweredExpr,
+    offset: usize,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    emit_aarch64_expr_with_width(
+        pointer,
+        ValueWidth::I64,
+        temporary_base,
+        depth + 1,
+        labels,
+        assembly,
+    )?;
+    write_assembly!(assembly, "\tadd x0, x0, #{offset}\n")
+}
+
+fn emit_aarch64_global_address(
+    name: &str,
+    labels: &LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, labels.target);
+    write_assembly!(assembly, "\tadrp x0, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tadd x0, x0, {label}@PAGEOFF\n")
 }

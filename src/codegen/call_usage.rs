@@ -53,6 +53,9 @@ pub(in crate::codegen) fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool 
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => {
             expr_needs_preserved_temp(expr)
         }
+        LoweredExpr::Comma { left, right } => {
+            expr_needs_preserved_temp(left) || expr_needs_preserved_temp(right)
+        }
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => expr_needs_preserved_temp(index),
@@ -144,7 +147,9 @@ pub(in crate::codegen) fn expr_uses_call(expr: &LoweredExpr) -> bool {
             then_expr,
             else_expr,
         } => expr_uses_call(condition) || expr_uses_call(then_expr) || expr_uses_call(else_expr),
-        LoweredExpr::Binary { left, right, .. } => expr_uses_call(left) || expr_uses_call(right),
+        LoweredExpr::Comma { left, right } | LoweredExpr::Binary { left, right, .. } => {
+            expr_uses_call(left) || expr_uses_call(right)
+        }
     }
 }
 

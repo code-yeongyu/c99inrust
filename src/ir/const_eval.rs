@@ -43,6 +43,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Assignment { .. } => Err(CompileError::new(
             "assignment expression is not an integer constant expression",
         )),
+        Expr::Comma { .. } => Err(CompileError::new(
+            "comma expression is not an integer constant expression",
+        )),
         Expr::PostIncrement { .. } => Err(CompileError::new(
             "post-increment expression is not an integer constant expression",
         )),

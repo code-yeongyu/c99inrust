@@ -98,7 +98,7 @@ impl Parser<'_> {
             return Ok(values);
         }
         loop {
-            values.push(self.expression()?);
+            values.push(self.assignment()?);
             if self.check_punctuator("}") {
                 self.advance();
                 return Ok(values);

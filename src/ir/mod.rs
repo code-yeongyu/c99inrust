@@ -35,6 +35,7 @@ mod local_array;
 mod local_initializer_values;
 mod local_struct_initializer;
 mod local_struct_initializer_array;
+mod local_struct_initializer_struct_array;
 mod lowered_expr_helpers;
 mod pointer_arithmetic;
 mod pointer_referent;
