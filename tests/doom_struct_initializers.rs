@@ -56,3 +56,46 @@ int main(void) { return 0; }";
     assert!(assembly.contains("\t.quad cheat_powerup_seq\n"));
     assert!(assembly.contains("\t.quad cheat_powerup_seq+3\n"));
 }
+
+#[test]
+fn doom_state_table_initializers_emit_function_union_fields() {
+    // given
+    let source = r"typedef void (*actionf_p1)(void*);
+typedef union {
+    actionf_p1 acp1;
+} actionf_t;
+typedef enum {
+    S_NULL,
+    S_PLAY,
+    S_PLAY_RUN1,
+    S_PLAY_RUN2
+} statenum_t;
+typedef enum {
+    SPR_PLAY
+} spritenum_t;
+typedef struct {
+    spritenum_t sprite;
+    long frame;
+    long tics;
+    actionf_t action;
+    statenum_t nextstate;
+    long misc1;
+    long misc2;
+} state_t;
+void A_Pain(void* actor) { }
+state_t states[] = {
+    { SPR_PLAY, 0, -1, {0}, S_NULL, 0, 0 },
+    { SPR_PLAY, 0, 4, {A_Pain}, S_PLAY_RUN2, 0, 0 }
+};
+int main(void) { return 0; }";
+
+    // when
+    let assembly = compile_to_linux_assembly(source);
+
+    // then
+    assert!(assembly.contains("states:"));
+    assert!(assembly.contains("\t.quad 4\n"));
+    assert!(assembly.contains("\t.quad A_Pain\n"));
+    assert!(assembly.contains("\t.long 3\n"));
+    assert!(!assembly.contains("states:\n\t.zero 112\n"));
+}

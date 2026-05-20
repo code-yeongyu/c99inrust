@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+mod nested_initializer;
+
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
     FieldType, GlobalStructInitializerAddress, GlobalStructInitializerValue, ScalarType,
@@ -30,7 +32,7 @@ pub(super) fn lower_struct_array_global(
     } else {
         LoweredGlobalInitializer::StructArray {
             byte_len,
-            values: lower_initializer_values(values, layout, global_bindings)?,
+            values: lower_initializer_values(values, layout, structs, global_bindings)?,
         }
     };
     Ok((
@@ -59,7 +61,7 @@ pub(super) fn lower_struct_object_global(
         let rows = vec![values.to_vec()];
         LoweredGlobalInitializer::StructArray {
             byte_len: layout.size,
-            values: lower_initializer_values(&rows, layout, global_bindings)?,
+            values: lower_initializer_values(&rows, layout, structs, global_bindings)?,
         }
     };
     Ok((
@@ -74,6 +76,7 @@ pub(super) fn lower_struct_object_global(
 fn lower_initializer_values(
     rows: &[Vec<GlobalStructInitializerValue>],
     layout: &StructLayout,
+    structs: &HashMap<String, StructLayout>,
     global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<Vec<LoweredStructInitializerValue>> {
     let mut values = Vec::new();
@@ -92,7 +95,7 @@ fn lower_initializer_values(
                 byte_offset: row_offset.checked_add(field.offset).ok_or_else(|| {
                     CompileError::new("global struct initializer offset overflow")
                 })?,
-                value: lower_value(value, &field.field_type, global_bindings)?,
+                value: lower_value(value, &field.field_type, structs, global_bindings)?,
             });
         }
     }
@@ -102,6 +105,7 @@ fn lower_initializer_values(
 fn lower_value(
     value: &GlobalStructInitializerValue,
     field_type: &FieldType,
+    structs: &HashMap<String, StructLayout>,
     global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<LoweredStructInitializerScalar> {
     match field_type {
@@ -120,9 +124,12 @@ fn lower_value(
             length,
             ..
         } => lower_array_field(value, *element_size, *length),
-        FieldType::Scalar(_) | FieldType::Struct(_) | FieldType::StructArray { .. } => Err(
-            CompileError::new("unsupported global struct initializer field"),
-        ),
+        FieldType::Struct(struct_name) => {
+            nested_initializer::lower(value, struct_name, structs, global_bindings)
+        }
+        FieldType::Scalar(_) | FieldType::StructArray { .. } => Err(CompileError::new(
+            "unsupported global struct initializer field",
+        )),
     }
 }
 

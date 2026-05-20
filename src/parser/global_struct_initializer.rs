@@ -119,6 +119,19 @@ fn parse_value(
     known_structs: &[StructLayout],
     constants: &[Constant],
 ) -> CompileResult<GlobalStructInitializerValue> {
+    if token_is_punctuator(&tokens[0], "{") {
+        let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
+            return Err(CompileError::new(
+                "unterminated global struct initializer value",
+            ));
+        };
+        if close_brace + 1 == tokens.len() {
+            let values = parse_values(&tokens[1..close_brace], known_structs, constants)?;
+            if let [value] = values.as_slice() {
+                return Ok(value.clone());
+            }
+        }
+    }
     let mut parser = Parser {
         tokens,
         index: 0,
