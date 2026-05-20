@@ -62,11 +62,11 @@ up_11 120 120 1 1 1 69194459 -208771260 -97 236756 0 2
 ```
 
 Latest tmux manual QA rerun, without `tmux kill-server`, on commit
-`1d91681`:
+`6e6fa15`:
 
 ```text
-tmux_session=c99inrust-doom-movement-20260521015300
-out=/tmp/c99inrust-doom-movement-20260521015300-out
+tmux_session=doomqa-1779302462
+out=/tmp/c99inrust-doomqa-1779302462
 tmux_command_status=0
 compile_ok=62 compile_fail=0
 link_status=0
@@ -80,6 +80,24 @@ run_status=124
 
 before 5 5 1 1 1 69206016 -236978176 0 0 0 -1
 up_11 119 119 1 1 1 69194566 -209032509 -107 261249 25 3
+```
+
+Window probe from the same run:
+
+```text
+Width: 320
+Height: 200
+Depth: 8
+Map State: IsViewable
+```
+
+The binary and logs from the same run were:
+
+```text
+binary=/tmp/c99inrust-doomqa-1779302462/linuxdoom-c99inrust
+run_log=/tmp/c99inrust-doomqa-1779302462/movement-run.log
+window_log=/tmp/c99inrust-doomqa-1779302462/movement-window.log
+samples_log=/tmp/c99inrust-doomqa-1779302462/movement-samples.log
 ```
 
 Sample columns are:
