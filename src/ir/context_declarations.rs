@@ -71,9 +71,10 @@ impl LoweringContext {
         &mut self,
         name: &str,
         length: usize,
+        is_unsigned: bool,
         initializer: Option<&LocalCharArrayInitializer>,
     ) -> CompileResult<()> {
-        let slot = self.declare_char_array(name, length)?;
+        let slot = self.declare_char_array(name, length, is_unsigned)?;
         if let Some(initializer) = initializer {
             self.instructions.push(Instruction::InitLocalBytes {
                 offset: self.local_offset(slot)?,

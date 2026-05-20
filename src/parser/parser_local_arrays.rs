@@ -36,7 +36,7 @@ impl Parser<'_> {
             return self.local_char_matrix_declaration(name, explicit_length);
         }
         if type_includes_char {
-            return self.local_char_array_declaration(name, explicit_length);
+            return self.local_char_array_declaration(name, explicit_length, type_is_unsigned);
         }
         if type_includes_short {
             return self.local_short_array_declaration(name, explicit_length, type_is_unsigned);
@@ -48,6 +48,7 @@ impl Parser<'_> {
         &mut self,
         name: String,
         explicit_length: Option<usize>,
+        is_unsigned: bool,
     ) -> CompileResult<Statement> {
         let initializer = if self.check_punctuator("=") {
             self.advance();
@@ -80,6 +81,7 @@ impl Parser<'_> {
         Ok(Statement::LocalCharArray {
             name,
             length,
+            is_unsigned,
             initializer,
         })
     }

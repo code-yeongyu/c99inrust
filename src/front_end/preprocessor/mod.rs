@@ -6,6 +6,7 @@ mod directive;
 mod engine;
 mod engine_directives;
 mod expansion;
+mod extensions;
 mod includes;
 mod macro_operators;
 

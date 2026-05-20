@@ -166,8 +166,11 @@ pub(in crate::codegen) fn emit_aarch64_load_pointer_subscript_result(
     element_unsigned: bool,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    if element_byte_size == 1 && width == ValueWidth::I32 {
+    if element_byte_size == 1 && width == ValueWidth::I32 && element_unsigned {
         return write_assembly!(assembly, "\tldrb w0, [x16, w17, sxtw]\n");
+    }
+    if element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tldrsb w0, [x16, w17, sxtw]\n");
     }
     if element_byte_size == 2 && width == ValueWidth::I32 && element_unsigned {
         return write_assembly!(assembly, "\tldrh w0, [x16, w17, sxtw #1]\n");

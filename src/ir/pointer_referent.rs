@@ -9,6 +9,9 @@ pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> Compile
     {
         return Ok(referent);
     }
+    if matches!(expr, Expr::StringLiteral(_)) {
+        return Ok("char".to_owned());
+    }
     if let Expr::Call { callee, .. } = expr
         && let Some(Some(referent)) = context.pointer_return_functions.get(callee)
     {

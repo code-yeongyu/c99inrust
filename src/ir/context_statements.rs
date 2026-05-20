@@ -23,8 +23,9 @@ impl LoweringContext {
             Statement::LocalCharArray {
                 name,
                 length,
+                is_unsigned,
                 initializer,
-            } => self.lower_local_char_array(name, *length, initializer.as_ref()),
+            } => self.lower_local_char_array(name, *length, *is_unsigned, initializer.as_ref()),
             Statement::LocalCharMatrix {
                 name,
                 rows,

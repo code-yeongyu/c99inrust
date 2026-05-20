@@ -9,6 +9,7 @@ use super::condition::all_conditions_active;
 use super::definition::MacroDefinition;
 use super::engine_directives::PreprocessState;
 use super::expansion::{expand_builtin_macros, expand_macros};
+use super::extensions::normalize_extensions;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreprocessedUnit {
@@ -117,7 +118,8 @@ impl Preprocessor {
             }
             if all_conditions_active(&condition_stack) {
                 let expanded = expand_macros(raw_line, macros);
-                output.push_str(&expand_builtin_macros(&expanded, current_file, line_number));
+                let builtins = expand_builtin_macros(&expanded, current_file, line_number);
+                output.push_str(&normalize_extensions(&builtins));
                 output.push('\n');
             }
         }

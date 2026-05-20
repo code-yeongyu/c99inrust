@@ -1,26 +1,21 @@
-use super::aarch64_addressing::{emit_aarch64_load_pointer_field, emit_aarch64_pointer_offset};
-use super::aarch64_assign::emit_aarch64_assign;
+use super::aarch64_addressing::emit_aarch64_pointer_offset;
 use super::aarch64_binary::{
-    emit_aarch64_binary_expr, emit_aarch64_i32_to_register, emit_aarch64_width_adjustment,
+    emit_aarch64_binary_expr, emit_aarch64_i32_to_register, emit_aarch64_i64_to_register,
+    emit_aarch64_width_adjustment,
 };
 use super::aarch64_calls::emit_aarch64_call_expr;
 use super::aarch64_conditionals::emit_aarch64_conditional;
-use super::aarch64_loads::{
-    emit_aarch64_load_double_literal, emit_aarch64_load_global,
-    emit_aarch64_load_global_byte_subscript, emit_aarch64_load_global_int_subscript,
-    emit_aarch64_load_global_pointer_subscript, emit_aarch64_load_pointer_subscript,
-    emit_aarch64_load_string_address,
-};
-use super::aarch64_post_increment::emit_aarch64_post_increment;
+use super::aarch64_loads::{emit_aarch64_load_double_literal, emit_aarch64_load_string_address};
+use super::aarch64_memory_expr::emit_aarch64_memory_expr;
 use super::aarch64_temporaries::emit_aarch64_load_temporary;
 use super::aarch64_unary::emit_aarch64_unary_expr;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::widths::{
-    BinaryExpr, ConditionalExpr, PointerFieldExpr, PointerOffsetExpr, PointerSubscriptExpr,
-    ValueWidth, cast_width, expr_width, scalar_width,
+    BinaryExpr, ConditionalExpr, PointerOffsetExpr, ValueWidth, cast_width, expr_width,
+    scalar_width,
 };
-use crate::diagnostics::{CompileError, CompileResult};
+use crate::diagnostics::CompileResult;
 use crate::ir::LoweredExpr;
 
 pub(in crate::codegen) fn emit_aarch64_expr(
@@ -48,6 +43,12 @@ pub(in crate::codegen) fn emit_aarch64_expr_with_width(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if let (LoweredExpr::Integer(value), ValueWidth::I64) = (expr, target_width) {
+        return emit_aarch64_i64_to_register(*value, "x0", assembly);
+    }
+    if matches!(expr, LoweredExpr::IndirectCall { .. }) && target_width == ValueWidth::I64 {
+        return emit_aarch64_expr_natural(expr, temporary_base, depth, labels, assembly);
+    }
     let natural_width = expr_width(expr);
     emit_aarch64_expr_natural(expr, temporary_base, depth, labels, assembly)?;
     emit_aarch64_width_adjustment(natural_width, target_width, assembly);
@@ -158,94 +159,5 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             labels,
             assembly,
         ),
-    }
-}
-
-pub(in crate::codegen) fn emit_aarch64_memory_expr(
-    expr: &LoweredExpr,
-    temporary_base: usize,
-    depth: usize,
-    labels: &mut LabelAllocator<'_>,
-    assembly: &mut String,
-) -> CompileResult<()> {
-    match expr {
-        LoweredExpr::Global { name, scalar_type } => {
-            emit_aarch64_load_global(name, scalar_width(*scalar_type), labels.target, assembly)
-        }
-        LoweredExpr::GlobalByteSubscript { name, index } => {
-            emit_aarch64_load_global_byte_subscript(
-                name,
-                index,
-                temporary_base,
-                depth,
-                labels,
-                assembly,
-            )
-        }
-        LoweredExpr::GlobalIntSubscript { name, index } => emit_aarch64_load_global_int_subscript(
-            name,
-            index,
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
-        LoweredExpr::GlobalPointerSubscript { name, index } => {
-            emit_aarch64_load_global_pointer_subscript(
-                name,
-                index,
-                temporary_base,
-                depth,
-                labels,
-                assembly,
-            )
-        }
-        LoweredExpr::PointerSubscript {
-            pointer,
-            index,
-            element_type,
-            element_byte_size,
-            element_unsigned,
-        } => emit_aarch64_load_pointer_subscript(
-            PointerSubscriptExpr {
-                pointer,
-                index,
-                element_type: *element_type,
-                element_byte_size: *element_byte_size,
-                element_unsigned: *element_unsigned,
-            },
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
-        LoweredExpr::PointerField {
-            pointer,
-            offset,
-            scalar_type,
-            byte_size,
-            is_unsigned,
-        } => emit_aarch64_load_pointer_field(
-            PointerFieldExpr {
-                pointer,
-                offset: *offset,
-                scalar_type: *scalar_type,
-                byte_size: *byte_size,
-                is_unsigned: *is_unsigned,
-            },
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
-        LoweredExpr::Assign { target, value } => {
-            emit_aarch64_assign(target, value, temporary_base, depth, labels, assembly)
-        }
-        LoweredExpr::PostIncrement { target, increment } => {
-            emit_aarch64_post_increment(target, *increment, temporary_base, depth, labels, assembly)
-        }
-        _ => Err(CompileError::new(
-            "internal error: expected aarch64 memory expression",
-        )),
     }
 }

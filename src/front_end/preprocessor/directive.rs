@@ -38,6 +38,7 @@ pub(super) fn parse_define(rest: &str, line: usize) -> CompileResult<(String, Ma
             params_source
                 .split(',')
                 .map(str::trim)
+                .map(|param| if param == "..." { "__VA_ARGS__" } else { param })
                 .map(str::to_string)
                 .collect()
         };

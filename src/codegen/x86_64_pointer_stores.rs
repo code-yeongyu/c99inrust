@@ -84,8 +84,11 @@ pub(in crate::codegen) fn emit_x86_64_load_pointer_subscript_result(
     element_unsigned: bool,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    if element_byte_size == 1 && width == ValueWidth::I32 {
+    if element_byte_size == 1 && width == ValueWidth::I32 && element_unsigned {
         return write_assembly!(assembly, "\tmovzbl (%rcx,%rdx,1), %eax\n");
+    }
+    if element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovsbl (%rcx,%rdx,1), %eax\n");
     }
     if element_byte_size == 2 && width == ValueWidth::I32 && element_unsigned {
         return write_assembly!(assembly, "\tmovzwl (%rcx,%rdx,2), %eax\n");

@@ -111,7 +111,14 @@ pub(in crate::codegen) fn emit_aarch64_store_local(
     assembly: &mut String,
 ) -> CompileResult<()> {
     if scalar_type != ScalarType::Int {
-        return emit_aarch64_expr(value, temporary_base, 0, labels, assembly);
+        return emit_aarch64_expr_with_width(
+            value,
+            scalar_width(scalar_type),
+            temporary_base,
+            0,
+            labels,
+            assembly,
+        );
     }
     if let LoweredExpr::Binary { op, left, right } = value
         && let (

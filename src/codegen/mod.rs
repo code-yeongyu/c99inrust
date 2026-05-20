@@ -20,6 +20,7 @@ mod aarch64_function;
 mod aarch64_global_stores;
 mod aarch64_loads;
 mod aarch64_logical;
+mod aarch64_memory_expr;
 mod aarch64_post_increment;
 mod aarch64_temporaries;
 mod aarch64_unary;

@@ -58,7 +58,7 @@ impl LoweringContext {
                 byte_size: element_byte_size,
             });
         }
-        if let Some(pointer) = self.resolve_local_char_array(array)? {
+        if let Some((pointer, _element_unsigned)) = self.resolve_local_char_array(array)? {
             return Ok(LoweredExpr::PointerOffset {
                 pointer: Box::new(pointer),
                 index: Box::new(self.lower_expr(index)?),
@@ -140,7 +140,7 @@ impl LoweringContext {
             LocalBinding::Scalar {
                 slot, scalar_type, ..
             } => (*slot, scalar_size(*scalar_type)),
-            LocalBinding::CharArray { slot, length } => (*slot, *length),
+            LocalBinding::CharArray { slot, length, .. } => (*slot, *length),
             LocalBinding::IntArray { slot, length } => (*slot, local_int_array_byte_size(*length)?),
             LocalBinding::ShortArray { slot, length, .. } => {
                 (*slot, local_short_array_byte_size(*length)?)

@@ -126,6 +126,9 @@ impl LoweringContext {
     }
 
     pub(in crate::ir) fn pointer_referent_for_identifier(&self, name: &str) -> Option<String> {
+        if name == "__func__" {
+            return Some("char".to_owned());
+        }
         if let Some(binding) = self.local_binding(name) {
             return match binding {
                 LocalBinding::Scalar {

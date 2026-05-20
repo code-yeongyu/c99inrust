@@ -79,6 +79,7 @@ impl LoweringContext {
         &mut self,
         name: &str,
         length: usize,
+        is_unsigned: bool,
     ) -> CompileResult<usize> {
         self.declare_slot(
             name,
@@ -88,6 +89,7 @@ impl LoweringContext {
             LocalBinding::CharArray {
                 slot: self.local_slots.len(),
                 length,
+                is_unsigned,
             },
         )
     }

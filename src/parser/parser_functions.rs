@@ -24,6 +24,7 @@ impl Parser<'_> {
     pub(super) fn function(&mut self) -> CompileResult<Function> {
         let (return_type, name) = self.function_signature()?;
         let (parameters, is_variadic) = self.parameter_list()?;
+        self.skip_old_style_parameter_declarations()?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
         while !self.check_punctuator("}") {
@@ -114,6 +115,14 @@ impl Parser<'_> {
             });
             return Ok(false);
         }
+        if let Some(name) = implicit_int_parameter_name(tokens) {
+            parameters.push(Parameter {
+                name: name.to_owned(),
+                scalar_type: ScalarType::Int,
+                referent: None,
+            });
+            return Ok(false);
+        }
         let Some(name) = parameter_name(tokens) else {
             return Err(CompileError::new("unsupported function parameter"));
         };
@@ -130,9 +139,28 @@ impl Parser<'_> {
         });
         Ok(false)
     }
+
+    fn skip_old_style_parameter_declarations(&mut self) -> CompileResult<()> {
+        while !self.check_end() && !self.check_punctuator("{") {
+            let tokens = &self.tokens[self.index..];
+            let Some(semicolon_index) = top_level_punctuator_index(tokens, ";") else {
+                return Err(CompileError::new(
+                    "unterminated old-style parameter declaration",
+                ));
+            };
+            self.index += semicolon_index + 1;
+        }
+        Ok(())
+    }
 }
 
 fn parameter_name(tokens: &[crate::front_end::lexer::Token]) -> Option<&str> {
     let before = top_level_punctuator_index(tokens, "[").unwrap_or(tokens.len());
     tokens[..before].iter().rev().find_map(token_identifier)
+}
+
+fn implicit_int_parameter_name(tokens: &[crate::front_end::lexer::Token]) -> Option<&str> {
+    (tokens.len() == 1)
+        .then(|| token_identifier(&tokens[0]))
+        .flatten()
 }

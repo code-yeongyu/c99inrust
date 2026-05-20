@@ -12,7 +12,7 @@ use super::x86_64_conditionals::emit_x86_64_conditional;
 use super::x86_64_expr_special::emit_x86_64_global_or_assignment_expr;
 use super::x86_64_loads::{emit_x86_64_load_double_literal, emit_x86_64_load_string_address};
 use super::x86_64_temporaries::emit_x86_64_load_temporary;
-use super::x86_64_unary::{emit_x86_64_integer, emit_x86_64_unary_expr};
+use super::x86_64_unary::{emit_x86_64_i64_integer, emit_x86_64_integer, emit_x86_64_unary_expr};
 use crate::diagnostics::CompileResult;
 use crate::ir::LoweredExpr;
 
@@ -44,6 +44,12 @@ pub(in crate::codegen) fn emit_x86_64_expr_with_width(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if let (LoweredExpr::Integer(value), ValueWidth::I64) = (expr, target_width) {
+        return emit_x86_64_i64_integer(*value, assembly);
+    }
+    if matches!(expr, LoweredExpr::IndirectCall { .. }) && target_width == ValueWidth::I64 {
+        return emit_x86_64_expr_natural(expr, temporary_base, depth, target, labels, assembly);
+    }
     let natural_width = expr_width(expr);
     emit_x86_64_expr_natural(expr, temporary_base, depth, target, labels, assembly)?;
     emit_x86_64_width_adjustment(natural_width, target_width, assembly);

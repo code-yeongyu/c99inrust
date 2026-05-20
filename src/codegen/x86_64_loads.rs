@@ -171,8 +171,11 @@ pub(in crate::codegen) fn emit_x86_64_load_pointer_subscript(
     )?;
     assembly.push_str("\tcltq\n");
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
-    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 && subscript.element_unsigned {
         return write_assembly!(assembly, "\tmovzbl (%rcx,%rax,1), %eax\n");
+    }
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tmovsbl (%rcx,%rax,1), %eax\n");
     }
     if subscript.element_byte_size == 2 && width == ValueWidth::I32 && subscript.element_unsigned {
         return write_assembly!(assembly, "\tmovzwl (%rcx,%rax,2), %eax\n");

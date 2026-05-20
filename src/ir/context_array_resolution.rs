@@ -50,7 +50,7 @@ impl LoweringContext {
     pub(in crate::ir) fn resolve_local_char_array(
         &self,
         array: &Expr,
-    ) -> CompileResult<Option<LoweredExpr>> {
+    ) -> CompileResult<Option<(LoweredExpr, bool)>> {
         let binding = if let Expr::Identifier(name) = array {
             self.local_binding(name)
         } else {

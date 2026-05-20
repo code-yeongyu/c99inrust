@@ -17,6 +17,7 @@ pub(in crate::ir) enum LocalBinding {
     CharArray {
         slot: usize,
         length: usize,
+        is_unsigned: bool,
     },
     CharMatrix {
         slot: usize,

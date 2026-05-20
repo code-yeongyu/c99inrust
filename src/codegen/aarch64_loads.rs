@@ -161,8 +161,11 @@ pub(in crate::codegen) fn emit_aarch64_load_pointer_subscript(
         assembly,
     )?;
     emit_aarch64_load_temporary_to_register(ValueWidth::I64, base_offset, "16", assembly)?;
-    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 && subscript.element_unsigned {
         return write_assembly!(assembly, "\tldrb w0, [x16, w0, sxtw]\n");
+    }
+    if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly!(assembly, "\tldrsb w0, [x16, w0, sxtw]\n");
     }
     if subscript.element_byte_size == 2 && width == ValueWidth::I32 && subscript.element_unsigned {
         return write_assembly!(assembly, "\tldrh w0, [x16, w0, sxtw #1]\n");

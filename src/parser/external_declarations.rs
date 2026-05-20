@@ -80,10 +80,28 @@ pub(super) fn function_definition_has_supported_signature(tokens: &[Token]) -> b
             }
             paren_depth -= 1;
             if paren_depth == 0 {
-                return tokens
-                    .get(index + 1)
-                    .is_some_and(|next| token_is_punctuator(next, "{"));
+                return function_body_follows(tokens, index + 1);
             }
+        }
+    }
+    false
+}
+
+fn function_body_follows(tokens: &[Token], start: usize) -> bool {
+    if tokens
+        .get(start)
+        .is_some_and(|next| token_is_punctuator(next, "{"))
+    {
+        return true;
+    }
+    let mut saw_parameter_declaration = false;
+    for token in &tokens[start..] {
+        if token_is_punctuator(token, ";") {
+            saw_parameter_declaration = true;
+            continue;
+        }
+        if token_is_punctuator(token, "{") {
+            return saw_parameter_declaration;
         }
     }
     false

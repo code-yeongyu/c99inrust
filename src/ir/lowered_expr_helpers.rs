@@ -28,7 +28,8 @@ pub(in crate::ir) const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Optio
         }
         | LoweredExpr::PointerField { scalar_type, .. } => Some(*scalar_type),
         LoweredExpr::GlobalIntSubscript { .. } => Some(ScalarType::Int),
-        LoweredExpr::LocalAddress { .. }
+        LoweredExpr::StringLiteral(_)
+        | LoweredExpr::LocalAddress { .. }
         | LoweredExpr::GlobalPointerSubscript { .. }
         | LoweredExpr::GlobalAddress { .. }
         | LoweredExpr::PointerOffset { .. }
@@ -39,7 +40,6 @@ pub(in crate::ir) const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Optio
         }
         LoweredExpr::Integer(_)
         | LoweredExpr::DoubleLiteral(_)
-        | LoweredExpr::StringLiteral(_)
         | LoweredExpr::IndirectCall { .. }
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::Unary { .. }

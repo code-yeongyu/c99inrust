@@ -1,6 +1,6 @@
 use super::{
-    CompileError, CompileResult, Keyword, Parser, ScalarType, TokenKind, supported_typedef_scalar,
-    token_identifier,
+    CompileError, CompileResult, Keyword, Parser, ScalarType, TokenKind, matching_top_level_paren,
+    supported_typedef_scalar, token_identifier, token_is_punctuator,
 };
 
 impl Parser<'_> {
@@ -25,6 +25,9 @@ impl Parser<'_> {
 
     pub(super) fn declaration_type_span_at_current(&self) -> Option<(ScalarType, usize)> {
         let mut index = self.index;
+        if let Some(end) = self.typeof_span_at(index) {
+            return Some((ScalarType::Int, end));
+        }
         let mut saw_type = false;
         let mut saw_bool = false;
         let mut saw_double = false;
@@ -119,6 +122,18 @@ impl Parser<'_> {
             | bool_flag(saw_bool, SAW_BOOL)
             | bool_flag(saw_double, SAW_DOUBLE);
         declaration_type_from_flags(flags, long_count, index)
+    }
+
+    fn typeof_span_at(&self, index: usize) -> Option<usize> {
+        let TokenKind::Identifier(name) = &self.tokens.get(index)?.kind else {
+            return None;
+        };
+        if !matches!(name.as_str(), "typeof" | "__typeof__")
+            || !token_is_punctuator(self.tokens.get(index + 1)?, "(")
+        {
+            return None;
+        }
+        matching_top_level_paren(self.tokens, index + 1).map(|close| close + 1)
     }
 
     pub(super) fn supported_declaration_typedef_scalar(&self, name: &str) -> Option<ScalarType> {

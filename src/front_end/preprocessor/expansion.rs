@@ -5,7 +5,7 @@ use super::macro_operators::replace_params;
 
 pub(super) fn expand_macros(line: &str, macros: &HashMap<String, MacroDefinition>) -> String {
     let mut current = line.to_string();
-    for _ in 0..16 {
+    for _ in 0..64 {
         let next = expand_macros_once(&current, macros);
         if next == current {
             return next;

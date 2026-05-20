@@ -50,6 +50,14 @@ pub(in crate::codegen) fn emit_x86_64_integer(
     let value = i32_immediate(value)?;
     write_assembly!(assembly, "\tmovl ${value}, %eax\n")
 }
+
+pub(in crate::codegen) fn emit_x86_64_i64_integer(
+    value: i64,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    write_assembly!(assembly, "\tmovabsq ${value}, %rax\n")
+}
+
 pub(in crate::codegen) fn emit_x86_64_negate_f64(
     target: Target,
     labels: &mut LabelAllocator<'_>,

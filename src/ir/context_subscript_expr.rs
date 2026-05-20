@@ -148,13 +148,13 @@ impl LoweringContext {
         array: &Expr,
         index: &Expr,
     ) -> CompileResult<Option<LoweredExpr>> {
-        if let Some(pointer) = self.resolve_local_char_array(array)? {
+        if let Some((pointer, element_unsigned)) = self.resolve_local_char_array(array)? {
             return Ok(Some(Self::pointer_subscript_expr(
                 pointer,
                 self.lower_expr(index)?,
                 ScalarType::Int,
                 1,
-                true,
+                element_unsigned,
             )));
         }
         if let Some((pointer, element_unsigned)) = self.resolve_local_short_array(array)? {

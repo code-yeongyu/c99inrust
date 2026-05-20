@@ -2,7 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Token, TokenKind};
 
 use super::SurfaceTranslationUnit;
-use super::external_declarations::classify_external_item;
+use super::external_declarations::{classify_external_item, top_level_function_open_paren};
 use super::token_scan::{decrease_depth, last_token_is_punctuator, token_is_punctuator};
 
 pub(super) struct SurfaceParser<'a> {
@@ -57,6 +57,10 @@ impl SurfaceParser<'_> {
             };
             let is_top_level = paren_depth == 0 && bracket_depth == 0 && brace_depth == 0;
             if is_top_level && token_is_punctuator(token, ";") {
+                if self.old_style_parameter_declaration_separator(start) {
+                    self.advance();
+                    continue;
+                }
                 self.advance();
                 return Ok(self.tokens[start..self.index].to_vec());
             }
@@ -74,9 +78,7 @@ impl SurfaceParser<'_> {
                     decrease_depth(&mut bracket_depth, token, "bracket")?;
                 }
                 TokenKind::Punctuator(value) if value == "{" => {
-                    if is_top_level
-                        && last_token_is_punctuator(&self.tokens[start..self.index], ")")
-                    {
+                    if is_top_level && self.function_body_starts_at_brace(start) {
                         function_body = true;
                     }
                     brace_depth += 1;
@@ -113,6 +115,16 @@ impl SurfaceParser<'_> {
             }
             self.advance();
         }
+    }
+
+    fn function_body_starts_at_brace(&self, start: usize) -> bool {
+        last_token_is_punctuator(&self.tokens[start..self.index], ")")
+            || top_level_function_open_paren(&self.tokens[start..self.index]).is_some()
+    }
+
+    fn old_style_parameter_declaration_separator(&self, start: usize) -> bool {
+        top_level_function_open_paren(&self.tokens[start..self.index]).is_some()
+            && !last_token_is_punctuator(&self.tokens[start..self.index], ")")
     }
 
     fn check_punctuator(&self, expected: &str) -> bool {

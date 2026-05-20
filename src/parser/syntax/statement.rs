@@ -21,6 +21,7 @@ pub enum Statement {
     LocalCharArray {
         name: String,
         length: usize,
+        is_unsigned: bool,
         initializer: Option<LocalCharArrayInitializer>,
     },
     LocalCharMatrix {

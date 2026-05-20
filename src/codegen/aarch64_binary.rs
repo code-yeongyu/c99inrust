@@ -186,6 +186,23 @@ pub(in crate::codegen) fn emit_aarch64_i32_to_register(
     Ok(())
 }
 
+pub(in crate::codegen) fn emit_aarch64_i64_to_register(
+    value: i64,
+    register: &str,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let bits = u64::from_ne_bytes(value.to_ne_bytes());
+    let low = bits & 0xffff;
+    write_assembly!(assembly, "\tmovz {register}, #{low}\n")?;
+    for shift in [16u32, 32, 48] {
+        let part = (bits >> shift) & 0xffff;
+        if part != 0 {
+            write_assembly!(assembly, "\tmovk {register}, #{part}, lsl #{shift}\n")?;
+        }
+    }
+    Ok(())
+}
+
 pub(in crate::codegen) fn i32_immediate(value: i64) -> CompileResult<i32> {
     if let Ok(value) = i32::try_from(value) {
         return Ok(value);

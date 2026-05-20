@@ -8,6 +8,9 @@ use crate::parser::ScalarType;
 
 impl LoweringContext {
     pub(in crate::ir) fn lower_identifier_expr(&self, name: &str) -> CompileResult<LoweredExpr> {
+        if name == "__func__" {
+            return Ok(LoweredExpr::StringLiteral(self.function_name.clone()));
+        }
         if let Some(binding) = self.local_binding(name) {
             return self.lower_local_identifier_expr(&binding);
         }
@@ -62,7 +65,7 @@ impl LoweringContext {
                 name: global_name.clone(),
                 scalar_type: *scalar_type,
             }),
-            LocalBinding::CharArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+            LocalBinding::CharArray { slot, length, .. } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,
                 byte_size: *length,
             }),
