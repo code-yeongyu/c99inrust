@@ -18,7 +18,7 @@ Each new language feature needs:
 The oracle harness lives in `tests/clang_oracle.rs` and split modules under
 `tests/clang_oracle/`. Each case compiles a C snippet with both compilers, links
 both outputs through the platform toolchain, runs both executables, and compares
-observable stdout plus exit code. The suite currently contains 174 oracle tests.
+observable stdout plus exit code. The suite currently contains 215 oracle tests.
 
 Current covered slices include fundamentals, control flow, calls, multi-file
 extern linkage, Doom-shaped globals, pointer and array operations, undefined or

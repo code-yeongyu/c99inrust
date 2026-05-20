@@ -36,3 +36,22 @@ link_status=0
 
 This does not require `doom1.wad`, Xvfb, or host `DISPLAY`. Run/input/movement
 remain covered by the separate IWAD-backed smoke scripts.
+
+## CI Recheck After Ultra C99 Oracle Cases
+
+Date: 2026-05-21 06:11 KST
+Commit: `2000360 fix(c99): match ultra oracle cases`
+GitHub Actions run: `26190196636`
+
+The `doom compile/link scan` job completed successfully after the latest deep
+C99 oracle expansion and compiler fixes. The job rebuilt the compiler, cloned
+the official public Doom source, compiled all 62 official translation units, and
+linked the Linux/X11 executable.
+
+Result:
+
+```text
+compile_ok=62 compile_fail=0
+link_status=0
+conclusion=success
+```

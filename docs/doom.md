@@ -386,6 +386,17 @@ ELF 64-bit LSB executable, x86-64
 
 Evidence is recorded in `docs/qa/2026-05-21-doom-link-scan.md`.
 
+Latest CI recheck:
+
+```text
+commit=2000360
+github_actions_run=26190196636
+job=doom compile/link scan
+compile_ok=62 compile_fail=0
+link_status=0
+conclusion=success
+```
+
 ## Latest Link And Run Smoke
 
 The 62 generated x86_64 Linux assembly files now link into a Linux/X11 ELF in
