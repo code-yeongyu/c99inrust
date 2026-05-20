@@ -24,6 +24,8 @@ mod deep_c99_requested;
 mod deep_c99_requested_mega_a;
 #[path = "clang_oracle/deep_c99_requested_mega_b.rs"]
 mod deep_c99_requested_mega_b;
+#[path = "clang_oracle/deep_c99_requested_mega_c.rs"]
+mod deep_c99_requested_mega_c;
 #[path = "clang_oracle/deep_c99_requested_more.rs"]
 mod deep_c99_requested_more;
 #[path = "clang_oracle/deep_c99_requested_more_eval.rs"]

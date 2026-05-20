@@ -139,7 +139,14 @@ impl LoweringContext {
                     referent: Some(referent),
                     ..
                 } => Some(referent),
+                LocalBinding::CharArray { is_unsigned, .. } => {
+                    Some(if is_unsigned { "byte" } else { "char" }.to_owned())
+                }
+                LocalBinding::IntArray { .. } => Some("int".to_owned()),
                 LocalBinding::ShortArray { .. } => Some("short".to_owned()),
+                LocalBinding::PointerArray { .. } => {
+                    Some(pointer_arithmetic::nested_referent(None))
+                }
                 _ => None,
             };
         }

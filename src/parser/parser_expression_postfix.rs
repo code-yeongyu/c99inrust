@@ -236,6 +236,7 @@ impl Parser<'_> {
             _ => String::new(),
         };
         let exponent = self.expect_integer()?;
+        self.consume_float_suffix();
         Ok(Some(format!("e{sign}{exponent}")))
     }
 

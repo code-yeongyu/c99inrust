@@ -5,6 +5,11 @@ use super::{
     validate_local_char_array_initializer_size,
 };
 
+fn local_char_initializer_byte(value: i64) -> CompileResult<u8> {
+    u8::try_from(value & 0xff)
+        .map_err(|_| CompileError::new("local char array initializer too large"))
+}
+
 impl Parser<'_> {
     pub(super) fn local_array_declaration(
         &mut self,
@@ -116,10 +121,7 @@ impl Parser<'_> {
                 self.known_constants,
             )?
             .to_i64_trunc()?;
-            values.push(
-                u8::try_from(value)
-                    .map_err(|_| CompileError::new("local char array initializer too large"))?,
-            );
+            values.push(local_char_initializer_byte(value)?);
             if self.check_punctuator("}") {
                 self.advance();
                 return Ok(values);

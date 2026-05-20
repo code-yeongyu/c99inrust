@@ -18,7 +18,7 @@ Each new language feature needs:
 The oracle harness lives in `tests/clang_oracle.rs` and split modules under
 `tests/clang_oracle/`. Each case compiles a C snippet with both compilers, links
 both outputs through the platform toolchain, runs both executables, and compares
-observable stdout plus exit code. The suite currently contains 280 oracle tests.
+observable stdout plus exit code. The suite currently contains 300 oracle tests.
 
 Current covered slices include fundamentals, control flow, calls, multi-file
 extern linkage, Doom-shaped globals, pointer and array operations, undefined or
@@ -45,7 +45,7 @@ pointer installation, pointer arrays over structs, partial aggregate zero-fill,
 `defined`/`#elif`, parameter-array `sizeof` decay, struct copy of nested arrays,
 comma-expression initializer ordering, local char matrix row decay and nested
 byte reads, and static local multi-declaration initializers.
-The next-wave requested edge suite adds another pass over all 20 requested
+The next-wave requested edge suites add repeated passes over all 20 requested
 categories with stdout-visible cases for nested padding/alignment, function
 pointer arrays, K&R definitions, anonymous aggregate members, GNU extensions,
 multi-file extern linkage, static inline calls, `restrict`, constant
