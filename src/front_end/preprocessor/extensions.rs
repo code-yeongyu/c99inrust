@@ -73,6 +73,7 @@ fn read_hex_float(chars: &[char], start: usize) -> Option<(String, usize)> {
     let mut index = start + 2;
     let mut value = 0.0f64;
     let mut saw_dot = false;
+    let mut saw_digit = false;
     let mut divisor = 16.0f64;
     while let Some(current) = chars.get(index).copied() {
         if current == '.' {
@@ -80,7 +81,10 @@ fn read_hex_float(chars: &[char], start: usize) -> Option<(String, usize)> {
             index += 1;
             break;
         }
-        let digit = hex_digit(current)?;
+        let Some(digit) = hex_digit(current) else {
+            break;
+        };
+        saw_digit = true;
         value = value.mul_add(16.0, digit);
         index += 1;
     }
@@ -89,10 +93,14 @@ fn read_hex_float(chars: &[char], start: usize) -> Option<(String, usize)> {
             let Some(digit) = hex_digit(current) else {
                 break;
             };
+            saw_digit = true;
             value += digit / divisor;
             divisor *= 16.0;
             index += 1;
         }
+    }
+    if !saw_digit {
+        return None;
     }
     if !matches!(chars.get(index), Some('p' | 'P')) {
         return None;

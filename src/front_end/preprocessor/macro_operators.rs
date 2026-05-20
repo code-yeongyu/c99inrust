@@ -18,15 +18,15 @@ pub(super) fn replace_params(replacement: &str, params: &[String], args: &[Strin
         if current == '#'
             && let Some((arg, next_index)) = stringified_arg(&chars, index + 1, params, args)
         {
-            output.push_str(&c_string_literal(arg));
+            output.push_str(&c_string_literal(&arg));
             index = next_index;
             continue;
         }
         if is_identifier_start(current) {
             let identifier = read_identifier(&chars, &mut index);
             if let Some(param_index) = params.iter().position(|param| param == &identifier) {
-                if let Some(arg) = args.get(param_index) {
-                    output.push_str(arg);
+                if let Some(arg) = arg_for_param(param_index, params, args) {
+                    output.push_str(&arg);
                 }
             } else {
                 output.push_str(&identifier);
@@ -39,12 +39,23 @@ pub(super) fn replace_params(replacement: &str, params: &[String], args: &[Strin
     paste_tokens(&output)
 }
 
-fn stringified_arg<'a>(
+fn arg_for_param(param_index: usize, params: &[String], args: &[String]) -> Option<String> {
+    if params
+        .get(param_index)
+        .is_some_and(|param| param == "__VA_ARGS__")
+        && param_index + 1 == params.len()
+    {
+        return Some(args.get(param_index..)?.join(", "));
+    }
+    args.get(param_index).cloned()
+}
+
+fn stringified_arg(
     chars: &[char],
     mut index: usize,
     params: &[String],
-    args: &'a [String],
-) -> Option<(&'a str, usize)> {
+    args: &[String],
+) -> Option<(String, usize)> {
     while chars
         .get(index)
         .is_some_and(|current| current.is_whitespace())
@@ -53,7 +64,15 @@ fn stringified_arg<'a>(
     }
     let identifier = read_identifier(chars, &mut index);
     let param_index = params.iter().position(|param| param == &identifier)?;
-    args.get(param_index).map(|arg| (arg.trim(), index))
+    if params
+        .get(param_index)
+        .is_some_and(|param| param == "__VA_ARGS__")
+        && param_index + 1 == params.len()
+    {
+        return Some((args.get(param_index..)?.join(", "), index));
+    }
+    args.get(param_index)
+        .map(|arg| (arg.trim().to_string(), index))
 }
 
 fn paste_tokens(value: &str) -> String {

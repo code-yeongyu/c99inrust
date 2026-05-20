@@ -2,8 +2,18 @@
 mod c99_edge_cases;
 #[path = "clang_oracle/control_flow.rs"]
 mod control_flow;
+#[path = "clang_oracle/deep_c99_calls_more.rs"]
+mod deep_c99_calls_more;
 #[path = "clang_oracle/deep_c99_edges.rs"]
 mod deep_c99_edges;
+#[path = "clang_oracle/deep_c99_expressions_more.rs"]
+mod deep_c99_expressions_more;
+#[path = "clang_oracle/deep_c99_layout_more.rs"]
+mod deep_c99_layout_more;
+#[path = "clang_oracle/deep_c99_numeric_more.rs"]
+mod deep_c99_numeric_more;
+#[path = "clang_oracle/deep_c99_preprocessor_more.rs"]
+mod deep_c99_preprocessor_more;
 #[path = "clang_oracle/deep_c99_requested.rs"]
 mod deep_c99_requested;
 #[path = "clang_oracle/functions_and_signatures.rs"]

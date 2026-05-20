@@ -5,7 +5,7 @@ use super::external_declarations::function_pointer_name;
 use super::struct_bitfields::{BitFieldState, bit_field_width, push_bit_field};
 use super::struct_layout_helpers::{
     StructFieldOutput, align_struct_offset, declarator_field_type, declarator_name_index,
-    push_struct_field, struct_field_type,
+    field_type_alignment, field_type_size, push_struct_field, struct_field_type,
 };
 use super::token_scan::{
     matching_top_level_brace, token_identifier, token_is_keyword, token_is_punctuator,
@@ -107,7 +107,14 @@ fn parse_struct_field_declaration(
     };
     let first = &tokens[first_start..first_end];
     let Some(first_name_index) = declarator_name_index(first) else {
-        return Ok(false);
+        for (start, end) in ranges {
+            let segment = &tokens[start..end];
+            let Some(width) = bit_field_width(segment) else {
+                return Ok(false);
+            };
+            push_bit_field(width, is_union, output, bit_fields)?;
+        }
+        return Ok(true);
     };
     let base_specifiers = &first[..first_name_index];
     let Some(base_type) = struct_field_type(
@@ -170,13 +177,22 @@ fn parse_nested_aggregate_field_declaration(
     let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
         return Ok(false);
     };
-    let Some(name) = tokens.get(close_brace + 1).and_then(token_identifier) else {
-        return Ok(false);
-    };
-    if tokens.get(close_brace + 2).is_some() {
+    let field_name = tokens.get(close_brace + 1).and_then(token_identifier);
+    if (field_name.is_some() && tokens.get(close_brace + 2).is_some())
+        || (field_name.is_none() && tokens.get(close_brace + 1).is_some())
+    {
         return Ok(false);
     }
-    let struct_name = format!("{}.{}", context.parent_name, name);
+    let struct_name = field_name.map_or_else(
+        || {
+            format!(
+                "{}.__anonymous{}",
+                context.parent_name,
+                context.nested_layouts.len()
+            )
+        },
+        |name| format!("{}.{}", context.parent_name, name),
+    );
     let nested_fields = {
         let mut nested_context = StructParseContext {
             parent_name: &struct_name,
@@ -200,13 +216,56 @@ fn parse_nested_aggregate_field_declaration(
         size,
     };
     context.available_structs.push(layout.clone());
-    context.nested_layouts.push(layout);
-    push_struct_field(
-        name,
-        FieldType::Struct(struct_name),
-        is_parent_union,
-        context.available_structs.as_slice(),
-        output,
-    )?;
+    context.nested_layouts.push(layout.clone());
+    if let Some(name) = field_name {
+        push_struct_field(
+            name,
+            FieldType::Struct(struct_name),
+            is_parent_union,
+            context.available_structs.as_slice(),
+            output,
+        )?;
+    } else {
+        push_anonymous_aggregate_fields(
+            &layout,
+            is_parent_union,
+            context.available_structs.as_slice(),
+            output,
+        )?;
+    }
     Ok(true)
+}
+
+fn push_anonymous_aggregate_fields(
+    layout: &StructLayout,
+    is_parent_union: bool,
+    known_structs: &[StructLayout],
+    output: &mut StructFieldOutput<'_>,
+) -> CompileResult<()> {
+    let field_type = FieldType::Struct(layout.name.clone());
+    let size = field_type_size(&field_type, known_structs)?;
+    let alignment = field_type_alignment(&field_type, known_structs)?;
+    *output.max_alignment = (*output.max_alignment).max(alignment);
+    let base_offset = if is_parent_union {
+        *output.offset = (*output.offset).max(size);
+        0
+    } else {
+        *output.offset = align_struct_offset(*output.offset, alignment)?;
+        let base_offset = *output.offset;
+        *output.offset = (*output.offset)
+            .checked_add(size)
+            .ok_or_else(|| crate::diagnostics::CompileError::new("struct size overflow"))?;
+        base_offset
+    };
+    for field in &layout.fields {
+        let offset = base_offset.checked_add(field.offset).ok_or_else(|| {
+            crate::diagnostics::CompileError::new("struct member offset overflow")
+        })?;
+        output.fields.push(StructField {
+            name: field.name.clone(),
+            field_type: field.field_type.clone(),
+            offset,
+        });
+    }
+    Ok(())
 }
