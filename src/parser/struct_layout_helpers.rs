@@ -2,13 +2,15 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Token, TokenKind};
 
 use super::declarator_types::{integer_parameter_type, pointer_referent_from_specifiers};
-use super::scalar_layout::scalar_field_type;
+use super::scalar_layout::{scalar_field_type, scalar_size_for_layout};
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_punctuator_index,
 };
 use super::type_recognition::supported_typedef_scalar;
-use super::{Constant, FieldType, ScalarType, StructLayout, parse_unsigned_char_array_length};
+use super::{
+    Constant, FieldType, ScalarType, StructField, StructLayout, parse_unsigned_char_array_length,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ArrayShape {
@@ -75,6 +77,55 @@ pub(super) fn struct_field_type(
     Some(FieldType::Scalar(scalar_field_type(tokens, scalar_type)))
 }
 
+pub(super) fn declarator_field_type(
+    segment: &[Token],
+    name_index: usize,
+    range_index: usize,
+    base_type: &FieldType,
+    constants: &[Constant],
+) -> FieldType {
+    let field_type = if range_index == 0 {
+        base_type.clone()
+    } else if segment[..name_index]
+        .iter()
+        .any(|token| token_is_punctuator(token, "*"))
+    {
+        FieldType::Pointer {
+            referent: pointer_referent_from_specifiers(&segment[..name_index]),
+        }
+    } else {
+        base_type.clone()
+    };
+    array_field_type(segment, field_type, constants)
+}
+
+fn array_field_type(tokens: &[Token], field_type: FieldType, constants: &[Constant]) -> FieldType {
+    let Some(shape) = struct_field_array_shape(tokens, constants) else {
+        return field_type;
+    };
+    match field_type {
+        FieldType::Scalar(element) => FieldType::Array {
+            element_type: element.scalar_type,
+            element_size: element.byte_size,
+            element_unsigned: element.is_unsigned,
+            length: shape.length,
+            columns: shape.columns,
+        },
+        FieldType::Pointer { .. } => FieldType::Array {
+            element_type: ScalarType::Pointer,
+            element_size: scalar_size_for_layout(ScalarType::Pointer),
+            element_unsigned: false,
+            length: shape.length,
+            columns: shape.columns,
+        },
+        FieldType::Struct(struct_name) => FieldType::StructArray {
+            struct_name,
+            length: shape.length,
+        },
+        FieldType::Array { .. } | FieldType::StructArray { .. } => field_type,
+    }
+}
+
 pub(super) fn field_type_size(
     field_type: &FieldType,
     known_structs: &[StructLayout],
@@ -134,6 +185,43 @@ fn struct_layout_alignment(
         field_type_alignment(&field.field_type, known_structs)
             .map(|field_alignment| alignment.max(field_alignment))
     })
+}
+
+pub(super) struct StructFieldOutput<'a> {
+    pub(super) fields: &'a mut Vec<StructField>,
+    pub(super) offset: &'a mut usize,
+    pub(super) max_alignment: &'a mut usize,
+}
+
+pub(super) fn push_struct_field(
+    name: &str,
+    field_type: FieldType,
+    is_union: bool,
+    known_structs: &[StructLayout],
+    output: &mut StructFieldOutput<'_>,
+) -> CompileResult<()> {
+    let size = field_type_size(&field_type, known_structs)?;
+    let alignment = field_type_alignment(&field_type, known_structs)?;
+    *output.max_alignment = (*output.max_alignment).max(alignment);
+    if is_union {
+        output.fields.push(StructField {
+            name: name.to_owned(),
+            field_type,
+            offset: 0,
+        });
+        *output.offset = (*output.offset).max(size);
+        return Ok(());
+    }
+    *output.offset = align_struct_offset(*output.offset, alignment)?;
+    output.fields.push(StructField {
+        name: name.to_owned(),
+        field_type,
+        offset: *output.offset,
+    });
+    *output.offset = (*output.offset)
+        .checked_add(size)
+        .ok_or_else(|| CompileError::new("struct size overflow"))?;
+    Ok(())
 }
 
 pub(super) fn align_struct_offset(offset: usize, alignment: usize) -> CompileResult<usize> {

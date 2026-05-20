@@ -2,11 +2,12 @@ use crate::diagnostics::CompileResult;
 use crate::front_end::lexer::{Keyword, Token};
 
 use super::doom_layout;
+use super::struct_fields::{StructParseContext, parse_struct_fields};
 use super::token_scan::{
     last_top_level_identifier, matching_top_level_brace, token_has_keyword, token_identifier,
     token_is_keyword, top_level_punctuator_index,
 };
-use super::{Constant, StructLayout, StructParseContext, parse_struct_fields};
+use super::{Constant, StructLayout};
 
 pub(super) fn parse_struct_typedef(
     tokens: &[Token],

@@ -15,6 +15,7 @@ mod local_arrays;
 mod model;
 mod program;
 mod scalar_layout;
+mod struct_fields;
 mod struct_layout_helpers;
 mod surface_parser;
 mod surface_types;
@@ -50,10 +51,6 @@ pub use model::{
 };
 pub use program::{Function, Parameter, Program};
 use scalar_layout::scalar_size_for_layout;
-use struct_layout_helpers::{
-    align_struct_offset, declarator_name_index, field_type_alignment, field_type_size,
-    struct_field_array_shape, struct_field_type,
-};
 use surface_parser::SurfaceParser;
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{
@@ -63,7 +60,7 @@ use token_scan::{
     last_token_is_punctuator, matching_top_level_brace, matching_top_level_bracket,
     matching_top_level_paren, parameter_is_variadic, parameter_is_void, previous_identifier_index,
     token_has_keyword, token_identifier, token_is_assignment_operator, token_is_keyword,
-    token_is_punctuator, top_level_comma_ranges, top_level_punctuator_index, update_depths,
+    token_is_punctuator, top_level_comma_ranges, top_level_punctuator_index,
 };
 use type_recognition::{
     sizeof_type, supported_cast_type_with_typedefs, supported_return_type, supported_typedef_scalar,
@@ -2035,261 +2032,6 @@ fn statement_from_expression(expr: Expr) -> Statement {
         },
         _ => Statement::Expression(expr),
     }
-}
-
-fn parse_struct_fields(
-    tokens: &[Token],
-    is_union: bool,
-    context: &mut StructParseContext<'_>,
-) -> CompileResult<Option<(Vec<StructField>, usize)>> {
-    let mut fields = Vec::new();
-    let mut offset = 0usize;
-    let mut max_alignment = 1usize;
-    let mut start = 0usize;
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth != 0
-            || bracket_depth != 0
-            || brace_depth != 0
-            || !token_is_punctuator(token, ";")
-        {
-            update_depths(
-                token,
-                &mut paren_depth,
-                &mut bracket_depth,
-                &mut brace_depth,
-            );
-            continue;
-        }
-        let declaration = &tokens[start..index];
-        if !declaration.is_empty()
-            && !parse_struct_field_declaration(
-                declaration,
-                is_union,
-                context,
-                &mut StructFieldOutput {
-                    fields: &mut fields,
-                    offset: &mut offset,
-                    max_alignment: &mut max_alignment,
-                },
-            )?
-        {
-            return Ok(None);
-        }
-        start = index + 1;
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    if start < tokens.len() {
-        return Ok(None);
-    }
-    let size = align_struct_offset(offset, max_alignment)?;
-    Ok(Some((fields, size)))
-}
-
-struct StructFieldOutput<'a> {
-    fields: &'a mut Vec<StructField>,
-    offset: &'a mut usize,
-    max_alignment: &'a mut usize,
-}
-
-struct StructParseContext<'a> {
-    parent_name: &'a str,
-    available_structs: &'a mut Vec<StructLayout>,
-    constants: &'a [Constant],
-    pointer_typedefs: &'a [String],
-    nested_layouts: &'a mut Vec<StructLayout>,
-}
-
-fn parse_struct_field_declaration(
-    tokens: &[Token],
-    is_union: bool,
-    context: &mut StructParseContext<'_>,
-    output: &mut StructFieldOutput<'_>,
-) -> CompileResult<bool> {
-    if parse_nested_aggregate_field_declaration(tokens, is_union, context, output)? {
-        return Ok(true);
-    }
-    if let Some(name) = function_pointer_name(tokens) {
-        push_struct_field(
-            &name,
-            FieldType::Pointer { referent: None },
-            is_union,
-            context.available_structs.as_slice(),
-            output,
-        )?;
-        return Ok(true);
-    }
-    let ranges = top_level_comma_ranges(tokens);
-    let Some((first_start, first_end)) = ranges.first().copied() else {
-        return Ok(false);
-    };
-    let first = &tokens[first_start..first_end];
-    let Some(first_name_index) = declarator_name_index(first) else {
-        return Ok(false);
-    };
-    let base_specifiers = &first[..first_name_index];
-    let Some(base_type) = struct_field_type(
-        base_specifiers,
-        context.available_structs.as_slice(),
-        context.pointer_typedefs,
-    ) else {
-        return Ok(false);
-    };
-    for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
-        let segment = &tokens[start..end];
-        let Some(name_index) = declarator_name_index(segment) else {
-            return Ok(false);
-        };
-        let Some(name) = token_identifier(&segment[name_index]) else {
-            return Ok(false);
-        };
-        let field_type = if range_index == 0 {
-            base_type.clone()
-        } else if segment[..name_index]
-            .iter()
-            .any(|token| token_is_punctuator(token, "*"))
-        {
-            FieldType::Pointer {
-                referent: pointer_referent_from_specifiers(&segment[..name_index]),
-            }
-        } else {
-            base_type.clone()
-        };
-        let field_type = if let Some(shape) = struct_field_array_shape(segment, context.constants) {
-            match field_type {
-                FieldType::Scalar(element) => FieldType::Array {
-                    element_type: element.scalar_type,
-                    element_size: element.byte_size,
-                    element_unsigned: element.is_unsigned,
-                    length: shape.length,
-                    columns: shape.columns,
-                },
-                FieldType::Pointer { .. } => FieldType::Array {
-                    element_type: ScalarType::Pointer,
-                    element_size: scalar_size_for_layout(ScalarType::Pointer),
-                    element_unsigned: false,
-                    length: shape.length,
-                    columns: shape.columns,
-                },
-                FieldType::Struct(struct_name) => FieldType::StructArray {
-                    struct_name,
-                    length: shape.length,
-                },
-                FieldType::Array { .. } | FieldType::StructArray { .. } => field_type,
-            }
-        } else {
-            field_type
-        };
-        push_struct_field(
-            name,
-            field_type,
-            is_union,
-            context.available_structs.as_slice(),
-            output,
-        )?;
-    }
-    Ok(true)
-}
-
-fn parse_nested_aggregate_field_declaration(
-    tokens: &[Token],
-    is_parent_union: bool,
-    context: &mut StructParseContext<'_>,
-    output: &mut StructFieldOutput<'_>,
-) -> CompileResult<bool> {
-    let Some(first) = tokens.first() else {
-        return Ok(false);
-    };
-    let is_union = if token_is_keyword(first, Keyword::Union) {
-        true
-    } else if token_is_keyword(first, Keyword::Struct) {
-        false
-    } else {
-        return Ok(false);
-    };
-    let Some(open_brace) = top_level_punctuator_index(tokens, "{") else {
-        return Ok(false);
-    };
-    let Some(close_brace) = matching_top_level_brace(tokens, open_brace) else {
-        return Ok(false);
-    };
-    let Some(name) = tokens.get(close_brace + 1).and_then(token_identifier) else {
-        return Ok(false);
-    };
-    if tokens.get(close_brace + 2).is_some() {
-        return Ok(false);
-    }
-    let struct_name = format!("{}.{}", context.parent_name, name);
-    let nested_fields = {
-        let mut nested_context = StructParseContext {
-            parent_name: &struct_name,
-            available_structs: &mut *context.available_structs,
-            constants: context.constants,
-            pointer_typedefs: context.pointer_typedefs,
-            nested_layouts: &mut *context.nested_layouts,
-        };
-        parse_struct_fields(
-            &tokens[open_brace + 1..close_brace],
-            is_union,
-            &mut nested_context,
-        )?
-    };
-    let Some((fields, size)) = nested_fields else {
-        return Ok(false);
-    };
-    let layout = StructLayout {
-        name: struct_name.clone(),
-        fields,
-        size,
-    };
-    context.available_structs.push(layout.clone());
-    context.nested_layouts.push(layout);
-    push_struct_field(
-        name,
-        FieldType::Struct(struct_name),
-        is_parent_union,
-        context.available_structs.as_slice(),
-        output,
-    )?;
-    Ok(true)
-}
-
-fn push_struct_field(
-    name: &str,
-    field_type: FieldType,
-    is_union: bool,
-    known_structs: &[StructLayout],
-    output: &mut StructFieldOutput<'_>,
-) -> CompileResult<()> {
-    let size = field_type_size(&field_type, known_structs)?;
-    let alignment = field_type_alignment(&field_type, known_structs)?;
-    *output.max_alignment = (*output.max_alignment).max(alignment);
-    if is_union {
-        output.fields.push(StructField {
-            name: name.to_owned(),
-            field_type,
-            offset: 0,
-        });
-        *output.offset = (*output.offset).max(size);
-        return Ok(());
-    }
-    *output.offset = align_struct_offset(*output.offset, alignment)?;
-    output.fields.push(StructField {
-        name: name.to_owned(),
-        field_type,
-        offset: *output.offset,
-    });
-    *output.offset = (*output.offset)
-        .checked_add(size)
-        .ok_or_else(|| CompileError::new("struct size overflow"))?;
-    Ok(())
 }
 
 fn parse_supported_global_declaration(
