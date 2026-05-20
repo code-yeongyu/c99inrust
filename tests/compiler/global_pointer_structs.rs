@@ -147,7 +147,7 @@ fn compiler_emits_byte_access_for_char_pointer_dereference_slice() {
 
     // then
     assert!(assembly.contains("\tmovb %al, (%rcx,%rdx,1)\n"));
-    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+    assert!(assembly.contains("\tmovsbl (%rcx,%rax,1), %eax\n"));
 }
 
 #[test]
@@ -167,7 +167,7 @@ int main(void) {
 
     // then
     assert!(assembly.contains("\tmovq myargv(%rip), %rax\n"));
-    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+    assert!(assembly.contains("\tmovsbl (%rcx,%rax,1), %eax\n"));
 }
 
 #[test]

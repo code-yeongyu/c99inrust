@@ -49,6 +49,7 @@ pub(in crate::codegen) struct PointerOffsetExpr<'a> {
 pub(in crate::codegen) struct GlobalByteSubscriptExpr<'a> {
     pub(in crate::codegen) name: &'a str,
     pub(in crate::codegen) index: &'a LoweredExpr,
+    pub(in crate::codegen) is_unsigned: bool,
 }
 
 #[derive(Clone, Copy)]

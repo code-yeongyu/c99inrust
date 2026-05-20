@@ -22,16 +22,19 @@ pub(in crate::codegen) fn emit_aarch64_memory_expr(
         LoweredExpr::Global { name, scalar_type } => {
             emit_aarch64_load_global(name, scalar_width(*scalar_type), labels.target, assembly)
         }
-        LoweredExpr::GlobalByteSubscript { name, index } => {
-            emit_aarch64_load_global_byte_subscript(
-                name,
-                index,
-                temporary_base,
-                depth,
-                labels,
-                assembly,
-            )
-        }
+        LoweredExpr::GlobalByteSubscript {
+            name,
+            index,
+            is_unsigned,
+        } => emit_aarch64_load_global_byte_subscript(
+            name,
+            index,
+            *is_unsigned,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         LoweredExpr::GlobalIntSubscript { name, index } => emit_aarch64_load_global_int_subscript(
             name,
             index,

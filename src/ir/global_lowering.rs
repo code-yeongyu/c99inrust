@@ -61,10 +61,18 @@ pub(in crate::ir) fn lower_extern_global_binding(
                 columns: *columns,
             }
         }
-        GlobalInitializer::ExternUnsignedCharArray => GlobalBinding::UnsignedCharArray,
-        GlobalInitializer::ExternUnsignedCharMatrix { columns } => {
-            GlobalBinding::UnsignedCharMatrix { columns: *columns }
+        GlobalInitializer::ExternUnsignedCharArray { is_unsigned } => {
+            GlobalBinding::UnsignedCharArray {
+                is_unsigned: *is_unsigned,
+            }
         }
+        GlobalInitializer::ExternUnsignedCharMatrix {
+            columns,
+            is_unsigned,
+        } => GlobalBinding::UnsignedCharMatrix {
+            columns: *columns,
+            is_unsigned: *is_unsigned,
+        },
         GlobalInitializer::ExternStructArray { struct_name } => {
             let layout = structs.get(struct_name).ok_or_else(|| {
                 CompileError::new(format!("unknown struct-array type: {struct_name}"))
@@ -99,7 +107,7 @@ pub(in crate::ir) fn lower_extern_global_binding(
         | GlobalInitializer::PointerNameArray { .. }
         | GlobalInitializer::StructObject { .. }
         | GlobalInitializer::StructArray { .. }
-        | GlobalInitializer::UnsignedCharArray(_)
+        | GlobalInitializer::UnsignedCharArray { .. }
         | GlobalInitializer::UnsignedCharMatrix { .. } => return Ok(None),
     };
     Ok(Some(binding))

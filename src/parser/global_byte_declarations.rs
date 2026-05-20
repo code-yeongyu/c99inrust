@@ -10,7 +10,7 @@ use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_has_keyword, token_identifier,
     token_is_punctuator, top_level_punctuator_index,
 };
-use super::{Constant, Global, GlobalInitializer};
+use super::{Constant, Global, GlobalInitializer, typedef_referent};
 
 pub(super) fn parse_global_unsigned_char_array(
     tokens: &[Token],
@@ -28,6 +28,7 @@ pub(super) fn parse_global_unsigned_char_array(
     if !global_specifiers_are_unsigned_char(&declaration[..name_index]) {
         return Ok(None);
     }
+    let is_unsigned = global_specifiers_are_unsigned_byte(&declaration[..name_index]);
     let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
         return Err(
             CompileError::new("unterminated global array declarator").at(
@@ -41,6 +42,7 @@ pub(super) fn parse_global_unsigned_char_array(
         open_bracket,
         close_bracket,
         name_index,
+        is_unsigned,
         constants,
     )? {
         return Ok(Some(global));
@@ -68,12 +70,15 @@ pub(super) fn parse_global_unsigned_char_array(
     if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
         return Ok(Some(Global::new(
             name,
-            GlobalInitializer::ExternUnsignedCharArray,
+            GlobalInitializer::ExternUnsignedCharArray { is_unsigned },
         )));
     }
     Ok(Some(Global::new(
         name,
-        GlobalInitializer::UnsignedCharArray(values),
+        GlobalInitializer::UnsignedCharArray {
+            values,
+            is_unsigned,
+        },
     )))
 }
 
@@ -82,6 +87,7 @@ fn parse_global_unsigned_char_matrix(
     open_bracket: usize,
     close_bracket: usize,
     name_index: usize,
+    is_unsigned: bool,
     constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     if !declaration
@@ -112,7 +118,10 @@ fn parse_global_unsigned_char_matrix(
     if token_has_keyword(&declaration[..name_index], Keyword::Extern) {
         return Ok(Some(Global::new(
             name,
-            GlobalInitializer::ExternUnsignedCharMatrix { columns },
+            GlobalInitializer::ExternUnsignedCharMatrix {
+                columns,
+                is_unsigned,
+            },
         )));
     }
     let values = parse_global_unsigned_char_matrix_values(
@@ -125,8 +134,20 @@ fn parse_global_unsigned_char_matrix(
     )?;
     Ok(Some(Global::new(
         name,
-        GlobalInitializer::UnsignedCharMatrix { values, columns },
+        GlobalInitializer::UnsignedCharMatrix {
+            values,
+            columns,
+            is_unsigned,
+        },
     )))
+}
+
+fn global_specifiers_are_unsigned_byte(tokens: &[Token]) -> bool {
+    token_has_keyword(tokens, Keyword::Unsigned)
+        || tokens
+            .iter()
+            .filter_map(token_identifier)
+            .any(|name| typedef_referent::byte_sized(name).is_some())
 }
 
 fn parse_global_unsigned_char_matrix_values(

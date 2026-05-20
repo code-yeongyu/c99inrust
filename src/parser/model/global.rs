@@ -44,9 +44,12 @@ pub enum GlobalInitializer {
         referent: Option<String>,
         columns: Option<usize>,
     },
-    ExternUnsignedCharArray,
+    ExternUnsignedCharArray {
+        is_unsigned: bool,
+    },
     ExternUnsignedCharMatrix {
         columns: usize,
+        is_unsigned: bool,
     },
     ExternStructArray {
         struct_name: String,
@@ -105,10 +108,14 @@ pub enum GlobalInitializer {
         columns: Option<usize>,
         values: Vec<Vec<GlobalStructInitializerValue>>,
     },
-    UnsignedCharArray(Vec<u8>),
+    UnsignedCharArray {
+        values: Vec<u8>,
+        is_unsigned: bool,
+    },
     UnsignedCharMatrix {
         values: Vec<u8>,
         columns: usize,
+        is_unsigned: bool,
     },
 }
 
@@ -134,7 +141,7 @@ impl GlobalInitializer {
                 | Self::ExternIntArray
                 | Self::ExternShortArray { .. }
                 | Self::ExternPointerArray { .. }
-                | Self::ExternUnsignedCharArray
+                | Self::ExternUnsignedCharArray { .. }
                 | Self::ExternUnsignedCharMatrix { .. }
                 | Self::ExternStructArray { .. }
                 | Self::ExternStructObject { .. }

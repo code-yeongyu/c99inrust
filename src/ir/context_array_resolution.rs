@@ -113,7 +113,8 @@ impl LoweringContext {
         let Expr::Identifier(name) = array else {
             return Ok(None);
         };
-        let Some(GlobalBinding::UnsignedCharMatrix { columns }) = self.global_bindings.get(name)
+        let Some(GlobalBinding::UnsignedCharMatrix { columns, .. }) =
+            self.global_bindings.get(name)
         else {
             return Ok(None);
         };

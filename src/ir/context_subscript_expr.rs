@@ -58,11 +58,13 @@ impl LoweringContext {
             return Ok(Some(pointer));
         }
         if let Expr::Identifier(name) = array
-            && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
+            && let Some(GlobalBinding::UnsignedCharArray { is_unsigned }) =
+                self.global_bindings.get(name)
         {
             return Ok(Some(LoweredExpr::GlobalByteSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
+                is_unsigned: *is_unsigned,
             }));
         }
         if let Expr::Identifier(name) = array
@@ -197,7 +199,7 @@ impl LoweringContext {
             self.lower_expr(index)?,
             element_type,
             element_byte_size,
-            false,
+            self.pointer_subscript_element_unsigned(array),
         ))
     }
 }

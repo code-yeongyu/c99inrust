@@ -14,6 +14,9 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     if let Some(lowered) = lower_pointer_array_initializer(&global.initializer) {
         return lowered;
     }
+    if let Some(lowered) = lower_unsigned_char_global_initializer(&global.initializer) {
+        return Ok(lowered);
+    }
     match &global.initializer {
         GlobalInitializer::Int(value) => Ok((
             LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
@@ -89,25 +92,49 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             structs,
             global_bindings,
         ),
-        GlobalInitializer::UnsignedCharArray(values) => Ok((
-            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
-            GlobalBinding::UnsignedCharArray,
-        )),
-        GlobalInitializer::UnsignedCharMatrix { values, columns } => Ok((
-            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
-            GlobalBinding::UnsignedCharMatrix { columns: *columns },
+        GlobalInitializer::UnsignedCharArray { .. }
+        | GlobalInitializer::UnsignedCharMatrix { .. } => Err(CompileError::new(
+            "internal error: byte global reached fallback lowering",
         )),
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
         | GlobalInitializer::ExternShortArray { .. }
         | GlobalInitializer::ExternPointerArray { .. }
-        | GlobalInitializer::ExternUnsignedCharArray
+        | GlobalInitializer::ExternUnsignedCharArray { .. }
         | GlobalInitializer::ExternUnsignedCharMatrix { .. }
         | GlobalInitializer::ExternStructArray { .. }
         | GlobalInitializer::ExternStructObject { .. } => Err(CompileError::new(
             "internal error: extern global reached definition lowering",
         )),
+    }
+}
+
+fn lower_unsigned_char_global_initializer(
+    initializer: &GlobalInitializer,
+) -> Option<(LoweredGlobalInitializer, GlobalBinding)> {
+    match initializer {
+        GlobalInitializer::UnsignedCharArray {
+            values,
+            is_unsigned,
+        } => Some((
+            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
+            GlobalBinding::UnsignedCharArray {
+                is_unsigned: *is_unsigned,
+            },
+        )),
+        GlobalInitializer::UnsignedCharMatrix {
+            values,
+            columns,
+            is_unsigned,
+        } => Some((
+            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
+            GlobalBinding::UnsignedCharMatrix {
+                columns: *columns,
+                is_unsigned: *is_unsigned,
+            },
+        )),
+        _ => None,
     }
 }
 

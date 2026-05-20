@@ -73,6 +73,42 @@ fn unsigned_char_conversion_matches_host_exit_code() {
 }
 
 #[test]
+fn unsigned_char_pointer_promotion_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "unsigned_char_pointer_promotion",
+        source: "int main(void) { unsigned char data[1]; unsigned char *p; data[0] = 255; p = data; return p[0] == 255 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn global_plain_char_promotion_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "global_plain_char_promotion",
+        source: "char data[1] = {255}; int main(void) { return data[0] < 0 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn global_unsigned_char_matrix_promotion_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "global_unsigned_char_matrix_promotion",
+        source: "unsigned char grid[1][1] = {{255}}; int main(void) { return grid[0][0] == 255 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
 fn long_long_high_bits_survive_addition_matches_host_exit_code() {
     // given
     let case = OracleCase {

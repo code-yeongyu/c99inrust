@@ -30,11 +30,13 @@ impl LoweringContext {
             )));
         }
         if let Expr::Identifier(name) = array
-            && self.global_bindings.get(name) == Some(&GlobalBinding::UnsignedCharArray)
+            && let Some(GlobalBinding::UnsignedCharArray { is_unsigned }) =
+                self.global_bindings.get(name)
         {
             return Ok(Some(LoweredLValue::GlobalByteSubscript {
                 name: name.clone(),
                 index: Box::new(self.lower_expr(index)?),
+                is_unsigned: *is_unsigned,
             }));
         }
         if let Expr::Identifier(name) = array
@@ -161,7 +163,7 @@ impl LoweringContext {
             self.lower_expr(index)?,
             element_type,
             element_byte_size,
-            false,
+            self.pointer_subscript_element_unsigned(array),
         ))
     }
 
@@ -216,5 +218,10 @@ impl LoweringContext {
         } else {
             ScalarType::Int
         }
+    }
+
+    pub(in crate::ir) fn pointer_subscript_element_unsigned(&self, array: &Expr) -> bool {
+        self.pointer_referent_for_expr(array)
+            .is_ok_and(|referent| pointer_arithmetic::is_unsigned_byte(&referent))
     }
 }

@@ -4,7 +4,9 @@ use super::data_literals::{
 use super::frames::LabelAllocator;
 use super::stack_helpers::memory_scale_bytes_for_byte_size;
 use super::target::Target;
-use super::widths::{PointerSubscriptExpr, TEMPORARY_BYTES, ValueWidth, scalar_width};
+use super::widths::{
+    GlobalByteSubscriptExpr, PointerSubscriptExpr, TEMPORARY_BYTES, ValueWidth, scalar_width,
+};
 use super::x86_64_addressing::{x86_64_instruction_suffix, x86_64_result_register};
 use super::x86_64_expr::emit_x86_64_expr_with_width;
 use super::x86_64_temporaries::{
@@ -66,17 +68,16 @@ pub(in crate::codegen) fn emit_x86_64_store_global(
 }
 
 pub(in crate::codegen) fn emit_x86_64_load_global_byte_subscript(
-    name: &str,
-    index: &LoweredExpr,
+    subscript: GlobalByteSubscriptExpr<'_>,
     temporary_base: usize,
     depth: usize,
     target: Target,
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let label = label_name(name, target);
+    let label = label_name(subscript.name, target);
     emit_x86_64_expr_with_width(
-        index,
+        subscript.index,
         ValueWidth::I32,
         temporary_base,
         depth,
@@ -86,7 +87,11 @@ pub(in crate::codegen) fn emit_x86_64_load_global_byte_subscript(
     )?;
     assembly.push_str("\tcltq\n");
     write_assembly!(assembly, "\tleaq {label}(%rip), %rcx\n")?;
-    assembly.push_str("\tmovzbl (%rcx,%rax), %eax\n");
+    if subscript.is_unsigned {
+        assembly.push_str("\tmovzbl (%rcx,%rax), %eax\n");
+    } else {
+        assembly.push_str("\tmovsbl (%rcx,%rax), %eax\n");
+    }
     Ok(())
 }
 

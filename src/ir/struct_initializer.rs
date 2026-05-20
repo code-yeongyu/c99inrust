@@ -248,7 +248,7 @@ fn global_binding_element_size(binding: &GlobalBinding) -> usize {
             }),
         GlobalBinding::StructObject { byte_size, .. }
         | GlobalBinding::StructArray { byte_size, .. } => *byte_size,
-        GlobalBinding::UnsignedCharArray => 1,
-        GlobalBinding::UnsignedCharMatrix { columns } => *columns,
+        GlobalBinding::UnsignedCharArray { .. } => 1,
+        GlobalBinding::UnsignedCharMatrix { columns, .. } => *columns,
     }
 }

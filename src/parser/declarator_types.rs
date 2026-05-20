@@ -116,6 +116,9 @@ fn parameter_array_depth(tokens: &[Token]) -> usize {
 }
 
 pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
+    if specifiers_are_unsigned_char(tokens) {
+        return Some("byte".to_owned());
+    }
     if tokens
         .iter()
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)))
@@ -153,6 +156,19 @@ pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String>
                         .then(|| name.to_owned())
                 })
         })
+}
+
+fn specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
+    let mut saw_unsigned = false;
+    let mut saw_char = false;
+    for token in tokens {
+        match token.kind {
+            TokenKind::Keyword(Keyword::Unsigned) => saw_unsigned = true,
+            TokenKind::Keyword(Keyword::Char) => saw_char = true,
+            _ => {}
+        }
+    }
+    saw_unsigned && saw_char
 }
 
 pub(super) fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {

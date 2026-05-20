@@ -36,19 +36,29 @@ pub(in crate::codegen) fn emit_aarch64_assign(
             emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
             emit_aarch64_store_global(name, width, labels.target, assembly)
         }
-        LoweredLValue::GlobalByteSubscript { name, index } => {
-            emit_aarch64_store_global_byte_subscript(
-                GlobalByteSubscriptExpr { name, index },
-                value,
-                temporary_base,
-                depth,
-                labels,
-                assembly,
-            )
-        }
+        LoweredLValue::GlobalByteSubscript {
+            name,
+            index,
+            is_unsigned,
+        } => emit_aarch64_store_global_byte_subscript(
+            GlobalByteSubscriptExpr {
+                name,
+                index,
+                is_unsigned: *is_unsigned,
+            },
+            value,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
         LoweredLValue::GlobalIntSubscript { name, index } => {
             emit_aarch64_store_global_int_subscript(
-                GlobalByteSubscriptExpr { name, index },
+                GlobalByteSubscriptExpr {
+                    name,
+                    index,
+                    is_unsigned: false,
+                },
                 value,
                 temporary_base,
                 depth,
@@ -58,7 +68,11 @@ pub(in crate::codegen) fn emit_aarch64_assign(
         }
         LoweredLValue::GlobalPointerSubscript { name, index } => {
             emit_aarch64_store_global_pointer_subscript(
-                GlobalByteSubscriptExpr { name, index },
+                GlobalByteSubscriptExpr {
+                    name,
+                    index,
+                    is_unsigned: false,
+                },
                 value,
                 temporary_base,
                 depth,

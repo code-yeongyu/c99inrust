@@ -1,6 +1,8 @@
 use super::frames::LabelAllocator;
 use super::target::Target;
-use super::widths::{PointerFieldExpr, PointerSubscriptExpr, scalar_width};
+use super::widths::{
+    GlobalByteSubscriptExpr, PointerFieldExpr, PointerSubscriptExpr, scalar_width,
+};
 use super::x86_64_addressing::emit_x86_64_load_pointer_field;
 use super::x86_64_assign::emit_x86_64_assign;
 use super::x86_64_loads::{
@@ -24,9 +26,16 @@ pub(in crate::codegen) fn emit_x86_64_global_or_assignment_expr(
         LoweredExpr::Global { name, scalar_type } => {
             emit_x86_64_load_global(name, scalar_width(*scalar_type), target, assembly)
         }
-        LoweredExpr::GlobalByteSubscript { name, index } => emit_x86_64_load_global_byte_subscript(
+        LoweredExpr::GlobalByteSubscript {
             name,
             index,
+            is_unsigned,
+        } => emit_x86_64_load_global_byte_subscript(
+            GlobalByteSubscriptExpr {
+                name,
+                index,
+                is_unsigned: *is_unsigned,
+            },
             temporary_base,
             depth,
             target,

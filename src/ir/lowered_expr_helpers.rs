@@ -78,9 +78,14 @@ pub(in crate::ir) fn lowered_lvalue_to_expr(target: &LoweredLValue) -> LoweredEx
             name: name.clone(),
             scalar_type: *scalar_type,
         },
-        LoweredLValue::GlobalByteSubscript { name, index } => LoweredExpr::GlobalByteSubscript {
+        LoweredLValue::GlobalByteSubscript {
+            name,
+            index,
+            is_unsigned,
+        } => LoweredExpr::GlobalByteSubscript {
             name: name.clone(),
             index: index.clone(),
+            is_unsigned: *is_unsigned,
         },
         LoweredLValue::GlobalIntSubscript { name, index } => LoweredExpr::GlobalIntSubscript {
             name: name.clone(),

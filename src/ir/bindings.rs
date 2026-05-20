@@ -76,9 +76,12 @@ pub(in crate::ir) enum GlobalBinding {
         length: Option<usize>,
         columns: Option<usize>,
     },
-    UnsignedCharArray,
+    UnsignedCharArray {
+        is_unsigned: bool,
+    },
     UnsignedCharMatrix {
         columns: usize,
+        is_unsigned: bool,
     },
 }
 
@@ -104,7 +107,7 @@ impl GlobalBinding {
             | Self::PointerArray { .. }
             | Self::StructObject { .. }
             | Self::StructArray { .. }
-            | Self::UnsignedCharArray
+            | Self::UnsignedCharArray { .. }
             | Self::UnsignedCharMatrix { .. } => None,
         }
     }
@@ -118,7 +121,7 @@ impl GlobalBinding {
                 | Self::DoubleArray
                 | Self::PointerArray { .. }
                 | Self::StructArray { .. }
-                | Self::UnsignedCharArray
+                | Self::UnsignedCharArray { .. }
                 | Self::UnsignedCharMatrix { .. }
         )
     }

@@ -63,12 +63,10 @@ pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> Compile
 
 fn array_referent(context: &LoweringContext, array: &Expr) -> Option<String> {
     if let Expr::Identifier(name) = array
-        && matches!(
-            context.global_bindings.get(name),
-            Some(GlobalBinding::UnsignedCharMatrix { .. })
-        )
+        && let Some(GlobalBinding::UnsignedCharMatrix { is_unsigned, .. }) =
+            context.global_bindings.get(name)
     {
-        return Some("char".to_owned());
+        return Some(if *is_unsigned { "byte" } else { "char" }.to_owned());
     }
     if let Expr::Identifier(name) = array
         && matches!(

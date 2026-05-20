@@ -130,6 +130,7 @@ pub enum LoweredExpr {
     GlobalByteSubscript {
         name: String,
         index: Box<Self>,
+        is_unsigned: bool,
     },
     GlobalIntSubscript {
         name: String,
@@ -215,6 +216,7 @@ pub enum LoweredLValue {
     GlobalByteSubscript {
         name: String,
         index: Box<LoweredExpr>,
+        is_unsigned: bool,
     },
     GlobalIntSubscript {
         name: String,

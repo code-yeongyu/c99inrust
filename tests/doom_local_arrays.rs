@@ -24,6 +24,6 @@ fn compiler_stores_local_char_array_subscript_as_byte_slice() {
 
     // then
     assert!(assembly.contains("\tmovb %al, (%rcx,%rdx,1)\n"));
-    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+    assert!(assembly.contains("\tmovsbl (%rcx,%rax,1), %eax\n"));
     assert!(!assembly.contains("\tmovl %eax, (%rcx,%rdx,4)\n"));
 }

@@ -55,7 +55,7 @@ int main(void) {
     let assembly = compile_x86_64(source);
 
     // then
-    assert!(assembly.contains("\tmovl $16, %eax\n"));
+    assert!(assembly.contains("\tmovabsq $16, %rax\n"));
     assert!(assembly.contains("\taddq %rcx, %rax\n"));
     assert!(assembly.contains("\taddq $16, %rax\n"));
     assert!(!assembly.contains("\taddq $1, %rax\n"));
@@ -190,7 +190,7 @@ int main(void) {
     let assembly = compile_x86_64(source);
 
     // then
-    assert!(assembly.contains("\tmovl $20, %eax\n"));
+    assert!(assembly.contains("\tmovabsq $20, %rax\n"));
     assert!(assembly.contains("\tidivq %rcx\n"));
     assert!(assembly.contains("\tsubq %rcx, %rax\n"));
 }
@@ -216,7 +216,7 @@ int main(void) {
     let assembly = compile_x86_64(source);
 
     // then
-    assert!(assembly.contains("\tmovl $12, %eax\n"));
+    assert!(assembly.contains("\tmovabsq $12, %rax\n"));
     assert!(assembly.contains("\tidivq %rcx\n"));
     assert!(assembly.contains("\tsubq %rcx, %rax\n"));
 }
@@ -240,7 +240,7 @@ int main(void) {
     let assembly = compile_x86_64(source);
 
     // then
-    assert!(assembly.contains("\tmovl $8, %eax\n"));
+    assert!(assembly.contains("\tmovabsq $8, %rax\n"));
     assert!(assembly.contains("\tidivq %rcx\n"));
     assert!(assembly.contains("\tsubq %rcx, %rax\n"));
 }

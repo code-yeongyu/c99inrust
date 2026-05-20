@@ -68,6 +68,7 @@ pub(in crate::codegen) fn emit_aarch64_store_global(
 pub(in crate::codegen) fn emit_aarch64_load_global_byte_subscript(
     name: &str,
     index: &LoweredExpr,
+    is_unsigned: bool,
     temporary_base: usize,
     depth: usize,
     labels: &mut LabelAllocator<'_>,
@@ -84,7 +85,11 @@ pub(in crate::codegen) fn emit_aarch64_load_global_byte_subscript(
     )?;
     write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
     write_assembly!(assembly, "\tadd x16, x16, {label}@PAGEOFF\n")?;
-    assembly.push_str("\tldrb w0, [x16, w0, sxtw]\n");
+    if is_unsigned {
+        assembly.push_str("\tldrb w0, [x16, w0, sxtw]\n");
+    } else {
+        assembly.push_str("\tldrsb w0, [x16, w0, sxtw]\n");
+    }
     Ok(())
 }
 

@@ -67,14 +67,14 @@ fn global_initializer_sizeof_bytes(
         } => length
             .checked_mul(struct_size_for_initializer(struct_name, known_structs)?)
             .ok_or_else(|| CompileError::new("global struct array sizeof overflow"))?,
-        GlobalInitializer::UnsignedCharArray(values)
+        GlobalInitializer::UnsignedCharArray { values, .. }
         | GlobalInitializer::UnsignedCharMatrix { values, .. } => values.len(),
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
         | GlobalInitializer::ExternShortArray { .. }
         | GlobalInitializer::ExternPointerArray { .. }
-        | GlobalInitializer::ExternUnsignedCharArray
+        | GlobalInitializer::ExternUnsignedCharArray { .. }
         | GlobalInitializer::ExternUnsignedCharMatrix { .. }
         | GlobalInitializer::ExternStructArray { .. }
         | GlobalInitializer::ExternStructObject { .. } => return Ok(None),

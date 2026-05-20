@@ -21,6 +21,10 @@ pub(in crate::ir) fn is_pointer(referent: &str) -> bool {
     referent.starts_with(POINTER_REFERENT)
 }
 
+pub(in crate::ir) fn is_unsigned_byte(referent: &str) -> bool {
+    referent == "byte"
+}
+
 pub(in crate::ir) fn nested_referent(referent: Option<&str>) -> String {
     let mut nested = POINTER_REFERENT.to_owned();
     if let Some(referent) = referent {

@@ -52,7 +52,7 @@ int main(void) {
     assert!(assembly.contains("detailNames:"));
     assert!(assembly.contains("\tcall use\n"));
     assert!(assembly.contains("\tmovb %al, (%rcx,%rdx,1)\n"));
-    assert!(assembly.contains("\tmovzbl (%rcx,%rax,1), %eax\n"));
+    assert!(assembly.contains("\tmovsbl (%rcx,%rax,1), %eax\n"));
 }
 
 #[test]
