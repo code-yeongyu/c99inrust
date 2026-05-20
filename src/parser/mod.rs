@@ -9,6 +9,7 @@ mod declarator_types;
 mod doom_layout;
 mod enum_declarations;
 mod external_declarations;
+mod global_sizeof;
 mod global_struct_initializer;
 mod global_struct_object;
 mod local_arrays;
@@ -40,6 +41,7 @@ use external_declarations::{
     function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
     function_prototype_name, pointer_return_function, top_level_function_open_paren,
 };
+use global_sizeof::global_sizeof_symbols;
 use local_arrays::{
     inferred_local_char_array_length, local_array_length, validate_local_char_array_initializer,
     validate_local_char_array_initializer_size,
@@ -50,7 +52,6 @@ pub use model::{
     StructField, StructLayout,
 };
 pub use program::{Function, Parameter, Program};
-use scalar_layout::scalar_size_for_layout;
 use surface_parser::SurfaceParser;
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{
@@ -2115,96 +2116,6 @@ fn with_global_linkage(tokens: &[Token], mut globals: Vec<Global>) -> Vec<Global
         global.is_static = is_static;
     }
     globals
-}
-
-fn global_sizeof_symbols(
-    globals: &[Global],
-    known_structs: &[StructLayout],
-) -> CompileResult<Vec<(String, usize)>> {
-    let mut symbols = known_structs
-        .iter()
-        .map(|layout| (layout.name.clone(), layout.size))
-        .collect::<Vec<_>>();
-    for global in globals {
-        if let Some(size) = global_initializer_sizeof_bytes(&global.initializer, known_structs)? {
-            symbols.push((global.name.clone(), size));
-        }
-    }
-    Ok(symbols)
-}
-
-fn global_initializer_sizeof_bytes(
-    initializer: &GlobalInitializer,
-    known_structs: &[StructLayout],
-) -> CompileResult<Option<usize>> {
-    let size = match initializer {
-        GlobalInitializer::Int(_) | GlobalInitializer::IntConstant(_) => {
-            scalar_size_for_layout(ScalarType::Int)
-        }
-        GlobalInitializer::PointerNull { .. }
-        | GlobalInitializer::PointerString { .. }
-        | GlobalInitializer::PointerSubscriptAddress { .. } => {
-            scalar_size_for_layout(ScalarType::Pointer)
-        }
-        GlobalInitializer::IntArray(values) => values
-            .len()
-            .checked_mul(scalar_size_for_layout(ScalarType::Int))
-            .ok_or_else(|| CompileError::new("global int array sizeof overflow"))?,
-        GlobalInitializer::ShortArray { values, .. } => values
-            .len()
-            .checked_mul(2)
-            .ok_or_else(|| CompileError::new("global short array sizeof overflow"))?,
-        GlobalInitializer::IntMatrix { values, .. } => values
-            .len()
-            .checked_mul(scalar_size_for_layout(ScalarType::Int))
-            .ok_or_else(|| CompileError::new("global int matrix sizeof overflow"))?,
-        GlobalInitializer::DoubleArray { length } => length
-            .checked_mul(scalar_size_for_layout(ScalarType::Double))
-            .ok_or_else(|| CompileError::new("global double array sizeof overflow"))?,
-        GlobalInitializer::PointerArray { length, .. } => length
-            .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
-            .ok_or_else(|| CompileError::new("global pointer array sizeof overflow"))?,
-        GlobalInitializer::PointerStringArray { values, .. } => values
-            .len()
-            .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
-            .ok_or_else(|| CompileError::new("global pointer string array sizeof overflow"))?,
-        GlobalInitializer::PointerNameArray { length, .. } => length
-            .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
-            .ok_or_else(|| CompileError::new("global pointer name array sizeof overflow"))?,
-        GlobalInitializer::StructObject { struct_name, .. } => {
-            struct_size_for_initializer(struct_name, known_structs)?
-        }
-        GlobalInitializer::StructArray {
-            struct_name,
-            length,
-            ..
-        } => length
-            .checked_mul(struct_size_for_initializer(struct_name, known_structs)?)
-            .ok_or_else(|| CompileError::new("global struct array sizeof overflow"))?,
-        GlobalInitializer::UnsignedCharArray(values)
-        | GlobalInitializer::UnsignedCharMatrix { values, .. } => values.len(),
-        GlobalInitializer::Extern(_)
-        | GlobalInitializer::ExternPointer { .. }
-        | GlobalInitializer::ExternIntArray
-        | GlobalInitializer::ExternShortArray { .. }
-        | GlobalInitializer::ExternPointerArray { .. }
-        | GlobalInitializer::ExternUnsignedCharArray
-        | GlobalInitializer::ExternUnsignedCharMatrix { .. }
-        | GlobalInitializer::ExternStructArray { .. }
-        | GlobalInitializer::ExternStructObject { .. } => return Ok(None),
-    };
-    Ok(Some(size))
-}
-
-fn struct_size_for_initializer(
-    struct_name: &str,
-    known_structs: &[StructLayout],
-) -> CompileResult<usize> {
-    known_structs
-        .iter()
-        .find(|layout| layout.name == struct_name)
-        .map(|layout| layout.size)
-        .ok_or_else(|| CompileError::new(format!("unknown struct sizeof type: {struct_name}")))
 }
 
 fn parse_global_function_pointer(tokens: &[Token]) -> Option<Global> {
