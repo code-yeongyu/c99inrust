@@ -113,6 +113,7 @@ impl LoweringContext {
                     element_size,
                     element_unsigned,
                     length,
+                    columns,
                     ..
                 } => self.push_local_struct_array_field_initializer(
                     LocalStructArrayField {
@@ -122,6 +123,7 @@ impl LoweringContext {
                         element_size,
                         element_unsigned,
                         length,
+                        columns,
                     },
                     values,
                     value_index,

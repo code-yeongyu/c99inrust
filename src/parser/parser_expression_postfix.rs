@@ -191,7 +191,9 @@ impl Parser<'_> {
     }
 
     fn decimal_exponent_suffix(&mut self) -> CompileResult<String> {
-        Ok(self.optional_decimal_exponent_suffix()?.unwrap_or_default())
+        let exponent = self.optional_decimal_exponent_suffix()?.unwrap_or_default();
+        self.consume_float_suffix();
+        Ok(exponent)
     }
 
     fn optional_decimal_exponent_suffix(&mut self) -> CompileResult<Option<String>> {
@@ -208,11 +210,13 @@ impl Parser<'_> {
         };
         self.advance();
         if !rest.is_empty() {
-            return rest
-                .chars()
-                .all(|current| current.is_ascii_digit())
-                .then(|| Some(format!("e{rest}")))
-                .ok_or_else(|| CompileError::new("invalid decimal exponent"));
+            let digits = rest.trim_end_matches(float_suffix_char);
+            let suffix = &rest[digits.len()..];
+            return (!digits.is_empty()
+                && digits.chars().all(|current| current.is_ascii_digit())
+                && suffix.chars().all(float_suffix_char))
+            .then(|| Some(format!("e{digits}")))
+            .ok_or_else(|| CompileError::new("invalid decimal exponent"));
         }
         let sign = match self.peek() {
             Some(Token {
@@ -228,4 +232,21 @@ impl Parser<'_> {
         let exponent = self.expect_integer()?;
         Ok(Some(format!("e{sign}{exponent}")))
     }
+
+    fn consume_float_suffix(&mut self) {
+        let Some(Token {
+            kind: TokenKind::Identifier(value),
+            ..
+        }) = self.peek()
+        else {
+            return;
+        };
+        if value.chars().all(float_suffix_char) {
+            self.advance();
+        }
+    }
+}
+
+const fn float_suffix_char(value: char) -> bool {
+    matches!(value, 'f' | 'F' | 'l' | 'L')
 }

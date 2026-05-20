@@ -27,6 +27,7 @@ mod global_struct_object;
 mod initializer_number;
 mod integer_initializer;
 mod local_arrays;
+mod local_scalar_initializer;
 mod model;
 mod parser_assignment_ops;
 mod parser_control_flow;
@@ -85,6 +86,7 @@ use local_arrays::{
     inferred_local_char_array_length, local_array_length, validate_local_char_array_initializer,
     validate_local_char_array_initializer_size,
 };
+use local_scalar_initializer::local_scalar_initializer;
 pub use model::{
     Constant, FieldType, Global, GlobalInitializer, GlobalStructInitializerAddress,
     GlobalStructInitializerValue, PointerReturnFunction, ReturnType, ScalarFieldType, ScalarType,

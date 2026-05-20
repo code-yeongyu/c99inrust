@@ -18,6 +18,10 @@ mod deep_c99_numeric_more;
 mod deep_c99_preprocessor_more;
 #[path = "clang_oracle/deep_c99_requested.rs"]
 mod deep_c99_requested;
+#[path = "clang_oracle/deep_c99_requested_mega_a.rs"]
+mod deep_c99_requested_mega_a;
+#[path = "clang_oracle/deep_c99_requested_mega_b.rs"]
+mod deep_c99_requested_mega_b;
 #[path = "clang_oracle/deep_c99_requested_more.rs"]
 mod deep_c99_requested_more;
 #[path = "clang_oracle/deep_c99_requested_more_eval.rs"]

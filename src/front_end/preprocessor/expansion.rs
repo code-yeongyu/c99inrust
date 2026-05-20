@@ -83,7 +83,16 @@ fn expand_macros_once(line: &str, macros: &HashMap<String, MacroDefinition>) -> 
                         if chars.get(probe) == Some(&'(') {
                             index = probe + 1;
                             if let Some(args) = read_macro_args(&chars, &mut index) {
-                                output.push_str(&replace_params(replacement, params, &args));
+                                let expanded_args = args
+                                    .iter()
+                                    .map(|arg| expand_macros(arg, macros))
+                                    .collect::<Vec<_>>();
+                                output.push_str(&replace_params(
+                                    replacement,
+                                    params,
+                                    &args,
+                                    &expanded_args,
+                                ));
                             } else {
                                 output.push_str(&line[identifier_start..]);
                                 return output;

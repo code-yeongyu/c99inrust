@@ -18,7 +18,7 @@ Each new language feature needs:
 The oracle harness lives in `tests/clang_oracle.rs` and split modules under
 `tests/clang_oracle/`. Each case compiles a C snippet with both compilers, links
 both outputs through the platform toolchain, runs both executables, and compares
-observable stdout plus exit code. The suite currently contains 226 oracle tests.
+observable stdout plus exit code. The suite currently contains 246 oracle tests.
 
 Current covered slices include fundamentals, control flow, calls, multi-file
 extern linkage, Doom-shaped globals, pointer and array operations, undefined or
@@ -32,6 +32,13 @@ wide-character literals, signed bitwise operations, initializer nesting,
 Local struct initializers are also covered, including brace-sensitive nested
 initialization, partial zero-fill, copy initialization, mixed scalar/pointer
 fields, and scalar array fields.
+The latest deep edge slices add exact-result oracle checks for nested aggregate
+layout, function-pointer tables, old-style definitions, anonymous aggregates,
+GNU `typeof`/attributes, multi-file extern objects, static inline calls,
+`restrict`, constant-expression array sizes, macro expansion, variadic macros,
+predefined macros, nested initializers, ternary side effects, `sizeof`
+evaluation suppression, incompatible pointer casts, char signedness, `long long`
+arithmetic, decimal float forms, and hex float forms.
 
 ## Undefined Behavior Policy
 

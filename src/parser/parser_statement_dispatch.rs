@@ -1,6 +1,6 @@
 use super::{
-    AssignmentOperator, BinaryOp, CompileError, CompileResult, Expr, Keyword, LValue, Parser,
-    ScalarType, Statement, Token, TokenKind, declaration_base_referent_type,
+    AssignmentOperator, CompileError, CompileResult, Expr, Keyword, LValue, Parser, ScalarType,
+    Statement, Token, TokenKind, declaration_base_referent_type, local_scalar_initializer,
     pointer_referent_for_depth, token_is_punctuator,
 };
 
@@ -179,11 +179,12 @@ impl Parser<'_> {
                 )?
             } else if self.check_punctuator("=") {
                 self.advance();
-                let initializer = self.declaration_initializer(
+                let initializer = local_scalar_initializer(
                     scalar_type,
                     type_includes_char,
                     type_is_unsigned,
-                )?;
+                    self.expression()?,
+                );
                 Statement::Declaration {
                     is_static,
                     scalar_type,
@@ -212,24 +213,6 @@ impl Parser<'_> {
             Ok(declarations.remove(0))
         } else {
             Ok(Statement::DeclarationList(declarations))
-        }
-    }
-
-    fn declaration_initializer(
-        &mut self,
-        scalar_type: ScalarType,
-        type_includes_char: bool,
-        type_is_unsigned: bool,
-    ) -> CompileResult<Expr> {
-        let expr = self.expression()?;
-        if scalar_type == ScalarType::Int && type_includes_char && type_is_unsigned {
-            Ok(Expr::Binary {
-                op: BinaryOp::BitAnd,
-                left: Box::new(expr),
-                right: Box::new(Expr::Integer(255)),
-            })
-        } else {
-            Ok(expr)
         }
     }
 }

@@ -1,6 +1,11 @@
 use super::expansion::{is_identifier_start, read_identifier};
 
-pub(super) fn replace_params(replacement: &str, params: &[String], args: &[String]) -> String {
+pub(super) fn replace_params(
+    replacement: &str,
+    params: &[String],
+    args: &[String],
+    expanded_args: &[String],
+) -> String {
     let chars = replacement.chars().collect::<Vec<_>>();
     let mut output = String::new();
     let mut index = 0usize;
@@ -23,9 +28,15 @@ pub(super) fn replace_params(replacement: &str, params: &[String], args: &[Strin
             continue;
         }
         if is_identifier_start(current) {
+            let identifier_start = index;
             let identifier = read_identifier(&chars, &mut index);
             if let Some(param_index) = params.iter().position(|param| param == &identifier) {
-                if let Some(arg) = arg_for_param(param_index, params, args) {
+                let source_args = if param_is_pasted(&chars, identifier_start, index) {
+                    args
+                } else {
+                    expanded_args
+                };
+                if let Some(arg) = arg_for_param(param_index, params, source_args) {
                     output.push_str(&arg);
                 }
             } else {
@@ -37,6 +48,27 @@ pub(super) fn replace_params(replacement: &str, params: &[String], args: &[Strin
         index += 1;
     }
     paste_tokens(&output)
+}
+
+fn param_is_pasted(chars: &[char], start: usize, end: usize) -> bool {
+    paste_before(chars, start) || paste_after(chars, end)
+}
+
+fn paste_before(chars: &[char], mut index: usize) -> bool {
+    while index > 0 && chars[index - 1].is_whitespace() {
+        index -= 1;
+    }
+    index >= 2 && chars[index - 1] == '#' && chars[index - 2] == '#'
+}
+
+fn paste_after(chars: &[char], mut index: usize) -> bool {
+    while chars
+        .get(index)
+        .is_some_and(|current| current.is_whitespace())
+    {
+        index += 1;
+    }
+    chars.get(index) == Some(&'#') && chars.get(index + 1) == Some(&'#')
 }
 
 fn arg_for_param(param_index: usize, params: &[String], args: &[String]) -> Option<String> {

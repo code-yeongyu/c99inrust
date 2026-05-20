@@ -10,6 +10,7 @@ pub(in crate::ir) struct LocalStructArrayField<'a> {
     pub(in crate::ir) element_size: usize,
     pub(in crate::ir) element_unsigned: bool,
     pub(in crate::ir) length: usize,
+    pub(in crate::ir) columns: Option<usize>,
 }
 
 impl LoweringContext {
@@ -28,9 +29,8 @@ impl LoweringContext {
         }
         if let LocalStructInitializerValue::Nested(nested_values) = value {
             *value_index += 1;
-            let mut nested_exprs = Vec::new();
-            collect_array_exprs(nested_values, &mut nested_exprs);
-            return self.push_array_field_exprs(field, &nested_exprs);
+            let indexed_exprs = indexed_array_exprs(field, nested_values)?;
+            return self.push_indexed_array_field_exprs(field, &indexed_exprs);
         }
         let mut exprs = Vec::new();
         while exprs.len() < field.length {
@@ -72,6 +72,32 @@ impl LoweringContext {
         Ok(())
     }
 
+    fn push_indexed_array_field_exprs(
+        &mut self,
+        field: LocalStructArrayField<'_>,
+        exprs: &[(usize, &Expr)],
+    ) -> CompileResult<()> {
+        if exprs.iter().any(|(index, _expr)| *index >= field.length) {
+            return Err(CompileError::new(
+                "too many local array field initializer values",
+            ));
+        }
+        for (index, expr) in exprs {
+            let element_offset = element_field_offset(field.offset, *index, field.element_size)?;
+            self.push_store(
+                LoweredLValue::PointerField {
+                    pointer: Box::new(field.target.pointer.clone()),
+                    offset: element_offset,
+                    scalar_type: field.element_type,
+                    byte_size: field.element_size,
+                    is_unsigned: field.element_unsigned,
+                },
+                self.lower_expr(expr)?,
+            );
+        }
+        Ok(())
+    }
+
     fn push_array_field_bytes(
         &mut self,
         field: LocalStructArrayField<'_>,
@@ -94,6 +120,32 @@ impl LoweringContext {
     }
 }
 
+fn indexed_array_exprs<'a>(
+    field: LocalStructArrayField<'_>,
+    values: &'a [LocalStructInitializerValue],
+) -> CompileResult<Vec<(usize, &'a Expr)>> {
+    let Some(columns) = field.columns else {
+        let mut exprs = Vec::new();
+        collect_array_exprs(values, &mut exprs);
+        return Ok(exprs.into_iter().enumerate().collect());
+    };
+    let mut exprs = Vec::new();
+    let mut flat_index = 0usize;
+    for value in values {
+        match value {
+            LocalStructInitializerValue::Expr(expr) => {
+                exprs.push((flat_index, expr));
+                flat_index += 1;
+            }
+            LocalStructInitializerValue::Nested(row_values) => {
+                collect_array_row_exprs(row_values, flat_index, columns, &mut exprs)?;
+                flat_index += columns;
+            }
+        }
+    }
+    Ok(exprs)
+}
+
 fn collect_array_exprs<'a>(values: &'a [LocalStructInitializerValue], exprs: &mut Vec<&'a Expr>) {
     for value in values {
         match value {
@@ -101,6 +153,28 @@ fn collect_array_exprs<'a>(values: &'a [LocalStructInitializerValue], exprs: &mu
             LocalStructInitializerValue::Nested(nested) => collect_array_exprs(nested, exprs),
         }
     }
+}
+
+fn collect_array_row_exprs<'a>(
+    values: &'a [LocalStructInitializerValue],
+    row_start: usize,
+    columns: usize,
+    exprs: &mut Vec<(usize, &'a Expr)>,
+) -> CompileResult<()> {
+    let mut row_exprs = Vec::new();
+    collect_array_exprs(values, &mut row_exprs);
+    if row_exprs.len() > columns {
+        return Err(CompileError::new(
+            "too many local array field initializer values",
+        ));
+    }
+    exprs.extend(
+        row_exprs
+            .into_iter()
+            .enumerate()
+            .map(|(index, expr)| (row_start + index, expr)),
+    );
+    Ok(())
 }
 
 fn string_array_initializer(
