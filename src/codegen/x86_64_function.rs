@@ -12,7 +12,7 @@ use super::widths::{
 use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
 };
-use super::x86_64_expr::emit_x86_64_expr;
+use super::x86_64_expr::{emit_x86_64_expr, emit_x86_64_expr_with_width};
 use super::x86_64_loads::emit_x86_64_store_global;
 use super::x86_64_temporaries::{
     emit_x86_64_init_local_bytes, emit_x86_64_init_local_ints, emit_x86_64_store_result,
@@ -54,8 +54,17 @@ pub(in crate::codegen) fn emit_x86_64_function(
                 scalar_type,
                 value,
             } => {
-                emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
-                emit_x86_64_store_result(scalar_width(*scalar_type), *offset, assembly)?;
+                let width = scalar_width(*scalar_type);
+                emit_x86_64_expr_with_width(
+                    value,
+                    width,
+                    temporary_base,
+                    0,
+                    target,
+                    &mut labels,
+                    assembly,
+                )?;
+                emit_x86_64_store_result(width, *offset, assembly)?;
             }
             Instruction::InitLocalBytes { offset, values } => {
                 emit_x86_64_init_local_bytes(*offset, values, assembly)?;
@@ -68,8 +77,17 @@ pub(in crate::codegen) fn emit_x86_64_function(
                 scalar_type,
                 value,
             } => {
-                emit_x86_64_expr(value, temporary_base, 0, target, &mut labels, assembly)?;
-                emit_x86_64_store_global(name, scalar_width(*scalar_type), target, assembly)?;
+                let width = scalar_width(*scalar_type);
+                emit_x86_64_expr_with_width(
+                    value,
+                    width,
+                    temporary_base,
+                    0,
+                    target,
+                    &mut labels,
+                    assembly,
+                )?;
+                emit_x86_64_store_global(name, width, target, assembly)?;
             }
             Instruction::JumpIfZero { condition, label } => {
                 emit_x86_64_expr(condition, temporary_base, 0, target, &mut labels, assembly)?;
