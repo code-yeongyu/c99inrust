@@ -379,9 +379,11 @@ tools/doom-link-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-link-scan
 Latest local result:
 
 ```text
+commit=d9836c4
+scan=/tmp/c99inrust-doom-link-scan-d9836c4-mega-c
 compile_ok=62 compile_fail=0
 link_status=0
-ELF 64-bit LSB executable, x86-64
+/out/linuxdoom-c99inrust: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=fb94a33afbca55422922016083b19176afb27bbf, for GNU/Linux 3.2.0, with debug_info, not stripped
 ```
 
 Evidence is recorded in `docs/qa/2026-05-21-doom-link-scan.md`.

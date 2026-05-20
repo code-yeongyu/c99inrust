@@ -83,3 +83,30 @@ link_status=0
 /out/linuxdoom-c99inrust: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=0559184d31ed27429c4f94a0451120a9eff614fa, for GNU/Linux 3.2.0, with debug_info, not stripped
 binary=/tmp/c99inrust-doom-link-scan-7578468-edge-more/linuxdoom-c99inrust
 ```
+
+## Local Mega Oracle Recheck
+
+Date: 2026-05-21 08:56 KST
+Commit: `d9836c4 test(c99): add requested mega oracle wave`
+
+This rechecked the no-IWAD compile/link gate after adding the next 20 requested
+deep C99 oracle tests and the compiler fixes they exposed. This did not run
+DISPLAY, VNC, Xvfb, manual play, or any IWAD-backed smoke.
+
+Command:
+
+```bash
+tools/doom-link-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-link-scan-d9836c4-mega-c
+```
+
+Result:
+
+```text
+official-doom-root=/tmp/c99inrust-doom-src
+linuxdoom=/tmp/c99inrust-doom-src/linuxdoom-1.10
+compiler=target/debug/c99inrust
+compile_ok=62 compile_fail=0
+link_status=0
+/out/linuxdoom-c99inrust: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=fb94a33afbca55422922016083b19176afb27bbf, for GNU/Linux 3.2.0, with debug_info, not stripped
+binary=/tmp/c99inrust-doom-link-scan-d9836c4-mega-c/linuxdoom-c99inrust
+```
