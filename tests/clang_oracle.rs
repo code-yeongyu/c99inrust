@@ -16,6 +16,8 @@ mod deep_c99_numeric_more;
 mod deep_c99_preprocessor_more;
 #[path = "clang_oracle/deep_c99_requested.rs"]
 mod deep_c99_requested;
+#[path = "clang_oracle/deep_c99_requested_more.rs"]
+mod deep_c99_requested_more;
 #[path = "clang_oracle/functions_and_signatures.rs"]
 mod functions_and_signatures;
 #[path = "clang_oracle/fundamentals.rs"]
