@@ -1,12 +1,13 @@
 use crate::front_end::lexer::{Keyword, Token};
 
+use super::declarator_types::pointer_referent_from_specifiers;
 use super::token_scan::{
     array_declarator_name, last_token_is_punctuator, last_top_level_identifier,
     previous_identifier, previous_identifier_index, token_has_keyword, token_identifier,
     token_is_keyword, token_is_punctuator, update_depths,
 };
 use super::type_recognition::supported_return_type;
-use super::{ExternalItem, PointerReturnFunction, ReturnType, pointer_referent_from_specifiers};
+use super::{ExternalItem, PointerReturnFunction, ReturnType};
 
 pub(super) fn classify_external_item(tokens: &[Token]) -> Option<ExternalItem> {
     if token_has_keyword(tokens, Keyword::Typedef) {
