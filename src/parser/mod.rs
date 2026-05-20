@@ -5,6 +5,7 @@ mod anonymous_union;
 mod builtin_field;
 mod builtin_layout;
 mod doom_layout;
+mod external_declarations;
 mod global_struct_initializer;
 mod global_struct_object;
 mod model;
@@ -19,6 +20,11 @@ mod typedef_referent;
 
 use anonymous_union::anonymous_union_struct_name;
 use builtin_layout::builtin_struct_layouts;
+use external_declarations::{
+    classify_external_item, function_definition_has_supported_signature, function_definition_name,
+    function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
+    function_prototype_name, pointer_return_function, top_level_function_open_paren,
+};
 pub use model::{
     Constant, FieldType, Global, GlobalInitializer, GlobalStructInitializerAddress,
     GlobalStructInitializerValue, PointerReturnFunction, ReturnType, ScalarFieldType, ScalarType,
@@ -32,11 +38,11 @@ pub use syntax::{
     BinaryOp, Expr, LValue, LocalCharArrayInitializer, Statement, SwitchCase, UnaryOp,
 };
 use token_scan::{
-    array_declarator_name, last_token_is_punctuator, last_top_level_identifier,
-    matching_top_level_brace, matching_top_level_bracket, matching_top_level_paren,
-    parameter_is_variadic, parameter_is_void, previous_identifier, previous_identifier_index,
-    token_has_keyword, token_identifier, token_is_assignment_operator, token_is_keyword,
-    token_is_punctuator, top_level_comma_ranges, top_level_punctuator_index, update_depths,
+    last_token_is_punctuator, last_top_level_identifier, matching_top_level_brace,
+    matching_top_level_bracket, matching_top_level_paren, parameter_is_variadic, parameter_is_void,
+    previous_identifier_index, token_has_keyword, token_identifier, token_is_assignment_operator,
+    token_is_keyword, token_is_punctuator, top_level_comma_ranges, top_level_punctuator_index,
+    update_depths,
 };
 use type_recognition::{
     sizeof_type, supported_cast_type_with_typedefs, supported_return_type, supported_typedef_scalar,
@@ -5175,202 +5181,4 @@ fn eval_integer_binary_initializer_expr(
             left.to_i128_integer()? != 0 || right.to_i128_integer()? != 0,
         ))),
     }
-}
-
-fn classify_external_item(tokens: &[Token]) -> Option<ExternalItem> {
-    if token_has_keyword(tokens, Keyword::Typedef) {
-        return typedef_name(tokens).map(|name| ExternalItem::Typedef { name });
-    }
-    if let Some(name) = struct_forward_name(tokens) {
-        return Some(ExternalItem::StructForward { name });
-    }
-    if let Some(name) = function_pointer_name(tokens) {
-        return Some(ExternalItem::Declaration { name });
-    }
-    if let Some(name) = normal_function_name(tokens) {
-        if last_token_is_punctuator(tokens, "}") {
-            return Some(ExternalItem::FunctionDefinition { name });
-        }
-        return Some(ExternalItem::Prototype { name });
-    }
-    declaration_name(tokens).map(|name| ExternalItem::Declaration { name })
-}
-
-fn function_definition_name(tokens: &[Token]) -> Option<String> {
-    if last_token_is_punctuator(tokens, "}") {
-        return normal_function_name(tokens);
-    }
-    None
-}
-
-fn function_prototype_name(tokens: &[Token]) -> Option<String> {
-    if last_token_is_punctuator(tokens, "}") || function_pointer_name(tokens).is_some() {
-        return None;
-    }
-    let open_index = top_level_function_open_paren(tokens)?;
-    let name_index = previous_identifier_index(tokens, open_index)?;
-    supported_return_type(&tokens[..name_index])?;
-    token_identifier(&tokens[name_index]).map(ToOwned::to_owned)
-}
-
-fn pointer_return_function(tokens: &[Token]) -> Option<PointerReturnFunction> {
-    let open_index = top_level_function_open_paren(tokens)?;
-    let name_index = previous_identifier_index(tokens, open_index)?;
-    if supported_return_type(&tokens[..name_index]) != Some(ReturnType::Pointer) {
-        return None;
-    }
-    let name = token_identifier(&tokens[name_index])?.to_owned();
-    Some(PointerReturnFunction {
-        name,
-        referent: pointer_referent_from_specifiers(&tokens[..name_index]),
-    })
-}
-
-fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
-    let Some(open_index) = top_level_function_open_paren(tokens) else {
-        return false;
-    };
-    let Some(name_index) = previous_identifier_index(tokens, open_index) else {
-        return false;
-    };
-    if supported_return_type(&tokens[..name_index]).is_none() {
-        return false;
-    }
-    let mut paren_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().skip(open_index) {
-        if token_is_punctuator(token, "(") {
-            paren_depth += 1;
-            continue;
-        }
-        if token_is_punctuator(token, ")") {
-            if paren_depth == 0 {
-                return false;
-            }
-            paren_depth -= 1;
-            if paren_depth == 0 {
-                return tokens
-                    .get(index + 1)
-                    .is_some_and(|next| token_is_punctuator(next, "{"));
-            }
-        }
-    }
-    false
-}
-
-fn typedef_name(tokens: &[Token]) -> Option<String> {
-    function_pointer_name(tokens).or_else(|| last_top_level_identifier(tokens))
-}
-
-fn function_pointer_typedef_name(tokens: &[Token]) -> Option<String> {
-    token_has_keyword(tokens, Keyword::Typedef)
-        .then(|| function_pointer_name(tokens))
-        .flatten()
-}
-
-fn struct_forward_name(tokens: &[Token]) -> Option<String> {
-    let meaningful = tokens
-        .iter()
-        .filter(|token| !token_is_punctuator(token, ";"))
-        .collect::<Vec<_>>();
-    if meaningful.len() != 2 {
-        return None;
-    }
-    if !token_is_keyword(meaningful[0], Keyword::Struct) {
-        return None;
-    }
-    token_identifier(meaningful[1]).map(ToOwned::to_owned)
-}
-
-fn declaration_name(tokens: &[Token]) -> Option<String> {
-    function_pointer_name(tokens)
-        .or_else(|| array_declarator_name(tokens))
-        .or_else(|| last_top_level_identifier(tokens))
-}
-
-fn function_pointer_cast_type(tokens: &[Token]) -> bool {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && token_is_punctuator(token, "(")
-            && tokens
-                .get(index + 1)
-                .is_some_and(|next| token_is_punctuator(next, "*"))
-            && tokens
-                .get(index + 2)
-                .is_some_and(|next| token_is_punctuator(next, ")"))
-        {
-            return true;
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    false
-}
-
-fn function_pointer_name(tokens: &[Token]) -> Option<String> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && token_is_punctuator(token, "(")
-            && tokens
-                .get(index + 1)
-                .is_some_and(|next| token_is_punctuator(next, "*"))
-            && tokens
-                .get(index + 3)
-                .is_some_and(|next| token_is_punctuator(next, ")"))
-        {
-            return tokens
-                .get(index + 2)
-                .and_then(token_identifier)
-                .map(ToOwned::to_owned);
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    None
-}
-
-fn normal_function_name(tokens: &[Token]) -> Option<String> {
-    let open_index = top_level_function_open_paren(tokens)?;
-    previous_identifier(tokens, open_index).map(ToOwned::to_owned)
-}
-
-fn top_level_function_open_paren(tokens: &[Token]) -> Option<usize> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    let mut saw_assignment = false;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-            if token_is_punctuator(token, "=") {
-                saw_assignment = true;
-            }
-            if !saw_assignment && token_is_punctuator(token, "(") {
-                return Some(index);
-            }
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    None
 }
