@@ -473,6 +473,34 @@ cargo build
 tools/doom-movement-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-movement-smoke
 ```
 
+## Manual Play Harness
+
+`tools/doom-manual-play.sh` builds the same 62-unit Linux/X11 Doom executable
+and can either stop after linking or launch the binary against a host X11
+display for direct keyboard control.
+
+Headless build-only proof:
+
+```bash
+cargo build
+DOOM_MANUAL_RUN=0 tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-manual-play
+```
+
+The latest tmux build-only QA used session
+`c99inrust-doom-manual-1779273652` and produced `compile_ok=62
+compile_fail=0`, `link_status=0`, and `manual_run=skipped` because
+`DOOM_MANUAL_RUN=0` was set deliberately.
+
+Interactive visible-session run:
+
+```bash
+cargo build
+tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-manual-play -- -warp 1 1 -nosound
+```
+
+Evidence and tmux instructions are recorded in
+`docs/qa/2026-05-20-doom-manual-play.md`.
+
 ## Playability Gate
 
 The current smokes prove visible-window startup, scripted keyboard delivery,
@@ -489,4 +517,5 @@ human-verified playability still requires:
 8. Start a map and verify keyboard input moves the player.
 
 Items 1 through 8 are covered by the latest Xvfb smokes. A human visible-session
-playthrough remains outside the automated smoke evidence.
+playthrough harness is now available, but a completed transcript remains outside
+the automated smoke evidence.
