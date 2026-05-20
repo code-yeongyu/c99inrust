@@ -1,10 +1,13 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token};
 
+use super::token_scan::{
+    previous_identifier_index, token_has_keyword, token_identifier, token_is_punctuator,
+    top_level_punctuator_index,
+};
 use super::{
     Constant, Global, GlobalInitializer, StructLayout, global_struct_initializer,
-    global_struct_specifier_name, previous_identifier_index, token_has_keyword, token_identifier,
-    token_is_punctuator, top_level_punctuator_index,
+    global_struct_specifier_name,
 };
 
 pub(super) fn parse(

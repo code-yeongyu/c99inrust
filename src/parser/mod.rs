@@ -12,6 +12,7 @@ mod program;
 mod scalar_layout;
 mod surface_types;
 mod syntax;
+mod token_scan;
 mod typedef_referent;
 
 use anonymous_union::anonymous_union_struct_name;
@@ -26,6 +27,13 @@ use scalar_layout::{scalar_field_type, scalar_size_for_layout, sizeof_scalar_typ
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{
     BinaryOp, Expr, LValue, LocalCharArrayInitializer, Statement, SwitchCase, UnaryOp,
+};
+use token_scan::{
+    array_declarator_name, decrease_depth, last_token_is_punctuator, last_top_level_identifier,
+    matching_top_level_brace, matching_top_level_bracket, matching_top_level_paren,
+    parameter_is_variadic, parameter_is_void, previous_identifier, previous_identifier_index,
+    token_has_keyword, token_identifier, token_is_assignment_operator, token_is_keyword,
+    token_is_punctuator, top_level_comma_ranges, top_level_punctuator_index, update_depths,
 };
 
 const DOOM_EXPAND_PIXEL_UNION: &str = "__doom_expand_pixel_union";
@@ -2578,32 +2586,6 @@ fn push_struct_field(
         .checked_add(size)
         .ok_or_else(|| CompileError::new("struct size overflow"))?;
     Ok(())
-}
-
-fn top_level_comma_ranges(tokens: &[Token]) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::new();
-    let mut start = 0usize;
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && token_is_punctuator(token, ",")
-        {
-            ranges.push((start, index));
-            start = index + 1;
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    ranges.push((start, tokens.len()));
-    ranges
 }
 
 fn declarator_name_index(tokens: &[Token]) -> Option<usize> {
@@ -5189,79 +5171,6 @@ fn eval_integer_binary_initializer_expr(
     }
 }
 
-fn top_level_punctuator_index(tokens: &[Token], expected: &str) -> Option<usize> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && token_is_punctuator(token, expected)
-        {
-            return Some(index);
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    None
-}
-
-fn matching_top_level_bracket(tokens: &[Token], open_bracket: usize) -> Option<usize> {
-    let mut bracket_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().skip(open_bracket) {
-        if token_is_punctuator(token, "[") {
-            bracket_depth += 1;
-            continue;
-        }
-        if token_is_punctuator(token, "]") {
-            bracket_depth = bracket_depth.checked_sub(1)?;
-            if bracket_depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-    None
-}
-
-fn matching_top_level_paren(tokens: &[Token], open_paren: usize) -> Option<usize> {
-    let mut paren_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().skip(open_paren) {
-        if token_is_punctuator(token, "(") {
-            paren_depth += 1;
-            continue;
-        }
-        if token_is_punctuator(token, ")") {
-            paren_depth = paren_depth.checked_sub(1)?;
-            if paren_depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-    None
-}
-
-fn matching_top_level_brace(tokens: &[Token], open_brace: usize) -> Option<usize> {
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().skip(open_brace) {
-        if token_is_punctuator(token, "{") {
-            brace_depth += 1;
-            continue;
-        }
-        if token_is_punctuator(token, "}") {
-            brace_depth = brace_depth.checked_sub(1)?;
-            if brace_depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-    None
-}
-
 struct SurfaceParser<'a> {
     tokens: &'a [Token],
     index: usize,
@@ -5754,154 +5663,4 @@ fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
         "va_list" => Some(ScalarType::VaList),
         _ => None,
     }
-}
-
-fn parameter_is_void(tokens: &[Token]) -> bool {
-    let mut saw_void = false;
-    for token in tokens {
-        match &token.kind {
-            TokenKind::Keyword(Keyword::Void) => saw_void = true,
-            TokenKind::Keyword(
-                Keyword::Const | Keyword::Register | Keyword::Restrict | Keyword::Volatile,
-            ) => {}
-            _ => return false,
-        }
-    }
-    saw_void
-}
-
-fn parameter_is_variadic(tokens: &[Token]) -> bool {
-    matches!(
-        tokens,
-        [Token {
-            kind: TokenKind::Punctuator(value),
-            ..
-        }] if value == "..."
-    )
-}
-
-fn array_declarator_name(tokens: &[Token]) -> Option<String> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && token_is_punctuator(token, "[")
-        {
-            return previous_identifier(tokens, index).map(ToOwned::to_owned);
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    None
-}
-
-fn last_top_level_identifier(tokens: &[Token]) -> Option<String> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    let mut candidate = None;
-    for token in tokens {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && let Some(identifier) = token_identifier(token)
-        {
-            candidate = Some(identifier.to_owned());
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    candidate
-}
-
-fn previous_identifier(tokens: &[Token], before: usize) -> Option<&str> {
-    tokens
-        .get(..before)?
-        .iter()
-        .rev()
-        .find_map(token_identifier)
-}
-
-fn previous_identifier_index(tokens: &[Token], before: usize) -> Option<usize> {
-    tokens
-        .get(..before)?
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, token)| token_identifier(token).map(|_name| index))
-}
-
-fn token_has_keyword(tokens: &[Token], keyword: Keyword) -> bool {
-    tokens.iter().any(|token| token_is_keyword(token, keyword))
-}
-
-fn token_identifier(token: &Token) -> Option<&str> {
-    match &token.kind {
-        TokenKind::Identifier(value) => Some(value),
-        _ => None,
-    }
-}
-
-fn token_is_keyword(token: &Token, keyword: Keyword) -> bool {
-    matches!(&token.kind, TokenKind::Keyword(value) if *value == keyword)
-}
-
-fn token_is_punctuator(token: &Token, expected: &str) -> bool {
-    matches!(&token.kind, TokenKind::Punctuator(value) if value == expected)
-}
-
-fn token_is_assignment_operator(token: &Token) -> bool {
-    matches!(
-        &token.kind,
-        TokenKind::Punctuator(value)
-            if matches!(
-                value.as_str(),
-                "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "<<=" | ">>=" | "&=" | "^=" | "|="
-            )
-    )
-}
-
-fn last_token_is_punctuator(tokens: &[Token], expected: &str) -> bool {
-    tokens
-        .iter()
-        .rev()
-        .find(|token| !matches!(token.kind, TokenKind::End))
-        .is_some_and(|token| token_is_punctuator(token, expected))
-}
-
-fn update_depths(
-    token: &Token,
-    paren_depth: &mut usize,
-    bracket_depth: &mut usize,
-    brace_depth: &mut usize,
-) {
-    match &token.kind {
-        TokenKind::Punctuator(value) if value == "(" => *paren_depth += 1,
-        TokenKind::Punctuator(value) if value == ")" && *paren_depth > 0 => *paren_depth -= 1,
-        TokenKind::Punctuator(value) if value == "[" => *bracket_depth += 1,
-        TokenKind::Punctuator(value) if value == "]" && *bracket_depth > 0 => *bracket_depth -= 1,
-        TokenKind::Punctuator(value) if value == "{" => *brace_depth += 1,
-        TokenKind::Punctuator(value) if value == "}" && *brace_depth > 0 => *brace_depth -= 1,
-        _ => {}
-    }
-}
-
-fn decrease_depth(depth: &mut usize, token: &Token, delimiter: &str) -> CompileResult<()> {
-    let Some(next_depth) = depth.checked_sub(1) else {
-        return Err(CompileError::new(format!("unmatched closing {delimiter}"))
-            .at(token.line, token.column));
-    };
-    *depth = next_depth;
-    Ok(())
 }

@@ -1,5 +1,6 @@
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
+use super::token_scan::{token_identifier, token_is_keyword, token_is_punctuator};
 use super::{DOOM_EXPAND_PIXEL_UNION, DOOM_NAME8_UNION};
 
 pub(super) fn anonymous_union_struct_name(tokens: &[Token]) -> Option<&'static str> {
@@ -43,20 +44,4 @@ fn anonymous_doom_name8_union(tokens: &[Token]) -> bool {
             && token_is_punctuator(&window[4], "]")
     });
     has_char_s && has_int_x
-}
-
-fn token_identifier(token: &Token) -> Option<&str> {
-    if let TokenKind::Identifier(name) = &token.kind {
-        Some(name)
-    } else {
-        None
-    }
-}
-
-fn token_is_keyword(token: &Token, keyword: Keyword) -> bool {
-    token.kind == TokenKind::Keyword(keyword)
-}
-
-fn token_is_punctuator(token: &Token, expected: &str) -> bool {
-    matches!(&token.kind, TokenKind::Punctuator(punctuator) if punctuator == expected)
 }

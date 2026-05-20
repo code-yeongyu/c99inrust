@@ -1,10 +1,10 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
     Constant, Expr, GlobalStructInitializerAddress, GlobalStructInitializerValue, LValue, Parser,
-    StructLayout, eval_integer_initializer_expr_with_constants, matching_top_level_brace,
-    token_is_punctuator, top_level_comma_ranges,
+    StructLayout, eval_integer_initializer_expr_with_constants,
 };
 
 pub(super) fn parse(
