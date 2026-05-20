@@ -1,4 +1,7 @@
-use super::{Instruction, LoweredExpr, LoweredLValue, LoweringContext, StructAddress, scalar_size};
+use super::{
+    Instruction, LocalStructArrayField, LoweredExpr, LoweredLValue, LoweringContext, StructAddress,
+    scalar_size,
+};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
     Expr, FieldType, LocalStructInitializer, LocalStructInitializerValue, ScalarType,
@@ -105,7 +108,25 @@ impl LoweringContext {
                     };
                     self.push_nested_local_struct_initializer(&nested_target, values, value_index)?;
                 }
-                FieldType::Array { .. } | FieldType::StructArray { .. } => {
+                FieldType::Array {
+                    element_type,
+                    element_size,
+                    element_unsigned,
+                    length,
+                    ..
+                } => self.push_local_struct_array_field_initializer(
+                    LocalStructArrayField {
+                        target,
+                        offset,
+                        element_type,
+                        element_size,
+                        element_unsigned,
+                        length,
+                    },
+                    values,
+                    value_index,
+                )?,
+                FieldType::StructArray { .. } => {
                     return Err(CompileError::new(
                         "unsupported local struct initializer field",
                     ));
