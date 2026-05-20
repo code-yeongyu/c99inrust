@@ -2,6 +2,8 @@
 mod c99_edge_cases;
 #[path = "clang_oracle/control_flow.rs"]
 mod control_flow;
+#[path = "clang_oracle/deep_c99_edges.rs"]
+mod deep_c99_edges;
 #[path = "clang_oracle/functions_and_signatures.rs"]
 mod functions_and_signatures;
 #[path = "clang_oracle/fundamentals.rs"]
