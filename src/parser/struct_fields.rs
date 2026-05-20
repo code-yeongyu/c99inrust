@@ -2,6 +2,7 @@ use crate::diagnostics::CompileResult;
 use crate::front_end::lexer::{Keyword, Token};
 
 use super::external_declarations::function_pointer_name;
+use super::struct_bitfields::{BitFieldState, bit_field_width, push_bit_field};
 use super::struct_layout_helpers::{
     StructFieldOutput, align_struct_offset, declarator_field_type, declarator_name_index,
     push_struct_field, struct_field_type,
@@ -32,6 +33,7 @@ pub(super) fn parse_struct_fields(
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
     let mut brace_depth = 0usize;
+    let mut bit_fields = BitFieldState::new();
     for (index, token) in tokens.iter().enumerate() {
         if paren_depth != 0
             || bracket_depth != 0
@@ -57,6 +59,7 @@ pub(super) fn parse_struct_fields(
                     offset: &mut offset,
                     max_alignment: &mut max_alignment,
                 },
+                &mut bit_fields,
             )?
         {
             return Ok(None);
@@ -81,11 +84,14 @@ fn parse_struct_field_declaration(
     is_union: bool,
     context: &mut StructParseContext<'_>,
     output: &mut StructFieldOutput<'_>,
+    bit_fields: &mut BitFieldState,
 ) -> CompileResult<bool> {
     if parse_nested_aggregate_field_declaration(tokens, is_union, context, output)? {
+        bit_fields.clear();
         return Ok(true);
     }
     if let Some(name) = function_pointer_name(tokens) {
+        bit_fields.clear();
         push_struct_field(
             &name,
             FieldType::Pointer { referent: None },
@@ -113,6 +119,11 @@ fn parse_struct_field_declaration(
     };
     for (range_index, (start, end)) in ranges.iter().copied().enumerate() {
         let segment = &tokens[start..end];
+        if let Some(width) = bit_field_width(segment) {
+            push_bit_field(width, is_union, output, bit_fields)?;
+            continue;
+        }
+        bit_fields.clear();
         let Some(name_index) = declarator_name_index(segment) else {
             return Ok(false);
         };

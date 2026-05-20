@@ -42,6 +42,7 @@ mod parser_statement_dispatch;
 mod parser_token_stream;
 mod program;
 mod scalar_layout;
+mod struct_bitfields;
 mod struct_fields;
 mod struct_layout_helpers;
 mod surface_parser;
