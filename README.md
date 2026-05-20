@@ -7,19 +7,20 @@ Written using [`../omo`](https://github.com/code-yeongyu/oh-my-openagent).
 
 ## Status
 
-This repository currently ships the first verified vertical slice:
+This repository currently ships a verified C99-compiler vertical slice aimed at
+the official public Doom source tree:
 
 | Surface | Status |
 | ------- | ------ |
 | Lexer | comments, identifiers, C keywords, integer/string/char literals, punctuators |
 | Preprocessor | local/system includes, `-D`, `#if/#elif/#ifdef/#ifndef/#undef`, object/function-like macros, line splicing |
-| Parser | int function bodies with local `int` declarations, assignments, zero-argument calls, `if`/`else`, `while`, `for`, blocks, returns, plus Doom-shaped surface declarations |
-| IR | scoped local-slot lowering, label lowering, zero-argument call lowering, constant integer call folding, and short-circuit logical lowering for supported `int` statements and expressions |
-| Codegen | native macOS ARM64 assembly, native executable build via host `cc`, plus modeled x86_64 Darwin/Linux assembly with zero-argument direct calls |
-| Doom | official source audit command and QA plan |
+| Parser | Doom-shaped C declarations, typedefs, structs/unions/enums, pointers, arrays, control flow, calls, expressions, and supported C99 function bodies |
+| IR | scoped locals/globals, pointer referents, struct fields, arrays, calls, sizeof, control flow, and Doom-specific libc/X11 surface lowering |
+| Codegen | native macOS ARM64 assembly, native executable build via host `cc`, plus x86_64 Linux assembly used for official Doom linking |
+| Doom | all 62 official `linuxdoom-1.10` C translation units compile to assembly, link into a Linux/X11 executable, and run under Xvfb until the scripted QA timeout |
 
-Full C99, full Doom playability, all-world architecture coverage, and
-general Clang-beating optimization are explicit future milestones. The current
+Full C99, fully interactive Doom playability, all-world architecture coverage,
+and general Clang-beating optimization are still active milestones. The current
 benchmark slice beats local Apple Clang for compile-to-assembly time,
 one-command binary build time, runtime, and basic assembly-shape counters; see
 `docs/qa/2026-05-18-rust-slop-performance.md`.
@@ -72,10 +73,20 @@ cargo run -- doom-audit /tmp/DOOM
 Current Doom-facing evidence: `preprocess + lex + parse-check` runs across all
 124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and `LINUX`
 defined, `compile -S` emits x86_64 Linux assembly for all 62 official Doom C
-translation units, and those assembly files link into a Linux/X11 ELF with
-`gcc -lm -lX11 -lXext` in an amd64 Ubuntu container. This is not yet a playable
-Doom claim; full acceptance still requires manually running a playable
-Linux/X11 Doom target with a legal IWAD.
+translation units, those assembly files link into a Linux/X11 ELF with system
+`gcc`, and the resulting binary runs under an 8-bit Xvfb screen with a legal
+IWAD until the scripted 25 second QA timeout. The latest smoke produced
+`compile_ok=62 compile_fail=0`, `link_status=0`, and `run_status=124` with no
+`Segmentation` or Doom `Error:` line in the run log. This proves the current
+manual run smoke, not full interactive playability.
+
+Repeat the current Doom smoke on a machine with Docker, the public Doom
+checkout, and a legal IWAD:
+
+```bash
+cargo build
+tools/doom-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-smoke
+```
 
 ## Development
 

@@ -20,7 +20,7 @@ Expected today:
 
 - counts C and header files under `linuxdoom-1.10`
 - confirms the Makefile exists
-- reports that full Doom compilation is still a future milestone
+- reports the current compile/link/run smoke status
 
 ## Frontend Surface Gate
 
@@ -34,9 +34,8 @@ for file in "$doom"/*.[ch]; do
 done
 ```
 
-This is a frontend milestone only. `parse-check` recognizes Doom-shaped
-top-level declarations and function-definition boundaries, but it does not type
-check, lower, compile, link, or run Doom yet.
+This remains a useful frontend check. The stronger current gate is the full
+compile/link/run smoke below.
 
 ## Compile Progress
 
@@ -359,7 +358,7 @@ cargo build
 tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-compile-scan.txt
 ```
 
-## Latest Link Scan
+## Latest Link And Run Smoke
 
 The 62 generated x86_64 Linux assembly files now link into a Linux/X11 ELF in
 an amd64 Ubuntu container with system `gcc`, libc headers, X11, and Xext:
@@ -371,21 +370,45 @@ asm_dir=/tmp/c99inrust-doom-link-1779165229-asm
 binary=/tmp/c99inrust-doom-link-1779165229-out/linuxdoom-c99inrust
 ```
 
-The linked binary is an x86_64 Linux PIE executable. This remains a compile and
-link milestone only; the repository still must not claim running or playable
-Doom support until the playability gate below passes.
+The newer full smoke also runs the linked binary with a legal shareware IWAD
+under an 8-bit Xvfb screen. The latest tmux run exited naturally without
+`tmux kill-server`:
+
+```text
+tmux_session=c99inrust-doom-qa-1779255203
+script=/tmp/c99inrust-doom-qa-1779255203.sh
+out=/tmp/c99inrust-doom-qa-1779255203-out
+compile_ok=62 compile_fail=0
+link_status=0
+run_status=124
+```
+
+`run_status=124` is the scripted 25 second timeout. The run log reached Doom
+startup, WAD loading, renderer initialization, play-loop setup, status bar
+initialization, MIT-SHM setup, and shared-memory allocation, with no
+`Segmentation` or Doom `Error:` line.
 
 Evidence is recorded in `docs/qa/2026-05-19-doom-link.md`.
 
+Repeat the current smoke with:
+
+```bash
+cargo build
+tools/doom-smoke.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-smoke
+```
+
 ## Playability Gate
 
-Future acceptance requires:
+The current smoke proves non-interactive manual running under Xvfb. Full
+interactive playability still requires:
 
 1. Compile `linuxdoom-1.10` with `c99inrust`.
 2. Link the executable for a Linux/X11 environment.
-3. Provide a legal IWAD path through `DOOMWADDIR`.
+3. Provide a legal IWAD path.
 4. Run inside tmux without `tmux kill-server`.
-5. Verify a window/title loop appears.
-6. Start a map and verify keyboard input moves the player.
+5. Verify the process survives startup and map load without segfault.
+6. Verify a visible window/title loop appears.
+7. Start a map and verify keyboard input moves the player.
 
-Until all six pass, this repository must not claim playable Doom support.
+Items 1 through 5 are covered by the latest Xvfb smoke; visible-window and
+keyboard-input evidence remain open.
