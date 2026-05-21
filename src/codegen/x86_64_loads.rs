@@ -197,6 +197,9 @@ pub(in crate::codegen) fn emit_x86_64_load_pointer_subscript(
     if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovswl (%rcx,%rax,2), %eax\n");
     }
+    if subscript.element_byte_size == 4 && width == ValueWidth::F64 {
+        return write_assembly!(assembly, "\tcvtss2sd (%rcx,%rax,4), %xmm0\n");
+    }
     let Some(scale) = memory_scale_bytes_for_byte_size(subscript.element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",
