@@ -180,6 +180,16 @@ fn local_complex_double_real_initializer_zeroes_imaginary_part_matches_host_stdo
 }
 
 #[test]
+fn local_complex_double_real_initializer_cast_reads_real_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_double_real_initializer_cast_reads_real_part";
+    let source = "int puts(char*); int main(void) { double _Complex z = 6.0; puts(\"complex-local-init-cast-real\"); return (int)z; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
 fn local_complex_double_real_assignment_zeroes_imaginary_part_matches_host_stdout_and_exit_code() {
     // given
     let name = "local_complex_double_real_assignment_zeroes_imaginary_part";

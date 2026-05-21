@@ -40,12 +40,14 @@ impl LoweringContext {
                 |expr| self.lower_expr(expr),
             )?
         };
-        self.instructions.push(Instruction::StoreLocal {
-            slot,
-            offset: self.local_offset(slot)?,
-            scalar_type,
+        self.push_store(
+            LoweredLValue::Local {
+                slot,
+                offset: self.local_offset(slot)?,
+                scalar_type,
+            },
             value,
-        });
+        );
         Ok(())
     }
 

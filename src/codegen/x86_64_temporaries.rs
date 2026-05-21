@@ -1,4 +1,4 @@
-use super::stack_helpers::{x86_stack_byte_offset, x86_stack_offset};
+use super::stack_helpers::{x86_stack_byte_offset, x86_stack_object_offset, x86_stack_offset};
 use super::widths::ValueWidth;
 use super::x86_64_addressing::{x86_64_instruction_suffix, x86_64_result_register};
 use crate::diagnostics::{CompileError, CompileResult};
@@ -86,6 +86,21 @@ pub(in crate::codegen) fn emit_x86_64_load_temporary(
         assembly,
         "\tmov{suffix} {}(%rbp), {register}\n",
         x86_stack_offset(offset, width)
+    )
+}
+
+pub(in crate::codegen) fn emit_x86_64_load_object_start(
+    width: ValueWidth,
+    offset: usize,
+    byte_size: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let suffix = x86_64_instruction_suffix(width);
+    let register = x86_64_result_register(width);
+    write_assembly!(
+        assembly,
+        "\tmov{suffix} {}(%rbp), {register}\n",
+        x86_stack_object_offset(offset, byte_size)
     )
 }
 

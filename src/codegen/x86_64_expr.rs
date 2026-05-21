@@ -12,10 +12,11 @@ use super::x86_64_calls::emit_x86_64_call_expr;
 use super::x86_64_conditionals::emit_x86_64_conditional;
 use super::x86_64_expr_special::emit_x86_64_global_or_assignment_expr;
 use super::x86_64_loads::{emit_x86_64_load_double_literal, emit_x86_64_load_string_address};
-use super::x86_64_temporaries::emit_x86_64_load_temporary;
+use super::x86_64_temporaries::{emit_x86_64_load_object_start, emit_x86_64_load_temporary};
 use super::x86_64_unary::{emit_x86_64_i64_integer, emit_x86_64_integer, emit_x86_64_unary_expr};
 use crate::diagnostics::CompileResult;
 use crate::ir::LoweredExpr;
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_x86_64_expr(
     expr: &LoweredExpr,
@@ -112,7 +113,7 @@ pub(in crate::codegen) fn emit_x86_64_expr_natural(
         LoweredExpr::Local {
             offset,
             scalar_type,
-        } => emit_x86_64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
+        } => emit_x86_64_load_local(*offset, *scalar_type, assembly),
         LoweredExpr::Unary { op, expr } => {
             emit_x86_64_unary_expr(*op, expr, temporary_base, depth, target, labels, assembly)
         }
@@ -161,5 +162,51 @@ pub(in crate::codegen) fn emit_x86_64_expr_natural(
             labels,
             assembly,
         ),
+    }
+}
+
+fn emit_x86_64_load_local(
+    offset: usize,
+    scalar_type: ScalarType,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(scalar_type);
+    if is_complex_scalar(scalar_type) {
+        return emit_x86_64_load_object_start(
+            width,
+            offset,
+            scalar_byte_size(scalar_type),
+            assembly,
+        );
+    }
+    emit_x86_64_load_temporary(width, offset, assembly)
+}
+
+const fn is_complex_scalar(scalar_type: ScalarType) -> bool {
+    matches!(
+        scalar_type,
+        ScalarType::ComplexFloat | ScalarType::ComplexDouble | ScalarType::ComplexLongDouble
+    )
+}
+
+const fn scalar_byte_size(scalar_type: ScalarType) -> usize {
+    match scalar_type {
+        ScalarType::Bool | ScalarType::Int => 4,
+        ScalarType::LongLong
+        | ScalarType::ComplexFloat
+        | ScalarType::Double
+        | ScalarType::Pointer => 8,
+        ScalarType::ComplexDouble => 16,
+        ScalarType::LongDouble => long_double_size(),
+        ScalarType::ComplexLongDouble => 2 * long_double_size(),
+        ScalarType::VaList => 24,
+    }
+}
+
+const fn long_double_size() -> usize {
+    if cfg!(all(target_arch = "x86_64", not(target_os = "macos"))) {
+        16
+    } else {
+        8
     }
 }
