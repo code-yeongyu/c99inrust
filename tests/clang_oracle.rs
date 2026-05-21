@@ -10,6 +10,8 @@ mod deep_c99_calls_more;
 mod deep_c99_complex;
 #[path = "clang_oracle/deep_c99_complex_arithmetic.rs"]
 mod deep_c99_complex_arithmetic;
+#[path = "clang_oracle/deep_c99_complex_compound_more.rs"]
+mod deep_c99_complex_compound_more;
 #[path = "clang_oracle/deep_c99_compound_flex.rs"]
 mod deep_c99_compound_flex;
 #[path = "clang_oracle/deep_c99_compound_storage.rs"]

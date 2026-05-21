@@ -1,4 +1,4 @@
-use super::{LoweredExpr, LoweringContext};
+use super::{LoweredExpr, LoweringContext, complex_equality_expr};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{BinaryOp, Expr, LValue, UnaryOp};
 
@@ -61,10 +61,15 @@ impl LoweringContext {
             let byte_size = self.pointer_difference_stride(left_referent, right_referent)?;
             return self.lower_pointer_difference_expr(left, right, byte_size);
         }
+        let left = self.lower_expr(left)?;
+        let right = self.lower_expr(right)?;
+        if let Some(expr) = complex_equality_expr(op, &left, &right) {
+            return Ok(expr);
+        }
         Ok(LoweredExpr::Binary {
             op,
-            left: Box::new(self.lower_expr(left)?),
-            right: Box::new(self.lower_expr(right)?),
+            left: Box::new(left),
+            right: Box::new(right),
         })
     }
 
