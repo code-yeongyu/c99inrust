@@ -116,7 +116,8 @@ official C files, linked the Doom binary, wrote `manual-transcript.txt`, and
 stopped deliberately with `manual_run=skipped` because `DOOM_MANUAL_RUN=0` was
 set. A completed human-visible X11 playthrough transcript is still the
 remaining manual evidence gap; validate one with
-`tools/doom-validate-manual-transcript.sh` before claiming manual playability.
+`tools/doom-validate-manual-transcript.sh` before claiming manual playability,
+or set `DOOM_MANUAL_VALIDATE=1` on the manual harness run.
 
 ## Development
 

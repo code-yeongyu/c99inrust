@@ -30,6 +30,14 @@ linuxdoom="$root/linuxdoom-1.10"
 compiler="${C99INRUST_BIN:-target/debug/c99inrust}"
 asm="$out/asm"
 transcript="$out/manual-transcript.txt"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+validator="$script_dir/doom-validate-manual-transcript.sh"
+manual_window_visible="${DOOM_MANUAL_WINDOW_VISIBLE:-}"
+manual_map_started="${DOOM_MANUAL_MAP_STARTED:-}"
+manual_arrow_keys_move="${DOOM_MANUAL_ARROW_KEYS_MOVE:-}"
+manual_strafe_fire_use_respond="${DOOM_MANUAL_STRAFE_FIRE_USE_RESPOND:-}"
+manual_exit_method="${DOOM_MANUAL_EXIT_METHOD:-}"
+manual_notes="${DOOM_MANUAL_NOTES:-}"
 
 if [ ! -d "$linuxdoom" ]; then
 	printf 'error: expected official id-Software/DOOM checkout with linuxdoom-1.10\n' >&2
@@ -67,15 +75,50 @@ write_transcript() {
 		printf 'link_status=0\n'
 		printf 'manual_run=%s\n' "$manual_run"
 		printf 'reason=%s\n' "$reason"
-		printf 'window_visible=\n'
-		printf 'map_started=\n'
-		printf 'arrow_keys_move=\n'
-		printf 'strafe_fire_use_respond=\n'
-		printf 'exit_method=\n'
+		printf 'window_visible=%s\n' "$manual_window_visible"
+		printf 'map_started=%s\n' "$manual_map_started"
+		printf 'arrow_keys_move=%s\n' "$manual_arrow_keys_move"
+		printf 'strafe_fire_use_respond=%s\n' "$manual_strafe_fire_use_respond"
+		printf 'exit_method=%s\n' "$manual_exit_method"
 		printf 'final_status=%s\n' "$final_status"
-		printf 'notes=\n'
+		printf 'notes=%s\n' "$manual_notes"
 	} >"$transcript"
 	record "transcript=$transcript"
+}
+
+prompt_field() {
+	current="$1"
+	prompt="$2"
+	if [ -n "$current" ]; then
+		printf '%s' "$current"
+		return
+	fi
+	if [ "${DOOM_MANUAL_PROMPT:-1}" != "1" ] || [ ! -t 0 ]; then
+		return
+	fi
+	printf '%s' "$prompt" >&2
+	IFS= read -r answer || answer=
+	printf '%s' "$answer"
+}
+
+capture_manual_acceptance() {
+	manual_window_visible="$(prompt_field "$manual_window_visible" 'Window visible? (yes/no): ')"
+	manual_map_started="$(prompt_field "$manual_map_started" 'Map started? (yes/no): ')"
+	manual_arrow_keys_move="$(prompt_field "$manual_arrow_keys_move" 'Arrow keys move/turn? (yes/no): ')"
+	manual_strafe_fire_use_respond="$(prompt_field "$manual_strafe_fire_use_respond" 'Strafe/fire/use respond? (yes/no): ')"
+	manual_exit_method="$(prompt_field "$manual_exit_method" 'Exit method: ')"
+	manual_notes="$(prompt_field "$manual_notes" 'Notes: ')"
+}
+
+validate_completed_transcript() {
+	if [ "${DOOM_MANUAL_VALIDATE:-0}" != "1" ]; then
+		return
+	fi
+	if [ ! -x "$validator" ]; then
+		printf 'error: transcript validator not executable: %s\n' "$validator" >&2
+		exit 21
+	fi
+	"$validator" "$transcript" | tee -a "$out/manual-play.log"
 }
 
 compile_ok=0
@@ -168,5 +211,7 @@ else
 fi
 record "manual_run=finished"
 record "manual_status=$manual_status"
+capture_manual_acceptance
 write_transcript "finished" "$manual_status"
+validate_completed_transcript
 exit "$manual_status"

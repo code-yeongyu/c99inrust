@@ -557,6 +557,8 @@ Evidence and tmux instructions are recorded in
 `docs/qa/2026-05-20-doom-manual-play.md`.
 Use `tools/doom-validate-manual-transcript.sh` on a completed
 `manual-transcript.txt` before treating a human-visible run as final evidence.
+The manual harness can run that validator automatically after an interactive
+session when `DOOM_MANUAL_VALIDATE=1` is set.
 
 ## Playability Gate
 

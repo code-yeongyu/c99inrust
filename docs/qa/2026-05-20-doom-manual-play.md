@@ -77,7 +77,8 @@ Manual QA should run inside tmux and exit the session naturally. Do not use
 ```bash
 tmux new -s c99inrust-doom-manual
 cargo build
-tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad
+DOOM_MANUAL_OPERATOR="$USER" DOOM_MANUAL_VALIDATE=1 \
+  tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad
 ```
 
 Interactive acceptance checks:
@@ -101,7 +102,7 @@ iwad=
 display=
 compile_ok=62 compile_fail=0
 link_status=0
-manual_run=starting
+manual_run=finished
 window_visible=
 map_started=
 arrow_keys_move=
@@ -112,8 +113,13 @@ notes=
 ```
 
 The harness writes these fields to `manual-transcript.txt` in the output
-directory. Build-only and blocked runs prefill the compile/link fields; for a
-human-visible play session, fill in the empty gameplay fields after the run.
+directory. Build-only and blocked runs prefill the compile/link fields. For a
+human-visible play session, the harness prompts for the gameplay fields after
+the Doom process exits when stdin is a TTY. Set `DOOM_MANUAL_PROMPT=0` to skip
+the prompts, or prefill fields with `DOOM_MANUAL_WINDOW_VISIBLE`,
+`DOOM_MANUAL_MAP_STARTED`, `DOOM_MANUAL_ARROW_KEYS_MOVE`,
+`DOOM_MANUAL_STRAFE_FIRE_USE_RESPOND`, `DOOM_MANUAL_EXIT_METHOD`, and
+`DOOM_MANUAL_NOTES`.
 
 Validate a completed transcript before claiming human-visible manual
 playability:
