@@ -1,9 +1,9 @@
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweredLValue, LoweringContext, StructAddress,
-    sizeof_expr,
+    lowered_lvalue_scalar_type, sizeof_expr,
 };
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, FieldType, LValue};
+use crate::parser::{Expr, FieldType, LValue, ScalarType};
 
 impl LoweringContext {
     pub(in crate::ir) fn lower_assignment(
@@ -20,6 +20,11 @@ impl LoweringContext {
             return Ok(());
         }
         let target = self.lower_lvalue(target)?;
+        if lowered_lvalue_scalar_type(&target) == ScalarType::Pointer
+            && let Expr::ArrayCompoundLiteral { .. } = value
+        {
+            return self.lower_array_compound_pointer_assignment(target, value);
+        }
         let value = self.lower_expr(value)?;
         self.push_store(target, value);
         Ok(())

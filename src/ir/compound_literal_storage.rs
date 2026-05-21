@@ -1,4 +1,4 @@
-use super::{Instruction, LoweredExpr, LoweredLValue, LoweringContext, zero_expr_for};
+use super::{LoweredExpr, LoweredLValue, LoweringContext, zero_expr_for};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Expr, ScalarType};
 
@@ -6,6 +6,19 @@ impl LoweringContext {
     pub(in crate::ir) fn lower_array_compound_pointer_initializer(
         &mut self,
         pointer_slot: usize,
+        initializer: &Expr,
+    ) -> CompileResult<()> {
+        let target = LoweredLValue::Local {
+            slot: pointer_slot,
+            offset: self.local_offset(pointer_slot)?,
+            scalar_type: ScalarType::Pointer,
+        };
+        self.lower_array_compound_pointer_assignment(target, initializer)
+    }
+
+    pub(in crate::ir) fn lower_array_compound_pointer_assignment(
+        &mut self,
+        target: LoweredLValue,
         initializer: &Expr,
     ) -> CompileResult<()> {
         let Expr::ArrayCompoundLiteral {
@@ -45,12 +58,7 @@ impl LoweringContext {
                 values.get(index),
             )?;
         }
-        self.instructions.push(Instruction::StoreLocal {
-            slot: pointer_slot,
-            offset: self.local_offset(pointer_slot)?,
-            scalar_type: ScalarType::Pointer,
-            value: array_pointer,
-        });
+        self.push_store(target, array_pointer);
         Ok(())
     }
 
