@@ -483,7 +483,8 @@ live player state from `/proc/<pid>/mem`. It fails unless the player mobj stays
 in the thinker list with `P_MobjThinker` and the player coordinates change:
 
 ```text
-out=/tmp/c99inrust-doom-movement-statefix
+commit=2eb3f12
+out=/tmp/c99inrust-doom-movement-d9836c4-mega-c
 compile_ok=62 compile_fail=0
 link_status=0
 display_status=0
@@ -494,10 +495,10 @@ movement_status=0
 tail_status=124
 run_status=124
 before 5 5 1 1 1 69206016 -236978176 0 0 0 -1
-up_11 119 119 1 1 1 69194566 -209032509 -107 261249 25 3
+up_11 117 117 1 1 1 69194790 -209582386 -107 261602 25 1
 ```
 
-The same movement smoke was rerun inside tmux session
+An older movement smoke was rerun inside tmux session
 `c99inrust-doom-movement-1779270567`, with `tmux_command_status=0`,
 `movement_status=0`, and no `tmux kill-server`.
 
