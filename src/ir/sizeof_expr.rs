@@ -19,6 +19,9 @@ pub(in crate::ir) fn lower(context: &LoweringContext, expr: &Expr) -> CompileRes
 
 fn expression_size(context: &LoweringContext, expr: &Expr) -> CompileResult<Option<usize>> {
     match expr {
+        Expr::StructCompoundLiteral { .. } | Expr::ArrayCompoundLiteral { .. } => {
+            context.compound_literal_size(expr).map(Some)
+        }
         Expr::Identifier(name) => identifier_size(context, name),
         Expr::Dereference { pointer } => pointer_element_size(context, pointer).map(Some),
         Expr::Subscript { array, .. } => subscript_size(context, array),

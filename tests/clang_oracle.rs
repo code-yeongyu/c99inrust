@@ -8,6 +8,8 @@ mod deep_c99_bughunt_wave_a;
 mod deep_c99_calls_more;
 #[path = "clang_oracle/deep_c99_complex.rs"]
 mod deep_c99_complex;
+#[path = "clang_oracle/deep_c99_compound_flex.rs"]
+mod deep_c99_compound_flex;
 #[path = "clang_oracle/deep_c99_designated_initializers.rs"]
 mod deep_c99_designated_initializers;
 #[path = "clang_oracle/deep_c99_doom_adjacent_next.rs"]

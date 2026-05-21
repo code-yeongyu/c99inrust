@@ -1,5 +1,5 @@
 use super::{LoweredExpr, LoweringContext};
-use crate::diagnostics::CompileResult;
+use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::Expr;
 
 impl LoweringContext {
@@ -12,6 +12,9 @@ impl LoweringContext {
             Expr::LongInteger(value) => Ok(LoweredExpr::LongInteger(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
             Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
+            Expr::StructCompoundLiteral { .. } | Expr::ArrayCompoundLiteral { .. } => Err(
+                CompileError::new("compound literal object cannot be used as a scalar value"),
+            ),
             Expr::VaArg {
                 list, scalar_type, ..
             } => Ok(LoweredExpr::VaArg {

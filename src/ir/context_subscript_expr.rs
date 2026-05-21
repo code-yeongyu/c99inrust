@@ -11,6 +11,9 @@ impl LoweringContext {
         array: &Expr,
         index: &Expr,
     ) -> CompileResult<LoweredExpr> {
+        if let Some(value) = self.lower_array_compound_subscript(array, index)? {
+            return Ok(value);
+        }
         if self.should_commute_subscript(array, index) {
             return self.lower_subscript(index, array);
         }

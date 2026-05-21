@@ -24,11 +24,17 @@ pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> Compile
     } = expr
     {
         let member = context.resolve_member_access(base, field, *dereference)?;
-        if let FieldType::Pointer {
-            referent: Some(referent),
-        } = member.field_type
-        {
-            return Ok(referent);
+        match member.field_type {
+            FieldType::Pointer {
+                referent: Some(referent),
+            } => return Ok(referent),
+            FieldType::Array {
+                element_type,
+                element_unsigned,
+                ..
+            } => return Ok(array_field_referent(element_type, element_unsigned)),
+            FieldType::StructArray { struct_name, .. } => return Ok(struct_name),
+            FieldType::Scalar(_) | FieldType::Pointer { .. } | FieldType::Struct(_) => {}
         }
     }
     if let Expr::Cast {
@@ -59,6 +65,25 @@ pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> Compile
     Err(CompileError::new(
         "pointer member access requires a typed pointer",
     ))
+}
+
+fn array_field_referent(element_type: ScalarType, element_unsigned: bool) -> String {
+    if element_unsigned {
+        "byte".to_owned()
+    } else {
+        match element_type {
+            ScalarType::Pointer => POINTER_REFERENT.to_owned(),
+            ScalarType::LongLong => "long long".to_owned(),
+            ScalarType::ComplexFloat => "float _Complex".to_owned(),
+            ScalarType::ComplexDouble => "double _Complex".to_owned(),
+            ScalarType::ComplexLongDouble => "long double _Complex".to_owned(),
+            ScalarType::Int
+            | ScalarType::Bool
+            | ScalarType::Double
+            | ScalarType::LongDouble
+            | ScalarType::VaList => "int".to_owned(),
+        }
+    }
 }
 
 fn array_referent(context: &LoweringContext, array: &Expr) -> Option<String> {

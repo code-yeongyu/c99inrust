@@ -32,7 +32,7 @@ impl Parser<'_> {
         Ok(values)
     }
 
-    fn local_struct_initializer_values_for_struct(
+    pub(super) fn local_struct_initializer_values_for_struct(
         &mut self,
         struct_name: &str,
     ) -> CompileResult<Vec<LocalStructInitializerValue>> {

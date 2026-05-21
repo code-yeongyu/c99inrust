@@ -1,4 +1,5 @@
 use super::super::ScalarType;
+use super::statement::LocalStructInitializerValue;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LValue {
@@ -29,6 +30,17 @@ pub enum Expr {
     LongInteger(i64),
     DoubleLiteral(String),
     StringLiteral(String),
+    StructCompoundLiteral {
+        struct_name: String,
+        values: Vec<LocalStructInitializerValue>,
+    },
+    ArrayCompoundLiteral {
+        element_type: ScalarType,
+        element_byte_size: usize,
+        element_unsigned: bool,
+        length: usize,
+        values: Vec<Self>,
+    },
     VaArg {
         list: Box<Self>,
         scalar_type: ScalarType,

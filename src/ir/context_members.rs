@@ -12,6 +12,9 @@ impl LoweringContext {
         field: &str,
         dereference: bool,
     ) -> CompileResult<LoweredExpr> {
+        if let Some(value) = self.lower_struct_compound_member(base, field, dereference)? {
+            return Ok(value);
+        }
         let member = self.resolve_member_access(base, field, dereference)?;
         let (scalar_type, byte_size, is_unsigned) = match member.field_type {
             FieldType::Scalar(field) => (field.scalar_type, field.byte_size, field.is_unsigned),

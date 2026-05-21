@@ -25,6 +25,9 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::StringLiteral(_) => Err(CompileError::new(
             "string literal is not an integer constant expression",
         )),
+        Expr::StructCompoundLiteral { .. } | Expr::ArrayCompoundLiteral { .. } => Err(
+            CompileError::new("compound literal is not an integer constant expression"),
+        ),
         Expr::VaArg { .. } => Err(CompileError::new(
             "va_arg expression is not an integer constant expression",
         )),

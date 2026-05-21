@@ -25,7 +25,11 @@ impl Parser<'_> {
     }
 
     pub(super) fn postfix(&mut self) -> CompileResult<Expr> {
-        let mut expr = self.primary()?;
+        let expr = self.primary()?;
+        self.postfix_suffixes(expr)
+    }
+
+    pub(super) fn postfix_suffixes(&mut self, mut expr: Expr) -> CompileResult<Expr> {
         loop {
             if self.check_punctuator("[") {
                 self.advance();

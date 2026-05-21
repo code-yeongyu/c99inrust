@@ -143,6 +143,9 @@ impl Parser<'_> {
     }
 
     pub(super) fn unary(&mut self) -> CompileResult<Expr> {
+        if let Some(expr) = self.compound_literal_at_current()? {
+            return self.postfix_suffixes(expr);
+        }
         if let Some((target, referent, next_index)) = self.cast_type_at_current() {
             if self
                 .tokens

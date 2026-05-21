@@ -33,6 +33,7 @@ mod local_arrays;
 mod local_scalar_initializer;
 mod model;
 mod parser_assignment_ops;
+mod parser_compound_literals;
 mod parser_control_flow;
 mod parser_declaration_types;
 mod parser_designated_initializers;

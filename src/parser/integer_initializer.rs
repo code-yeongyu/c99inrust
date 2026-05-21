@@ -124,6 +124,8 @@ fn eval_integer_initializer_expr_with_context(
         )),
         Expr::SizeOfExpr { expr } => eval_sizeof_initializer_expr(expr, sizeof_symbols),
         Expr::StringLiteral(_)
+        | Expr::StructCompoundLiteral { .. }
+        | Expr::ArrayCompoundLiteral { .. }
         | Expr::AddressOf { .. }
         | Expr::Dereference { .. }
         | Expr::Member { .. }
