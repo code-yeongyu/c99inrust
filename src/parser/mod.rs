@@ -5,6 +5,7 @@ mod aggregate_declarations;
 mod anonymous_union;
 mod builtin_field;
 mod builtin_layout;
+mod declaration_referents;
 mod declarator_types;
 mod doom_layout;
 mod enum_declarations;
@@ -74,10 +75,10 @@ use aggregate_declarations::{
 };
 use anonymous_union::anonymous_union_struct_name;
 use builtin_layout::builtin_struct_layouts;
-use declarator_types::{
-    declaration_base_referent_type, parameter_scalar_type, pointer_referent_for_depth,
-    pointer_referent_from_specifiers, pointer_referent_type,
+use declaration_referents::{
+    declaration_base_referent_type, pointer_referent_for_depth, pointer_referent_from_specifiers,
 };
+use declarator_types::{parameter_scalar_type, pointer_referent_type};
 use enum_declarations::{enum_typedef_name, parse_enum_constants};
 use external_declarations::{
     function_definition_has_supported_signature, function_definition_name,

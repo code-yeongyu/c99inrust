@@ -1,8 +1,9 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
-use super::declarator_types::{integer_parameter_type, pointer_referent_from_specifiers};
+use super::declarator_types::integer_parameter_type;
 use super::global_byte_declarations::parse_unsigned_char_array_length;
+use super::pointer_referent_from_specifiers;
 use super::scalar_layout::{scalar_field_type, scalar_size_for_layout};
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,

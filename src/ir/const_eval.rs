@@ -98,11 +98,15 @@ pub(in crate::ir) fn cast_const_value(target: ScalarType, value: i64) -> Compile
             .map(i64::from)
             .map_err(|_| CompileError::new("integer cast result does not fit i32")),
         ScalarType::LongLong => Ok(value),
-        ScalarType::Double | ScalarType::LongDouble | ScalarType::Pointer | ScalarType::VaList => {
-            Err(CompileError::new(
-                "non-integer cast is not an integer constant expression",
-            ))
-        }
+        ScalarType::ComplexFloat
+        | ScalarType::ComplexDouble
+        | ScalarType::ComplexLongDouble
+        | ScalarType::Double
+        | ScalarType::LongDouble
+        | ScalarType::Pointer
+        | ScalarType::VaList => Err(CompileError::new(
+            "non-integer cast is not an integer constant expression",
+        )),
     }
 }
 pub(in crate::ir) fn eval_binary(op: BinaryOp, left: i64, right: i64) -> CompileResult<i64> {

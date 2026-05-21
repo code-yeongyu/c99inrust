@@ -18,8 +18,13 @@ pub(super) const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Bool => 1,
         ScalarType::Int => 4,
-        ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+        ScalarType::LongLong
+        | ScalarType::ComplexFloat
+        | ScalarType::Double
+        | ScalarType::Pointer => 8,
+        ScalarType::ComplexDouble => 16,
         ScalarType::LongDouble => long_double_size_for_layout(),
+        ScalarType::ComplexLongDouble => 2 * long_double_size_for_layout(),
         ScalarType::VaList => 24,
     }
 }

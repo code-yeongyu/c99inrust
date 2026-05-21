@@ -1,12 +1,12 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
-use super::declarator_types::pointer_referent_from_specifiers;
 use super::global_specifiers::global_specifiers_are_pointer;
 use super::global_string_initializers::parse_string_initializer;
 use super::integer_initializer::{
     parse_integer_initializer, parse_integer_initializer_with_constants,
 };
+use super::pointer_referent_from_specifiers;
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_punctuator_index,

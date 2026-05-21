@@ -1,11 +1,10 @@
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 use super::ScalarType;
+use super::declaration_base_referent_type;
+use super::pointer_referent_for_depth;
 use super::token_scan::{token_identifier, token_is_punctuator, update_depths};
 use super::type_recognition::supported_typedef_scalar;
-use super::typedef_referent;
-
-const POINTER_REFERENT: &str = "*";
 
 pub(super) fn parameter_scalar_type(
     tokens: &[Token],
@@ -115,68 +114,6 @@ fn parameter_array_depth(tokens: &[Token]) -> usize {
         .count()
 }
 
-pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String> {
-    if specifiers_are_unsigned_char(tokens) {
-        return Some("byte".to_owned());
-    }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)))
-    {
-        return Some("char".to_owned());
-    }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Int)))
-    {
-        return Some("int".to_owned());
-    }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Short)))
-    {
-        return Some("short".to_owned());
-    }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Long)))
-    {
-        return Some("long long".to_owned());
-    }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Void)))
-    {
-        return Some("void".to_owned());
-    }
-    tokens
-        .iter()
-        .rev()
-        .find_map(token_identifier)
-        .and_then(|name| {
-            typedef_referent::byte_sized(name)
-                .map(ToOwned::to_owned)
-                .or_else(|| {
-                    supported_typedef_scalar(name)
-                        .is_none()
-                        .then(|| name.to_owned())
-                })
-        })
-}
-
-fn specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
-    let mut saw_unsigned = false;
-    let mut saw_char = false;
-    for token in tokens {
-        match token.kind {
-            TokenKind::Keyword(Keyword::Unsigned) => saw_unsigned = true,
-            TokenKind::Keyword(Keyword::Char) => saw_char = true,
-            _ => {}
-        }
-    }
-    saw_unsigned && saw_char
-}
-
 pub(super) fn integer_parameter_type(tokens: &[Token]) -> Option<ScalarType> {
     integer_parameter_type_with_typedefs(tokens, &[])
 }
@@ -228,36 +165,5 @@ fn integer_parameter_type_with_typedefs(
         Some(ScalarType::Int)
     } else {
         Some(ScalarType::LongLong)
-    }
-}
-
-pub(super) fn pointer_referent_from_specifiers(tokens: &[Token]) -> Option<String> {
-    let pointer_depth = tokens
-        .iter()
-        .filter(|token| token_is_punctuator(token, "*"))
-        .count();
-    if pointer_depth == 0 {
-        return None;
-    }
-    pointer_referent_for_depth(
-        pointer_depth,
-        declaration_base_referent_type(tokens).as_deref(),
-    )
-}
-
-pub(super) fn pointer_referent_for_depth(
-    pointer_depth: usize,
-    base_referent: Option<&str>,
-) -> Option<String> {
-    match pointer_depth {
-        0 => None,
-        1 => base_referent.map(ToOwned::to_owned),
-        depth => {
-            let mut referent = POINTER_REFERENT.repeat(depth - 1);
-            if let Some(base) = base_referent {
-                referent.push_str(base);
-            }
-            Some(referent)
-        }
     }
 }

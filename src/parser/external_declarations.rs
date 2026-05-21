@@ -1,7 +1,7 @@
 use crate::front_end::lexer::{Keyword, Token};
 
-use super::declarator_types::pointer_referent_from_specifiers;
 use super::function_pointer_declarators::{function_pointer_variable, pointer_return_declarator};
+use super::pointer_referent_from_specifiers;
 use super::token_scan::{
     array_declarator_name, last_token_is_punctuator, last_top_level_identifier,
     previous_identifier, previous_identifier_index, token_has_keyword, token_identifier,

@@ -7,6 +7,9 @@ pub(in crate::ir) fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
         ScalarType::Double | ScalarType::LongDouble => {
             LoweredExpr::DoubleLiteral("0.0".to_string())
         }
+        ScalarType::ComplexFloat | ScalarType::ComplexDouble | ScalarType::ComplexLongDouble => {
+            LoweredExpr::Integer(0)
+        }
         ScalarType::Bool
         | ScalarType::Int
         | ScalarType::LongLong
@@ -121,8 +124,13 @@ pub(in crate::ir) fn struct_alignment(layout: &StructLayout) -> usize {
 pub(in crate::ir) const fn scalar_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Bool | ScalarType::Int => 4,
-        ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+        ScalarType::LongLong
+        | ScalarType::ComplexFloat
+        | ScalarType::Double
+        | ScalarType::Pointer => 8,
+        ScalarType::ComplexDouble => 16,
         ScalarType::LongDouble => long_double_size(),
+        ScalarType::ComplexLongDouble => 2 * long_double_size(),
         ScalarType::VaList => 24,
     }
 }

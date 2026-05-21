@@ -1,13 +1,13 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
-use super::declarator_types::pointer_referent_from_specifiers;
 use super::global_int_initializers::parse_global_int_initializer;
 use super::global_specifiers::{
     global_specifiers_are_extern_int, global_specifiers_are_extern_long_long,
     global_specifiers_are_extern_pointer, global_specifiers_are_int,
     global_specifiers_are_long_long, global_struct_specifier_name,
 };
+use super::pointer_referent_from_specifiers;
 use super::token_scan::{
     previous_identifier_index, token_identifier, token_is_punctuator, top_level_comma_ranges,
     top_level_punctuator_index,

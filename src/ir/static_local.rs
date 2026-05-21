@@ -21,11 +21,15 @@ pub(in crate::ir) fn scalar_initializer(
         ScalarType::Pointer => Err(CompileError::new(
             "static local pointer initializer must be null",
         )),
-        ScalarType::LongLong | ScalarType::Double | ScalarType::LongDouble | ScalarType::VaList => {
-            Err(CompileError::new(
-                "static local currently supports int and pointer scalars only",
-            ))
-        }
+        ScalarType::LongLong
+        | ScalarType::ComplexFloat
+        | ScalarType::ComplexDouble
+        | ScalarType::ComplexLongDouble
+        | ScalarType::Double
+        | ScalarType::LongDouble
+        | ScalarType::VaList => Err(CompileError::new(
+            "static local currently supports int and pointer scalars only",
+        )),
     }
 }
 

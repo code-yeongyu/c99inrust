@@ -64,7 +64,9 @@ pub(super) fn supported_cast_type_with_typedefs(
     }
     let mut saw_type = false;
     let mut saw_bool = false;
+    let mut saw_complex = false;
     let mut saw_double = false;
+    let mut saw_float = false;
     let mut saw_named_type = false;
     let mut saw_pointer = false;
     let mut expecting_struct_tag = false;
@@ -77,6 +79,16 @@ pub(super) fn supported_cast_type_with_typedefs(
             TokenKind::Keyword(Keyword::Double) => {
                 saw_type = true;
                 saw_double = true;
+                expecting_struct_tag = false;
+            }
+            TokenKind::Keyword(Keyword::Float) => {
+                saw_type = true;
+                saw_float = true;
+                expecting_struct_tag = false;
+            }
+            TokenKind::Keyword(Keyword::Complex) => {
+                saw_type = true;
+                saw_complex = true;
                 expecting_struct_tag = false;
             }
             TokenKind::Keyword(Keyword::Bool) => {
@@ -133,26 +145,64 @@ pub(super) fn supported_cast_type_with_typedefs(
             | TokenKind::Keyword(_) => return None,
         }
     }
-    if !saw_type {
-        return None;
-    }
-    if saw_pointer {
-        return Some(ScalarType::Pointer);
-    }
-    if saw_named_type {
-        return None;
-    }
-    if saw_bool {
+    let flags = cast_flag(saw_type, CAST_SAW_TYPE)
+        | cast_flag(saw_pointer, CAST_SAW_POINTER)
+        | cast_flag(saw_named_type, CAST_SAW_NAMED)
+        | cast_flag(saw_complex, CAST_SAW_COMPLEX)
+        | cast_flag(saw_float, CAST_SAW_FLOAT)
+        | cast_flag(saw_bool, CAST_SAW_BOOL)
+        | cast_flag(saw_double, CAST_SAW_DOUBLE);
+    cast_type_from_flags(flags, long_count)
+}
+
+const CAST_SAW_TYPE: u8 = 1;
+const CAST_SAW_POINTER: u8 = 2;
+const CAST_SAW_NAMED: u8 = 4;
+const CAST_SAW_COMPLEX: u8 = 8;
+const CAST_SAW_FLOAT: u8 = 16;
+const CAST_SAW_BOOL: u8 = 32;
+const CAST_SAW_DOUBLE: u8 = 64;
+
+const fn cast_type_from_flags(flags: u8, long_count: usize) -> Option<ScalarType> {
+    if !cast_has(flags, CAST_SAW_TYPE) {
+        None
+    } else if cast_has(flags, CAST_SAW_POINTER) {
+        Some(ScalarType::Pointer)
+    } else if cast_has(flags, CAST_SAW_NAMED) {
+        None
+    } else if cast_has(flags, CAST_SAW_COMPLEX) {
+        Some(complex_type(cast_has(flags, CAST_SAW_FLOAT), long_count))
+    } else if cast_has(flags, CAST_SAW_FLOAT) {
+        None
+    } else if cast_has(flags, CAST_SAW_BOOL) {
         Some(ScalarType::Bool)
-    } else if saw_double && long_count == 0 {
+    } else if cast_has(flags, CAST_SAW_DOUBLE) && long_count == 0 {
         Some(ScalarType::Double)
-    } else if saw_double {
+    } else if cast_has(flags, CAST_SAW_DOUBLE) {
         Some(ScalarType::LongDouble)
     } else if long_count == 0 {
         Some(ScalarType::Int)
     } else {
         Some(ScalarType::LongLong)
     }
+}
+
+const fn complex_type(saw_float: bool, long_count: usize) -> ScalarType {
+    if saw_float {
+        ScalarType::ComplexFloat
+    } else if long_count == 0 {
+        ScalarType::ComplexDouble
+    } else {
+        ScalarType::ComplexLongDouble
+    }
+}
+
+const fn cast_flag(value: bool, flag: u8) -> u8 {
+    if value { flag } else { 0 }
+}
+
+const fn cast_has(flags: u8, flag: u8) -> bool {
+    flags & flag != 0
 }
 
 fn cast_type_starts_with_pointer_declarator(tokens: &[Token]) -> bool {
