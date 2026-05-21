@@ -8,6 +8,9 @@ impl LoweringContext {
         target: &LValue,
         value: &Expr,
     ) -> CompileResult<LoweredExpr> {
+        if let Some(expr) = self.lower_scalar_compound_assignment_expr(target, value)? {
+            return Ok(expr);
+        }
         let target = self.lower_lvalue(target)?;
         Ok(LoweredExpr::Assign {
             target,

@@ -1,6 +1,6 @@
 use super::{
-    GlobalBinding, LocalBinding, LoweredExpr, LoweredLValue, LoweringContext, StructAddress,
-    lowered_lvalue_scalar_type, sizeof_expr,
+    GlobalBinding, Instruction, LocalBinding, LoweredExpr, LoweredLValue, LoweringContext,
+    StructAddress, lowered_lvalue_scalar_type, sizeof_expr,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Expr, FieldType, LValue, ScalarType};
@@ -11,6 +11,10 @@ impl LoweringContext {
         target: &LValue,
         value: &Expr,
     ) -> CompileResult<()> {
+        if let Some(value) = self.lower_scalar_compound_assignment_expr(target, value)? {
+            self.instructions.push(Instruction::Eval(value));
+            return Ok(());
+        }
         if let Some(struct_target) = self.resolve_struct_lvalue_address(target)? {
             if let Expr::StructCompoundLiteral {
                 struct_name,
