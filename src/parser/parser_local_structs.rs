@@ -25,15 +25,22 @@ impl Parser<'_> {
                 self.advance();
                 let length = local_array_length(&self.expression()?, self.known_constants)?;
                 self.expect_punctuator("]")?;
-                if self.check_punctuator("=") {
-                    return Err(CompileError::new(
-                        "local struct array initializers are not supported",
-                    ));
-                }
+                let initializer = if self.check_punctuator("=") {
+                    self.advance();
+                    if !self.check_punctuator("{") {
+                        return Err(CompileError::new(
+                            "local struct array initializers require braces",
+                        ));
+                    }
+                    Some(self.local_struct_initializer_values()?)
+                } else {
+                    None
+                };
                 Statement::LocalStructArray {
                     name,
                     struct_name: struct_name.clone(),
                     length,
+                    initializer,
                 }
             } else if self.check_punctuator("=") {
                 self.advance();

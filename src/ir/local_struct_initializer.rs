@@ -44,6 +44,39 @@ impl LoweringContext {
         }
     }
 
+    pub(in crate::ir) fn lower_local_struct_array_initializer(
+        &mut self,
+        name: &str,
+        struct_name: &str,
+        slot: usize,
+        length: usize,
+        values: &[LocalStructInitializerValue],
+    ) -> CompileResult<()> {
+        let layout = self.struct_layout(struct_name)?.clone();
+        let byte_size = layout
+            .size
+            .checked_mul(length)
+            .ok_or_else(|| CompileError::new("local struct array initializer size overflow"))?;
+        let target = StructAddress {
+            pointer: LoweredExpr::LocalAddress {
+                offset: self.local_offset(slot)?,
+                byte_size,
+            },
+            offset: 0,
+            struct_name: struct_name.to_owned(),
+        };
+        self.instructions.push(Instruction::InitLocalBytes {
+            offset: self.local_offset(slot)?,
+            values: vec![0; byte_size],
+        });
+        self.push_local_struct_array_elements_initializer(&target, struct_name, length, values)
+            .map_err(|error| {
+                CompileError::new(format!(
+                    "failed to initialize local struct array {name}: {error}"
+                ))
+            })
+    }
+
     fn copy_local_struct_initializer(
         &mut self,
         target: &StructAddress,

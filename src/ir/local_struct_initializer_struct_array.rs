@@ -3,6 +3,37 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{FieldType, LocalStructInitializerValue};
 
 impl LoweringContext {
+    pub(in crate::ir) fn push_local_struct_array_elements_initializer(
+        &mut self,
+        target: &StructAddress,
+        struct_name: &str,
+        length: usize,
+        values: &[LocalStructInitializerValue],
+    ) -> CompileResult<()> {
+        let Some(first_value) = values.first() else {
+            return Ok(());
+        };
+        if matches!(first_value, LocalStructInitializerValue::Nested(_)) {
+            return self.push_braced_local_struct_array(target, 0, struct_name, length, values);
+        }
+        let mut value_index = 0usize;
+        self.push_unbraced_local_struct_array(
+            target,
+            0,
+            struct_name,
+            length,
+            values,
+            &mut value_index,
+        )?;
+        if value_index == values.len() {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                "too many local struct-array initializer values",
+            ))
+        }
+    }
+
     pub(in crate::ir) fn push_local_struct_array_initializer(
         &mut self,
         target: &StructAddress,

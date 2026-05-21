@@ -102,3 +102,24 @@ fn local_struct_matrix_field_nested_initializer_matches_host_exit_code() {
     // when/then
     assert_case("local_struct_matrix_field_nested_initializer", source);
 }
+
+#[test]
+fn local_struct_array_initializer_zero_fills_and_decays_matches_host_exit_code() {
+    // given
+    let source = "typedef struct { int x; int y; } pair_t; int main(void) { pair_t pairs[3] = { { 1, 2 }, { 3 } }; pair_t *cursor = pairs + 1; return pairs[0].y == 2 && cursor->x == 3 && cursor->y == 0 && pairs[2].x == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "local_struct_array_initializer_zero_fills_and_decays",
+        source,
+    );
+}
+
+#[test]
+fn local_struct_array_unbraced_initializer_spills_matches_host_exit_code() {
+    // given
+    let source = "typedef struct { int x; int y; } pair_t; int main(void) { pair_t pairs[2] = { 1, 2, 3 }; return pairs[0].x == 1 && pairs[0].y == 2 && pairs[1].x == 3 && pairs[1].y == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("local_struct_array_unbraced_initializer_spills", source);
+}

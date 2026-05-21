@@ -54,6 +54,7 @@ pub enum Statement {
         name: String,
         struct_name: String,
         length: usize,
+        initializer: Option<Vec<LocalStructInitializerValue>>,
     },
     LocalConstants(Vec<Constant>),
     DeclarationList(Vec<Self>),

@@ -123,7 +123,13 @@ impl LoweringContext {
                 name,
                 struct_name,
                 length,
-            } => Some(self.lower_local_struct_array(name, struct_name, *length)),
+                initializer,
+            } => Some(self.lower_local_struct_array(
+                name,
+                struct_name,
+                *length,
+                initializer.as_deref(),
+            )),
             Statement::LocalConstants(constants) => {
                 for constant in constants {
                     self.constants.insert(constant.name.clone(), constant.value);

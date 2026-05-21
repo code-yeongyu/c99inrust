@@ -6,7 +6,8 @@ use super::{
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{
-    Expr, Global, LocalCharArrayInitializer, LocalStructInitializer, ScalarType, Statement,
+    Expr, Global, LocalCharArrayInitializer, LocalStructInitializer, LocalStructInitializerValue,
+    ScalarType, Statement,
 };
 use std::collections::HashMap;
 
@@ -188,8 +189,12 @@ impl LoweringContext {
         name: &str,
         struct_name: &str,
         length: usize,
+        initializer: Option<&[LocalStructInitializerValue]>,
     ) -> CompileResult<()> {
-        self.declare_struct_array(name, struct_name, length)?;
+        let slot = self.declare_struct_array(name, struct_name, length)?;
+        if let Some(values) = initializer {
+            self.lower_local_struct_array_initializer(name, struct_name, slot, length, values)?;
+        }
         Ok(())
     }
 
