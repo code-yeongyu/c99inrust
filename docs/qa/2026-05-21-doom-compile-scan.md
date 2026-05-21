@@ -32,3 +32,26 @@ compile -S -D NORMALUNIX -D LINUX -I /tmp/c99inrust-doom-src/linuxdoom-1.10
 This proves the current compiler commit still reaches assembly generation for
 the full official Doom C source set. It is compile evidence only; link/run/input
 and movement evidence remain the stronger smoke gates recorded separately.
+
+## CI Recheck After Local Struct Array Support
+
+Date: 2026-05-21 10:36 KST
+Commit: `f587a7c fix(c99): support local struct arrays`
+GitHub Actions run: `26200199678`
+
+The full CI workflow rebuilt the compiler, cloned the official public Doom
+source, and reran the compile scan after adding local struct array oracle
+coverage and compiler support.
+
+Downloaded artifact: `doom-compile-link-proof-f587a7c0a41d4e61a8ba9b3ff8a6127464f26898`
+
+Result:
+
+```text
+official-doom-root=/home/runner/work/_temp/DOOM
+linuxdoom=/home/runner/work/_temp/DOOM/linuxdoom-1.10
+compiler=target/debug/c99inrust
+ok=62
+fail=0
+conclusion=success
+```

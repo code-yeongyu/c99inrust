@@ -129,3 +129,40 @@ compile_ok=62 compile_fail=0
 link_status=0
 conclusion=success
 ```
+
+## CI Recheck After Local Struct Array Support
+
+Date: 2026-05-21 10:36 KST
+Commit: `f587a7c fix(c99): support local struct arrays`
+GitHub Actions run: `26200199678`
+
+The full CI workflow completed successfully after adding Clang-oracle coverage
+and compiler support for local arrays of struct objects decaying to typed
+struct pointers. The `doom compile/link scan` job rebuilt the compiler, cloned
+the official public Doom source, compiled all 62 official translation units,
+linked the Linux/X11 executable, and uploaded the compile/link proof artifact.
+
+Downloaded artifact: `doom-compile-link-proof-f587a7c0a41d4e61a8ba9b3ff8a6127464f26898`
+
+Compile scan result:
+
+```text
+official-doom-root=/home/runner/work/_temp/DOOM
+linuxdoom=/home/runner/work/_temp/DOOM/linuxdoom-1.10
+compiler=target/debug/c99inrust
+ok=62
+fail=0
+```
+
+Link scan result:
+
+```text
+official-doom-root=/home/runner/work/_temp/DOOM
+linuxdoom=/home/runner/work/_temp/DOOM/linuxdoom-1.10
+compiler=target/debug/c99inrust
+compile_ok=62 compile_fail=0
+link_status=0
+/out/linuxdoom-c99inrust: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=419dfd402923c6c45dbd7a06a5f66e4ff505bcea, for GNU/Linux 3.2.0, with debug_info, not stripped
+binary=/home/runner/work/_temp/doom-link-scan/linuxdoom-c99inrust
+conclusion=success
+```

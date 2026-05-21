@@ -79,12 +79,10 @@ Current Doom-facing compiler evidence: `preprocess + lex + parse-check` runs
 across all 124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and
 `LINUX` defined, `compile -S` emits x86_64 Linux assembly for all 62 official
 Doom C translation units, and those assembly files link into a Linux/X11 ELF
-with system `gcc`. The latest local no-IWAD compile/link recheck on commit
-`d9836c4` produced `compile_ok=62 compile_fail=0`, `link_status=0`, and an
-x86_64 Linux/X11 ELF with BuildID
-`fb94a33afbca55422922016083b19176afb27bbf`. The latest CI no-IWAD
-compile/link gate on commit `5a2f0bb` in GitHub Actions run `26197824812`
-also produced `compile_ok=62 compile_fail=0` and `link_status=0`. The latest
+with system `gcc`. The latest CI no-IWAD compile/link gate on commit
+`f587a7c` in GitHub Actions run `26200199678` produced
+`compile_ok=62 compile_fail=0`, `link_status=0`, and an x86_64 Linux/X11 ELF
+with BuildID `419dfd402923c6c45dbd7a06a5f66e4ff505bcea`. The latest
 automated Xvfb movement smoke on commit `2eb3f12` produced
 `compile_ok=62 compile_fail=0`, `link_status=0`, `display_status=0`,
 `window_status=0`, `input_status=0`, `movement_status=0`, and `run_status=124`
