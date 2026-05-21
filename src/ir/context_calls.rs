@@ -1,9 +1,9 @@
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, builtin_calls, call_args,
-    lowered_expr_scalar_type,
+    complex_truth_expr, is_complex_scalar, lowered_expr_scalar_type,
 };
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, ScalarType};
+use crate::parser::{BinaryOp, Expr, ScalarType};
 
 impl LoweringContext {
     pub(in crate::ir) fn lower_call_expr(
@@ -98,11 +98,7 @@ impl LoweringContext {
         expr: &Expr,
     ) -> CompileResult<LoweredExpr> {
         if target == ScalarType::Bool {
-            return Ok(LoweredExpr::Binary {
-                op: crate::parser::BinaryOp::NotEqual,
-                left: Box::new(self.lower_expr(expr)?),
-                right: Box::new(LoweredExpr::Integer(0)),
-            });
+            return self.lower_bool_cast_expr(expr);
         }
         let expr = if target == ScalarType::Pointer {
             self.lower_pointer_cast_expr(expr)?
@@ -125,5 +121,26 @@ impl LoweringContext {
                 Err(error)
             }
         }
+    }
+
+    pub(in crate::ir) fn lower_bool_cast_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
+        Ok(LoweredExpr::Binary {
+            op: BinaryOp::NotEqual,
+            left: Box::new(self.lower_condition_expr(expr)?),
+            right: Box::new(LoweredExpr::Integer(0)),
+        })
+    }
+
+    pub(in crate::ir) fn lower_condition_expr(&self, expr: &Expr) -> CompileResult<LoweredExpr> {
+        let value = self.lower_expr(expr)?;
+        Ok(Self::complex_truth_for_lowered(&value).unwrap_or(value))
+    }
+
+    pub(in crate::ir) fn complex_truth_for_lowered(value: &LoweredExpr) -> Option<LoweredExpr> {
+        let scalar_type = lowered_expr_scalar_type(value)?;
+        if !is_complex_scalar(scalar_type) {
+            return None;
+        }
+        complex_truth_expr(value, scalar_type)
     }
 }

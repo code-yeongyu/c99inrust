@@ -86,3 +86,39 @@ fn complex_compound_literal_multiplication_preserves_imaginary_lane_matches_host
         source,
     );
 }
+
+#[test]
+fn complex_unary_minus_negates_both_lanes_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex a = 2.0; double *ap = (double *)&a; ap[1] = -5.0; double _Complex z = -a; double *zp = (double *)&z; puts(\"complex-unary-minus\"); return zp[0] == -2.0 && zp[1] == 5.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_unary_minus_negates_both_lanes", source);
+}
+
+#[test]
+fn complex_bool_conversion_uses_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 0.0; double *zp = (double *)&z; zp[1] = 4.0; _Bool truth = z; puts(\"complex-bool-imag\"); return truth ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_bool_conversion_uses_imaginary_lane", source);
+}
+
+#[test]
+fn complex_logical_not_uses_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 0.0; double *zp = (double *)&z; zp[1] = 3.0; puts(\"complex-not-imag\"); return !z ? 1 : 0; }\n";
+
+    // when/then
+    assert_case("complex_logical_not_uses_imaginary_lane", source);
+}
+
+#[test]
+fn complex_if_condition_uses_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 0.0; double *zp = (double *)&z; zp[1] = -2.0; puts(\"complex-if-imag\"); if (z) return 0; return 1; }\n";
+
+    // when/then
+    assert_case("complex_if_condition_uses_imaginary_lane", source);
+}

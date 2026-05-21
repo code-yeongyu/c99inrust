@@ -12,7 +12,7 @@ impl LoweringContext {
     ) -> CompileResult<()> {
         let else_label = self.fresh_label();
         let end_label = self.fresh_label();
-        let condition = self.lower_expr(condition)?;
+        let condition = self.lower_condition_expr(condition)?;
         self.instructions.push(Instruction::JumpIfZero {
             condition,
             label: else_label,
@@ -41,7 +41,7 @@ impl LoweringContext {
         let end_label = self.fresh_label();
         self.instructions
             .push(Instruction::Label { label: start_label });
-        let condition = self.lower_expr(condition)?;
+        let condition = self.lower_condition_expr(condition)?;
         self.instructions.push(Instruction::JumpIfZero {
             condition,
             label: end_label,
@@ -78,7 +78,7 @@ impl LoweringContext {
         self.instructions.push(Instruction::Label {
             label: continue_label,
         });
-        let condition = self.lower_expr(condition)?;
+        let condition = self.lower_condition_expr(condition)?;
         self.instructions.push(Instruction::JumpIfZero {
             condition,
             label: end_label,
@@ -107,7 +107,7 @@ impl LoweringContext {
         self.instructions
             .push(Instruction::Label { label: start_label });
         if let Some(expr) = condition {
-            let condition = self.lower_expr(expr)?;
+            let condition = self.lower_condition_expr(expr)?;
             self.instructions.push(Instruction::JumpIfZero {
                 condition,
                 label: end_label,

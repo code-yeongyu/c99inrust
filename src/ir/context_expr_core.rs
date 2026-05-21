@@ -34,10 +34,7 @@ impl LoweringContext {
             Expr::PostIncrement { target, decrement } => {
                 self.lower_post_increment_expr(target, *decrement)
             }
-            Expr::Unary { op, expr } => Ok(LoweredExpr::Unary {
-                op: *op,
-                expr: Box::new(self.lower_expr(expr)?),
-            }),
+            Expr::Unary { op, expr } => self.lower_unary_expr(*op, expr),
             Expr::Cast { target, expr, .. } => self.lower_cast_expr(*target, expr),
             Expr::Conditional {
                 condition,

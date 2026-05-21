@@ -110,4 +110,22 @@ impl LoweringContext {
             right: Box::new(LoweredExpr::Integer(divisor)),
         })
     }
+
+    pub(in crate::ir) fn lower_unary_expr(
+        &self,
+        op: UnaryOp,
+        expr: &Expr,
+    ) -> CompileResult<LoweredExpr> {
+        if op == UnaryOp::LogicalNot {
+            return Ok(LoweredExpr::Binary {
+                op: BinaryOp::Equal,
+                left: Box::new(self.lower_condition_expr(expr)?),
+                right: Box::new(LoweredExpr::Integer(0)),
+            });
+        }
+        Ok(LoweredExpr::Unary {
+            op,
+            expr: Box::new(self.lower_expr(expr)?),
+        })
+    }
 }

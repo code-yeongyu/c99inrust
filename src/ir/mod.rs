@@ -66,7 +66,7 @@ pub(in crate::ir) use bindings::{
 };
 pub(in crate::ir) use complex_scalar_parts::{
     complex_binary_operands, complex_indirect_target, complex_lane_byte_size, complex_lane_expr,
-    complex_object_pointer, is_complex_scalar,
+    complex_object_pointer, complex_truth_expr, complex_unary_operand, is_complex_scalar,
 };
 pub(in crate::ir) use const_eval::{cast_const_value, eval_binary};
 pub(in crate::ir) use constant_inlining::{constant_return_functions, inline_constant_calls};

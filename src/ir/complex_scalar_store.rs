@@ -1,10 +1,10 @@
 use super::{
     Instruction, LoweredExpr, LoweredLValue, LoweringContext, complex_binary_operands,
     complex_indirect_target, complex_lane_byte_size, complex_lane_expr, complex_object_pointer,
-    scalar_size,
+    complex_unary_operand, scalar_size,
 };
 use crate::diagnostics::CompileResult;
-use crate::parser::ScalarType;
+use crate::parser::{ScalarType, UnaryOp};
 
 impl LoweringContext {
     pub(in crate::ir) fn push_complex_object_store(
@@ -33,6 +33,9 @@ impl LoweringContext {
         }
         if let Some(source) = complex_object_pointer(&value, scalar_type) {
             return self.push_complex_object_copy(pointer, &source, scalar_type);
+        }
+        if let Some((op, source)) = complex_unary_operand(&value, scalar_type) {
+            return self.push_complex_unary_store(pointer, scalar_type, op, &source);
         }
         if let Some((op, left, right)) = complex_binary_operands(&value, scalar_type) {
             return self.push_complex_binary_store(pointer, scalar_type, op, &left, &right);
@@ -67,6 +70,36 @@ impl LoweringContext {
                 index_value,
                 element_byte_size,
                 complex_lane_expr(source_pointer, index_value, element_byte_size),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn push_complex_unary_store(
+        &mut self,
+        target_pointer: &LoweredExpr,
+        scalar_type: ScalarType,
+        op: UnaryOp,
+        source_pointer: &LoweredExpr,
+    ) -> CompileResult<()> {
+        if op == UnaryOp::Plus {
+            return self.push_complex_object_copy(target_pointer, source_pointer, scalar_type);
+        }
+        let element_byte_size = complex_lane_byte_size(scalar_type);
+        let tail_slots = scalar_size(scalar_type) / element_byte_size;
+        for (index_value, _) in (0_i64..).zip(0..tail_slots) {
+            self.push_complex_element_store(
+                target_pointer,
+                index_value,
+                element_byte_size,
+                LoweredExpr::Unary {
+                    op,
+                    expr: Box::new(complex_lane_expr(
+                        source_pointer,
+                        index_value,
+                        element_byte_size,
+                    )),
+                },
             )?;
         }
         Ok(())
