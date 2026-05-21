@@ -105,6 +105,33 @@ fn scalar_short_compound_literal_address_conversion_matches_host_stdout_and_exit
 }
 
 #[test]
+fn scalar_char_compound_literal_sizeof_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { puts(\"scalar-compound-char-sizeof\"); return sizeof((char){ 1 }); }\n";
+
+    // when/then
+    assert_case("scalar_char_compound_literal_sizeof", source);
+}
+
+#[test]
+fn scalar_unsigned_char_compound_literal_sizeof_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { puts(\"scalar-compound-uchar-sizeof\"); return sizeof((unsigned char){ 1 }); }\n";
+
+    // when/then
+    assert_case("scalar_unsigned_char_compound_literal_sizeof", source);
+}
+
+#[test]
+fn scalar_short_compound_literal_sizeof_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { puts(\"scalar-compound-short-sizeof\"); return sizeof((short){ 1 }); }\n";
+
+    // when/then
+    assert_case("scalar_short_compound_literal_sizeof", source);
+}
+
+#[test]
 fn scalar_complex_compound_literal_address_preserves_lanes_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); int main(void) { double _Complex z = 2.0; double *zp = (double *)&z; zp[1] = 3.0; double _Complex *p = &(double _Complex){ z }; double *raw = (double *)p; puts(\"scalar-compound-complex-address\"); return raw[0] == 2.0 && raw[1] == 3.0 ? 0 : 1; }\n";

@@ -4,7 +4,7 @@ use crate::parser::{Expr, ScalarType};
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, local_char_matrix_byte_size,
     local_int_array_byte_size, local_int_matrix_byte_size, local_pointer_array_byte_size,
-    local_short_array_byte_size, lowered_expr_scalar_type, scalar_size,
+    local_short_array_byte_size, lowered_expr_scalar_type, pointer_arithmetic, scalar_size,
 };
 
 pub(in crate::ir) fn lower(context: &LoweringContext, expr: &Expr) -> CompileResult<LoweredExpr> {
@@ -22,7 +22,14 @@ fn expression_size(context: &LoweringContext, expr: &Expr) -> CompileResult<Opti
         Expr::StructCompoundLiteral { .. } | Expr::ArrayCompoundLiteral { .. } => {
             context.compound_literal_size(expr).map(Some)
         }
-        Expr::ScalarCompoundLiteral { scalar_type, .. } => Ok(Some(scalar_size(*scalar_type))),
+        Expr::ScalarCompoundLiteral {
+            scalar_type,
+            referent,
+            ..
+        } => Ok(Some(scalar_compound_size(
+            *scalar_type,
+            referent.as_deref(),
+        ))),
         Expr::Identifier(name) => identifier_size(context, name),
         Expr::Dereference { pointer } => pointer_element_size(context, pointer).map(Some),
         Expr::Subscript { array, .. } => subscript_size(context, array),
@@ -96,6 +103,12 @@ fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
 fn pointer_element_size(context: &LoweringContext, pointer: &Expr) -> CompileResult<usize> {
     let referent = context.pointer_referent_for_expr(pointer)?;
     context.pointer_referent_stride(&referent)
+}
+
+fn scalar_compound_size(scalar_type: ScalarType, referent: Option<&str>) -> usize {
+    referent
+        .and_then(pointer_arithmetic::byte_size)
+        .unwrap_or_else(|| scalar_size(scalar_type))
 }
 
 fn integer(size: usize) -> CompileResult<LoweredExpr> {
