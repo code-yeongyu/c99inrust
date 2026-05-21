@@ -75,3 +75,39 @@ fn flexible_array_member_complex_plus_real_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case("flexible_array_member_complex_plus_real", source);
 }
+
+#[test]
+fn struct_compound_literal_assignment_zero_fills_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; int main(void) { pair_t p = { 9, 8 }; p = (pair_t){ .y = 4 }; puts(\"compound-assign-zero\"); return p.x == 0 && p.y == 4 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("struct_compound_literal_assignment_zero_fills", source);
+}
+
+#[test]
+fn nested_struct_member_compound_literal_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; typedef struct { int tag; pair_t pair; } box_t; int main(void) { box_t box = { 11, { 9, 8 } }; box.pair = (pair_t){ .y = 5 }; puts(\"compound-member-assign\"); return box.tag == 11 && box.pair.x == 0 && box.pair.y == 5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("nested_struct_member_compound_literal_assignment", source);
+}
+
+#[test]
+fn struct_compound_literal_assignment_array_field_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[3]; } bucket_t; int main(void) { bucket_t bucket = { { 1, 2, 3 } }; bucket = (bucket_t){ .values = { [1] = 7 } }; puts(\"compound-assign-array\"); return bucket.values[0] == 0 && bucket.values[1] == 7 && bucket.values[2] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("struct_compound_literal_assignment_array_field", source);
+}
+
+#[test]
+fn struct_compound_literal_assignment_complex_field_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { double _Complex z; int tag; } box_t; int main(void) { box_t box = { 0.0, 99 }; double _Complex z = 3.0; double *zp = (double *)&z; zp[1] = 4.0; box = (box_t){ z, 6 }; double *raw = (double *)&box.z; puts(\"compound-assign-complex\"); return raw[0] == 3.0 && raw[1] == 4.0 && box.tag == 6 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("struct_compound_literal_assignment_complex_field", source);
+}

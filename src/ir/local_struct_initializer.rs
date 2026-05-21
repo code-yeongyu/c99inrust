@@ -96,7 +96,7 @@ impl LoweringContext {
         self.push_struct_copy(target, &source)
     }
 
-    fn copy_struct_compound_literal_initializer(
+    pub(in crate::ir) fn copy_struct_compound_literal_initializer(
         &mut self,
         target: &StructAddress,
         source_struct_name: &str,
@@ -111,8 +111,11 @@ impl LoweringContext {
                 "compound literal struct initializer requires a local target",
             ));
         };
+        let offset = offset
+            .checked_add(target.offset)
+            .ok_or_else(|| CompileError::new("compound literal struct initializer overflow"))?;
         self.instructions.push(Instruction::InitLocalBytes {
-            offset: *offset,
+            offset,
             values: vec![0; byte_size],
         });
         let mut value_index = 0usize;

@@ -12,6 +12,17 @@ impl LoweringContext {
         value: &Expr,
     ) -> CompileResult<()> {
         if let Some(struct_target) = self.resolve_struct_lvalue_address(target)? {
+            if let Expr::StructCompoundLiteral {
+                struct_name,
+                values,
+            } = value
+            {
+                return self.copy_struct_compound_literal_initializer(
+                    &struct_target,
+                    struct_name,
+                    values,
+                );
+            }
             let source = self.resolve_struct_address(value)?;
             if source.struct_name != struct_target.struct_name {
                 return Err(CompileError::new("incompatible struct assignment"));
