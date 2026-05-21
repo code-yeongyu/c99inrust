@@ -299,3 +299,51 @@ fn unsigned_char_array_compound_literal_pointer_promotion_matches_host_stdout_an
         source,
     });
 }
+
+#[test]
+fn int_array_compound_literal_designators_zero_fill_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int *p = (int[5]){ [2] = 9, [4] = 7 }; puts(\"compound-int-designator\"); return p[0] == 0 && p[2] == 9 && p[4] == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "int_array_compound_literal_designators_zero_fill",
+        source,
+    });
+}
+
+#[test]
+fn char_array_compound_literal_designator_overrides_match_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { char *p = (char[4]){ [1] = 'a', [1] = 'z', [3] = 0 }; puts(\"compound-char-designator\"); return p[0] == 0 && p[1] == 'z' && p[3] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "char_array_compound_literal_designator_overrides",
+        source,
+    });
+}
+
+#[test]
+fn local_struct_initialized_from_compound_literal_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; int main(void) { pair_t p = (pair_t){ .y = 12, .x = 5 }; puts(\"compound-struct-copy-init\"); return p.x + p.y; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "local_struct_initialized_from_compound_literal",
+        source,
+    });
+}
+
+#[test]
+fn flexible_array_member_struct_elements_match_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); void *malloc(int); typedef struct { int x; int y; } item_t; typedef struct { int length; item_t items[]; } bag_t; int main(void) { bag_t *bag = (bag_t*)malloc(sizeof(bag_t) + 2 * sizeof(item_t)); bag->length = 2; bag->items[0].x = 3; bag->items[0].y = 5; bag->items[1].x = 7; bag->items[1].y = 11; puts(\"flex-struct-items\"); return bag->items[0].y + bag->items[1].x; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "flexible_array_member_struct_elements",
+        source,
+    });
+}

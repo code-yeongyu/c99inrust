@@ -110,7 +110,7 @@ impl Parser<'_> {
         let close_brace = matching_top_level_brace(self.tokens, open_brace)
             .ok_or_else(|| CompileError::new("unterminated compound literal"))?;
         let values =
-            self.parse_compound_literal_exprs(&self.tokens[open_brace + 1..close_brace])?;
+            self.parse_compound_array_literal_exprs(&self.tokens[open_brace + 1..close_brace])?;
         self.index = close_brace + 1;
         let length = array_type.length.unwrap_or(values.len());
         Ok(Expr::ArrayCompoundLiteral {
@@ -122,14 +122,57 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_compound_literal_exprs(&self, tokens: &[Token]) -> CompileResult<Vec<Expr>> {
+    fn parse_compound_array_literal_exprs(&self, tokens: &[Token]) -> CompileResult<Vec<Expr>> {
         let mut values = Vec::new();
+        let mut next_index = 0usize;
         for (start, end) in top_level_comma_ranges(tokens) {
-            if start != end {
-                values.push(self.parse_compound_literal_expr(&tokens[start..end])?);
+            if start == end {
+                continue;
             }
+            let item = &tokens[start..end];
+            let (index, value_tokens) =
+                if let Some((index, value_tokens)) = self.compound_array_designator(item)? {
+                    next_index = index + 1;
+                    (index, value_tokens)
+                } else {
+                    let index = next_index;
+                    next_index += 1;
+                    (index, item)
+                };
+            if values.len() <= index {
+                values.resize(index + 1, Expr::Integer(0));
+            }
+            values[index] = self.parse_compound_literal_expr(value_tokens)?;
         }
         Ok(values)
+    }
+
+    fn compound_array_designator<'a>(
+        &self,
+        tokens: &'a [Token],
+    ) -> CompileResult<Option<(usize, &'a [Token])>> {
+        if !tokens
+            .first()
+            .is_some_and(|token| token_is_punctuator(token, "["))
+        {
+            return Ok(None);
+        }
+        let close_bracket = matching_top_level_bracket(tokens, 0)
+            .ok_or_else(|| CompileError::new("unterminated compound literal designator"))?;
+        if !tokens
+            .get(close_bracket + 1)
+            .is_some_and(|token| token_is_punctuator(token, "="))
+        {
+            return Err(CompileError::new(
+                "expected compound literal designator assignment",
+            ));
+        }
+        let expr = self.parse_compound_literal_expr(&tokens[1..close_bracket])?;
+        let index = eval_integer_initializer_expr_with_constants(&expr, self.known_constants)?
+            .to_i128_integer()?;
+        let index = usize::try_from(index)
+            .map_err(|_| CompileError::new("compound literal designator is negative"))?;
+        Ok(Some((index, &tokens[close_bracket + 2..])))
     }
 
     fn parse_compound_literal_expr(&self, tokens: &[Token]) -> CompileResult<Expr> {

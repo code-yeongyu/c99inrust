@@ -82,11 +82,48 @@ impl LoweringContext {
         target: &StructAddress,
         expr: &Expr,
     ) -> CompileResult<()> {
+        if let Expr::StructCompoundLiteral {
+            struct_name,
+            values,
+        } = expr
+        {
+            return self.copy_struct_compound_literal_initializer(target, struct_name, values);
+        }
         let source = self.resolve_struct_address(expr)?;
         if source.struct_name != target.struct_name {
             return Err(CompileError::new("incompatible local struct initializer"));
         }
         self.push_struct_copy(target, &source)
+    }
+
+    fn copy_struct_compound_literal_initializer(
+        &mut self,
+        target: &StructAddress,
+        source_struct_name: &str,
+        values: &[LocalStructInitializerValue],
+    ) -> CompileResult<()> {
+        if source_struct_name != target.struct_name {
+            return Err(CompileError::new("incompatible local struct initializer"));
+        }
+        let byte_size = self.struct_layout(&target.struct_name)?.size;
+        let LoweredExpr::LocalAddress { offset, .. } = &target.pointer else {
+            return Err(CompileError::new(
+                "compound literal struct initializer requires a local target",
+            ));
+        };
+        self.instructions.push(Instruction::InitLocalBytes {
+            offset: *offset,
+            values: vec![0; byte_size],
+        });
+        let mut value_index = 0usize;
+        self.push_local_struct_initializer_values(target, values, &mut value_index)?;
+        if value_index == values.len() {
+            Ok(())
+        } else {
+            Err(CompileError::new(
+                "too many struct compound literal initializer values",
+            ))
+        }
     }
 
     pub(in crate::ir) fn push_local_struct_initializer_values(
