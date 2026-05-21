@@ -17,6 +17,11 @@ pub struct LoweredGlobal {
 pub enum LoweredGlobalInitializer {
     Int(i32),
     LongLong(i64),
+    Double(String),
+    RealThenZero {
+        real: String,
+        byte_len: usize,
+    },
     IntArray(Vec<i32>),
     ShortArray(Vec<i32>),
     PointerNull,

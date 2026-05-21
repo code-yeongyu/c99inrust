@@ -1,6 +1,7 @@
 use super::data_literals::{
     emit_string_literal_data_returning_to, global_string_label, label_name,
 };
+use super::global_real_scalars::{emit_double_global, emit_real_then_zero_global};
 use super::struct_globals;
 use super::target::Target;
 use crate::diagnostics::{CompileError, CompileResult};
@@ -30,6 +31,12 @@ pub(in crate::codegen) fn emit_globals(
                 assembly.push_str(".p2align 3\n");
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.quad {value}\n")?;
+            }
+            LoweredGlobalInitializer::Double(value) => {
+                emit_double_global(&label, value, assembly)?;
+            }
+            LoweredGlobalInitializer::RealThenZero { real, byte_len } => {
+                emit_real_then_zero_global(&label, real, *byte_len, assembly)?;
             }
             LoweredGlobalInitializer::IntArray(values) => {
                 if values.iter().all(|value| *value == 0) {

@@ -1,7 +1,14 @@
+use super::multifile_support::{
+    OracleMultiFileCase, OracleSourceFile, assert_multifile_compile_run_matches_host,
+};
 use super::support::{OracleCase, assert_compile_run_matches_host};
 
 fn assert_case(name: &'static str, source: &'static str) {
     assert_compile_run_matches_host(OracleCase { name, source });
+}
+
+fn assert_multifile_case(name: &'static str, files: &'static [OracleSourceFile]) {
+    assert_multifile_compile_run_matches_host(OracleMultiFileCase { name, files });
 }
 
 #[test]
@@ -122,4 +129,42 @@ fn complex_const_qualified_sizeof_type_matches_host_stdout_and_exit_code() {
 
     // when/then
     assert_case(name, source);
+}
+
+#[test]
+fn global_complex_double_real_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "global_complex_double_real_initializer";
+    let source = "int puts(char*); double _Complex g = 5.0; int main(void) { puts(\"complex-global-real\"); return (int)g; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn global_complex_double_layout_zeroes_imaginary_part_stdout_and_exit_code() {
+    // given
+    let name = "global_complex_double_layout_zeroes_imaginary_part";
+    let source = "int puts(char*); double _Complex g = 5.0; int main(void) { double *parts = (double *)&g; puts(\"complex-global-layout\"); return (int)parts[0] + (int)parts[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn extern_complex_double_global_matches_host_stdout_and_exit_code() {
+    // given
+    static FILES: &[OracleSourceFile] = &[
+        OracleSourceFile {
+            path: "defs.c",
+            source: "double _Complex shared = 7.0;\n",
+        },
+        OracleSourceFile {
+            path: "main.c",
+            source: "int puts(char*); extern double _Complex shared; int main(void) { puts(\"complex-extern\"); return (int)shared; }\n",
+        },
+    ];
+
+    // when/then
+    assert_multifile_case("extern_complex_double_global", FILES);
 }

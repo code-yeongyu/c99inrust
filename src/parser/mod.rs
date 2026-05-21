@@ -15,6 +15,7 @@ mod global_byte_declarations;
 mod global_byte_initializers;
 mod global_declarations;
 mod global_double_declarations;
+mod global_floatlike_declarations;
 mod global_int_arrays;
 mod global_int_initializers;
 mod global_pointer_arrays;

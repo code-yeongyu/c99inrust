@@ -29,6 +29,7 @@ mod call_usage;
 mod data_literals;
 mod emit_program;
 mod frames;
+mod global_real_scalars;
 mod globals;
 mod pointer_cast;
 mod sized_fields;

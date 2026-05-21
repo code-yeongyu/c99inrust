@@ -28,6 +28,9 @@ fn global_initializer_sizeof_bytes(
             scalar_size_for_layout(ScalarType::Int)
         }
         GlobalInitializer::LongLong(_) => scalar_size_for_layout(ScalarType::LongLong),
+        GlobalInitializer::Double(_) => scalar_size_for_layout(ScalarType::Double),
+        GlobalInitializer::ComplexReal { scalar_type, .. }
+        | GlobalInitializer::ScalarZero(scalar_type) => scalar_size_for_layout(*scalar_type),
         GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
         | GlobalInitializer::PointerSubscriptAddress { .. } => {

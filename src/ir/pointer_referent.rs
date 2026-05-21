@@ -74,14 +74,12 @@ fn array_field_referent(element_type: ScalarType, element_unsigned: bool) -> Str
         match element_type {
             ScalarType::Pointer => POINTER_REFERENT.to_owned(),
             ScalarType::LongLong => "long long".to_owned(),
+            ScalarType::Double => "double".to_owned(),
+            ScalarType::LongDouble => "long double".to_owned(),
             ScalarType::ComplexFloat => "float _Complex".to_owned(),
             ScalarType::ComplexDouble => "double _Complex".to_owned(),
             ScalarType::ComplexLongDouble => "long double _Complex".to_owned(),
-            ScalarType::Int
-            | ScalarType::Bool
-            | ScalarType::Double
-            | ScalarType::LongDouble
-            | ScalarType::VaList => "int".to_owned(),
+            ScalarType::Int | ScalarType::Bool | ScalarType::VaList => "int".to_owned(),
         }
     }
 }

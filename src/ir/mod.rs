@@ -43,6 +43,7 @@ mod lowered_expr_helpers;
 mod pointer_arithmetic;
 mod pointer_referent;
 mod program_lowering;
+mod scalar_global_initializers;
 mod sizeof_expr;
 mod static_local;
 mod struct_initializer;
@@ -81,3 +82,4 @@ pub(in crate::ir) use lowered_expr_helpers::{
     ensure_post_increment_scalar, lowered_expr_scalar_type, lowered_lvalue_scalar_type,
     lowered_lvalue_to_expr, pointer_field_address,
 };
+pub(in crate::ir) use scalar_global_initializers::lower_scalar_global_initializer;

@@ -59,6 +59,12 @@ pub enum GlobalInitializer {
     },
     Int(i64),
     LongLong(i64),
+    Double(String),
+    ComplexReal {
+        scalar_type: ScalarType,
+        real: String,
+    },
+    ScalarZero(ScalarType),
     IntArray(Vec<i32>),
     ShortArray {
         values: Vec<i32>,

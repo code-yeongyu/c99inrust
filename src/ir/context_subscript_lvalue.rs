@@ -210,13 +210,14 @@ impl LoweringContext {
     }
 
     pub(in crate::ir) fn pointer_subscript_element_type(&self, array: &Expr) -> ScalarType {
-        if self
-            .pointer_referent_for_expr(array)
-            .is_ok_and(|referent| pointer_arithmetic::is_pointer(&referent))
-        {
-            ScalarType::Pointer
-        } else {
-            ScalarType::Int
+        match self.pointer_referent_for_expr(array).ok().as_deref() {
+            Some(referent) if pointer_arithmetic::is_pointer(referent) => ScalarType::Pointer,
+            Some("double") => ScalarType::Double,
+            Some("long double") => ScalarType::LongDouble,
+            Some("float _Complex") => ScalarType::ComplexFloat,
+            Some("double _Complex") => ScalarType::ComplexDouble,
+            Some("long double _Complex") => ScalarType::ComplexLongDouble,
+            _ => ScalarType::Int,
         }
     }
 

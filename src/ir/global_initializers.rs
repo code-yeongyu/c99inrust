@@ -1,5 +1,6 @@
 use super::{
-    GlobalBinding, LoweredGlobalInitializer, pointer_arithmetic, scalar_size, struct_initializer,
+    GlobalBinding, LoweredGlobalInitializer, lower_scalar_global_initializer, pointer_arithmetic,
+    scalar_size, struct_initializer,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Global, GlobalInitializer, ScalarType, StructLayout};
@@ -17,17 +18,10 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     if let Some(lowered) = lower_unsigned_char_global_initializer(&global.initializer) {
         return Ok(lowered);
     }
+    if let Some(lowered) = lower_scalar_global_initializer(global, constants)? {
+        return Ok(lowered);
+    }
     match &global.initializer {
-        GlobalInitializer::Int(value) => Ok((
-            LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
-                CompileError::new(format!(
-                    "global int initializer does not fit i32: {}",
-                    global.name
-                ))
-            })?),
-            GlobalBinding::Int,
-        )),
-        GlobalInitializer::LongLong(value) => Ok(lower_long_long_global_initializer(*value)),
         GlobalInitializer::IntArray(values) => Ok((
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntArray,
@@ -45,9 +39,6 @@ pub(in crate::ir) fn lower_defined_global_initializer(
                 LoweredGlobalInitializer::ZeroBytes(byte_len),
                 GlobalBinding::DoubleArray,
             ))
-        }
-        GlobalInitializer::IntConstant(name) => {
-            lower_int_constant_global(name, &global.name, constants)
         }
         GlobalInitializer::PointerNull { referent } => Ok((
             LoweredGlobalInitializer::PointerNull,
@@ -97,7 +88,13 @@ pub(in crate::ir) fn lower_defined_global_initializer(
         | GlobalInitializer::UnsignedCharMatrix { .. } => Err(CompileError::new(
             "internal error: byte global reached fallback lowering",
         )),
-        GlobalInitializer::Extern(_)
+        GlobalInitializer::Int(_)
+        | GlobalInitializer::LongLong(_)
+        | GlobalInitializer::Double(_)
+        | GlobalInitializer::ComplexReal { .. }
+        | GlobalInitializer::ScalarZero(_)
+        | GlobalInitializer::IntConstant(_)
+        | GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray
         | GlobalInitializer::ExternShortArray { .. }
@@ -109,15 +106,6 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
-}
-
-const fn lower_long_long_global_initializer(
-    value: i64,
-) -> (LoweredGlobalInitializer, GlobalBinding) {
-    (
-        LoweredGlobalInitializer::LongLong(value),
-        GlobalBinding::LongLong,
-    )
 }
 
 fn lower_unsigned_char_global_initializer(
@@ -230,25 +218,5 @@ pub(in crate::ir) fn lower_global_pointer_subscript_address(
         GlobalBinding::Pointer {
             referent: referent.map(ToOwned::to_owned),
         },
-    ))
-}
-
-pub(in crate::ir) fn lower_int_constant_global(
-    name: &str,
-    global_name: &str,
-    constants: &HashMap<String, i64>,
-) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
-    let Some(value) = constants.get(name) else {
-        return Err(CompileError::new(format!(
-            "unknown global initializer constant: {name}"
-        )));
-    };
-    Ok((
-        LoweredGlobalInitializer::Int(i32::try_from(*value).map_err(|_| {
-            CompileError::new(format!(
-                "global int initializer does not fit i32: {global_name}"
-            ))
-        })?),
-        GlobalBinding::Int,
     ))
 }

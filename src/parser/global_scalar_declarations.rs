@@ -1,6 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::global_floatlike_declarations::global_floatlike_scalar_type;
 use super::global_int_initializers::parse_global_int_initializer;
 use super::global_specifiers::{
     global_specifiers_are_extern_int, global_specifiers_are_extern_long_long,
@@ -39,6 +40,8 @@ pub(super) fn parse_global_extern_scalar(
         }
     } else if let Some(struct_name) = global_struct_specifier_name(specifiers, known_structs) {
         GlobalInitializer::ExternStructObject { struct_name }
+    } else if let Some(scalar_type) = global_floatlike_scalar_type(specifiers, true) {
+        GlobalInitializer::Extern(scalar_type)
     } else if global_specifiers_are_extern_int(specifiers) {
         GlobalInitializer::Extern(ScalarType::Int)
     } else if global_specifiers_are_extern_long_long(specifiers) {

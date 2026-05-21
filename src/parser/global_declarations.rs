@@ -6,6 +6,7 @@ use super::external_declarations::{
 };
 use super::global_byte_declarations::parse_global_unsigned_char_array;
 use super::global_double_declarations::parse_global_double_array;
+use super::global_floatlike_declarations::parse_global_floatlike_scalar;
 use super::global_int_arrays::parse_global_int_array;
 use super::global_pointer_arrays::{
     parse_global_extern_pointer_array, parse_global_pointer_array, parse_global_pointer_name_array,
@@ -79,6 +80,9 @@ pub(super) fn parse_supported_global_declaration(
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer(tokens, constants)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_floatlike_scalar(tokens, constants, sizeof_symbols)? {
         return Ok(Some(global));
     }
     parse_global_int(tokens, known_structs, constants, sizeof_symbols)

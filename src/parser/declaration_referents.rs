@@ -29,6 +29,7 @@ pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String>
         return Some("short".to_owned());
     }
     complex_referent(tokens)
+        .or_else(|| double_referent(tokens))
         .or_else(|| long_referent(tokens))
         .or_else(|| void_referent(tokens))
         .or_else(|| typedef_or_named_referent(tokens))
@@ -92,6 +93,23 @@ fn long_referent(tokens: &[Token]) -> Option<String> {
         .iter()
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Long)))
         .then(|| "long long".to_owned())
+}
+
+fn double_referent(tokens: &[Token]) -> Option<String> {
+    if !tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Double)))
+    {
+        return None;
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Long)))
+    {
+        Some("long double".to_owned())
+    } else {
+        Some("double".to_owned())
+    }
 }
 
 fn void_referent(tokens: &[Token]) -> Option<String> {

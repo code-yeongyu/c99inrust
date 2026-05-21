@@ -239,6 +239,7 @@ fn global_binding_element_size(binding: &GlobalBinding) -> usize {
     match binding {
         GlobalBinding::Int | GlobalBinding::IntArray => scalar_size(ScalarType::Int),
         GlobalBinding::LongLong => scalar_size(ScalarType::LongLong),
+        GlobalBinding::Scalar(scalar_type) => scalar_size(*scalar_type),
         GlobalBinding::IntMatrix { columns } => columns * scalar_size(ScalarType::Int),
         GlobalBinding::ShortArray { columns, .. } => columns.map_or(2, |columns| columns * 2),
         GlobalBinding::DoubleArray => scalar_size(ScalarType::Double),
