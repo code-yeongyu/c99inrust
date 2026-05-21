@@ -104,6 +104,26 @@ fn pointer_array_iteration_over_structs_matches_host_stdout_and_exit_code() {
 }
 
 #[test]
+fn local_pointer_array_initializer_infers_length_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_pointer_array_initializer_infers_length";
+    let source = "int puts(char*); int main(void) { int values[3] = { 4, 6, 8 }; int *ptrs[] = { values, values + 1, values + 2 }; puts(\"ptr-init\"); return *ptrs[0] + *ptrs[1] + *ptrs[2]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_struct_pointer_array_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_struct_pointer_array_initializer";
+    let source = "int puts(char*); typedef struct { int x; int y; } node_t; int sum(node_t **items) { return items[0]->x + items[1]->y; } int main(void) { node_t a; node_t b; a.x = 5; b.y = 11; node_t *items[2] = { &a, &b }; puts(\"struct-ptr-init\"); return sum(items); }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
 fn global_partial_nested_initializer_zero_fills_match_host_stdout_and_exit_code() {
     // given
     let name = "global_partial_nested_initializer_zero_fills";
