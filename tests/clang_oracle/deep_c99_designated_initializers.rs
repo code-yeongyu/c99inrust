@@ -55,6 +55,26 @@ fn local_struct_designator_then_positional_matches_host_stdout_and_exit_code() {
 }
 
 #[test]
+fn local_nested_struct_field_designators_match_host_stdout_and_exit_code() {
+    // given
+    let name = "local_nested_struct_field_designators";
+    let source = "int puts(char*); typedef struct { int x; int y; } point_t; typedef struct { int tag; point_t point; int tail; } node_t; int main(void) { node_t node = { .point = { .y = 7, .x = 4 }, .tag = 3 }; puts(\"des-nested-struct\"); return node.tag == 3 && node.point.x == 4 && node.point.y == 7 && node.tail == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_struct_array_field_designators_match_host_stdout_and_exit_code() {
+    // given
+    let name = "local_struct_array_field_designators";
+    let source = "int puts(char*); typedef struct { int values[4]; int tail; } bag_t; int main(void) { bag_t bag = { .values = { [2] = 9, [0] = 4 }, .tail = 6 }; puts(\"des-array-field\"); return bag.values[0] == 4 && bag.values[1] == 0 && bag.values[2] == 9 && bag.values[3] == 0 && bag.tail == 6 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
 fn global_struct_field_designators_match_host_stdout_and_exit_code() {
     // given
     let name = "global_struct_field_designators";

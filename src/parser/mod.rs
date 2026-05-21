@@ -46,6 +46,8 @@ mod parser_local_declarations;
 mod parser_local_function_pointers;
 mod parser_local_int_matrices;
 mod parser_local_pointer_arrays;
+mod parser_local_struct_designators;
+mod parser_local_struct_initializers;
 mod parser_local_structs;
 mod parser_local_vlas;
 mod parser_sizeof_type;
