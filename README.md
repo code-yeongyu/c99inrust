@@ -28,7 +28,8 @@ one-command binary build time, runtime, and basic assembly-shape counters; see
 The full-spec track is enforced through a Clang-oracle test harness: supported
 C99 snippets must compile with `c99inrust`, compile with the host C compiler in
 `-std=c99` mode, and produce the same observable exit code before the supported
-surface can grow.
+surface can grow. The current oracle suite contains 486 stdout/exit-code
+differential tests.
 
 ## Install
 
@@ -80,9 +81,9 @@ across all 124 official `linuxdoom-1.10` C/header files with `NORMALUNIX` and
 `LINUX` defined, `compile -S` emits x86_64 Linux assembly for all 62 official
 Doom C translation units, and those assembly files link into a Linux/X11 ELF
 with system `gcc`. The latest CI no-IWAD compile/link gate on commit
-`f587a7c` in GitHub Actions run `26200199678` produced
+`aa552e1` in GitHub Actions run `26221421290` produced
 `compile_ok=62 compile_fail=0`, `link_status=0`, and an x86_64 Linux/X11 ELF
-with BuildID `419dfd402923c6c45dbd7a06a5f66e4ff505bcea`. The latest
+with BuildID `a4c76544195d76bfd3c3ece7aae487aab3b8fe45`. The latest
 automated Xvfb movement smoke on commit `2eb3f12` produced
 `compile_ok=62 compile_fail=0`, `link_status=0`, `display_status=0`,
 `window_status=0`, `input_status=0`, `movement_status=0`, and `run_status=124`

@@ -358,11 +358,11 @@ ok=62
 fail=0
 ```
 
-The latest CI artifact rechecked the same compile surface on commit `f587a7c`:
+The latest CI artifact rechecked the same compile surface on commit `aa552e1`:
 
 ```text
-github_actions_run=26200199678
-artifact=doom-compile-link-proof-f587a7c0a41d4e61a8ba9b3ff8a6127464f26898
+github_actions_run=26221421290
+artifact=doom-compile-link-proof-aa552e1fed313d52fbaaf3669c1d8ed3862b893f
 ok=62
 fail=0
 ```
@@ -401,12 +401,12 @@ Evidence is recorded in `docs/qa/2026-05-21-doom-link-scan.md`.
 Latest CI recheck:
 
 ```text
-commit=f587a7c
-github_actions_run=26200199678
+commit=aa552e1
+github_actions_run=26221421290
 job=doom compile/link scan
 compile_ok=62 compile_fail=0
 link_status=0
-elf_build_id=419dfd402923c6c45dbd7a06a5f66e4ff505bcea
+elf_build_id=a4c76544195d76bfd3c3ece7aae487aab3b8fe45
 conclusion=success
 ```
 
