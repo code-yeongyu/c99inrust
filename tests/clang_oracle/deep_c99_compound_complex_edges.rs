@@ -111,3 +111,39 @@ fn struct_compound_literal_assignment_complex_field_matches_host_stdout_and_exit
     // when/then
     assert_case("struct_compound_literal_assignment_complex_field", source);
 }
+
+#[test]
+fn global_struct_compound_literal_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; pair_t global = { 9, 8 }; int main(void) { global = (pair_t){ .y = 6 }; puts(\"compound-global-assign\"); return global.x == 0 && global.y == 6 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_struct_compound_literal_assignment", source);
+}
+
+#[test]
+fn pointer_struct_compound_literal_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; int main(void) { pair_t value = { 9, 8 }; pair_t *p = &value; p[0] = (pair_t){ .x = 7 }; puts(\"compound-pointer-assign\"); return value.x == 7 && value.y == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("pointer_struct_compound_literal_assignment", source);
+}
+
+#[test]
+fn pointer_member_struct_compound_literal_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; typedef struct { int tag; pair_t pair; } box_t; int main(void) { box_t box = { 3, { 9, 8 } }; box_t *p = &box; p->pair = (pair_t){ .x = 2 }; puts(\"compound-pointer-member\"); return box.tag == 3 && box.pair.x == 2 && box.pair.y == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("pointer_member_struct_compound_literal_assignment", source);
+}
+
+#[test]
+fn struct_array_field_compound_literal_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; typedef struct { pair_t items[2]; } box_t; int main(void) { box_t box = { { { 1, 2 }, { 3, 4 } } }; box.items[1] = (pair_t){ .y = 9 }; puts(\"compound-struct-array-field\"); return box.items[0].x == 1 && box.items[1].x == 0 && box.items[1].y == 9 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("struct_array_field_compound_literal_assignment", source);
+}

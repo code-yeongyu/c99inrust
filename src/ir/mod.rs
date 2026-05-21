@@ -53,6 +53,7 @@ mod program_lowering;
 mod scalar_global_initializers;
 mod sizeof_expr;
 mod static_local;
+mod struct_compound_assignment;
 mod struct_initializer;
 mod types;
 
