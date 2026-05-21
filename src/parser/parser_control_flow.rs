@@ -48,6 +48,10 @@ impl Parser<'_> {
         let initializer = if self.check_punctuator(";") {
             self.advance();
             None
+        } else if let Some(statement) = self.local_function_pointer_declaration()? {
+            Some(Box::new(statement))
+        } else if let Some(statement) = self.local_struct_declaration()? {
+            Some(Box::new(statement))
         } else if let Some(scalar_type) = self.declaration_type_at_current() {
             Some(Box::new(self.declaration_statement(scalar_type)?))
         } else {

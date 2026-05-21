@@ -24,6 +24,8 @@ mod deep_c99_extra_eval_numeric;
 mod deep_c99_extra_layout_types;
 #[path = "clang_oracle/deep_c99_extra_preprocessor.rs"]
 mod deep_c99_extra_preprocessor;
+#[path = "clang_oracle/deep_c99_for_init_declarations.rs"]
+mod deep_c99_for_init_declarations;
 #[path = "clang_oracle/deep_c99_layout_more.rs"]
 mod deep_c99_layout_more;
 #[path = "clang_oracle/deep_c99_local_struct_init.rs"]
