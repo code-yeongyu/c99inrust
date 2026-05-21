@@ -251,3 +251,51 @@ fn flexible_array_member_unsigned_char_promotion_matches_host_stdout_and_exit_co
         source,
     });
 }
+
+#[test]
+fn int_array_compound_literal_pointer_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int *p = (int[]){ 7, 8, 9 }; puts(\"compound-int-ptr\"); return p[0] + *(p + 2); }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "int_array_compound_literal_pointer_initializer",
+        source,
+    });
+}
+
+#[test]
+fn sized_array_compound_literal_pointer_zero_fill_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int *p = (int[4]){ 3, 4 }; puts(\"compound-sized-ptr\"); return p[0] + p[1] + p[3]; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "sized_array_compound_literal_pointer_zero_fill",
+        source,
+    });
+}
+
+#[test]
+fn char_array_compound_literal_pointer_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { char *p = (char[]){ 'x', 'y', 0 }; puts(\"compound-char-ptr\"); return p[1]; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "char_array_compound_literal_pointer_initializer",
+        source,
+    });
+}
+
+#[test]
+fn unsigned_char_array_compound_literal_pointer_promotion_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { unsigned char *p = (unsigned char[]){ 250, 6 }; puts(\"compound-uchar-ptr\"); return p[0] + p[1] == 256 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "unsigned_char_array_compound_literal_pointer_promotion",
+        source,
+    });
+}

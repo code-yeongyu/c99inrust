@@ -24,6 +24,11 @@ impl LoweringContext {
             return self.lower_static_declaration(scalar_type, name, referent, initializer);
         }
         let slot = self.declare_local(name, scalar_type, referent)?;
+        if scalar_type == ScalarType::Pointer
+            && let Some(initializer @ Expr::ArrayCompoundLiteral { .. }) = initializer
+        {
+            return self.lower_array_compound_pointer_initializer(slot, initializer);
+        }
         let value = if scalar_type == ScalarType::Bool {
             initializer.map_or_else(
                 || Ok(zero_expr_for(scalar_type)),

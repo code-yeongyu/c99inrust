@@ -4,6 +4,7 @@ const VARIADIC_GP_SAVE_BYTES: usize = 64;
 mod bindings;
 mod builtin_calls;
 mod call_args;
+mod compound_literal_storage;
 mod compound_literals;
 mod const_eval;
 mod constant_inlining;
