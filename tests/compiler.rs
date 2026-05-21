@@ -40,3 +40,5 @@ mod sized_globals_and_x86;
 mod struct_array_globals;
 #[path = "compiler/switch_continue_and_calls.rs"]
 mod switch_continue_and_calls;
+#[path = "compiler/x86_double_negation.rs"]
+mod x86_double_negation;

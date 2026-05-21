@@ -64,6 +64,7 @@ pub(in crate::codegen) fn emit_x86_64_negate_f64(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let label = labels.fresh();
-    write_assembly!(assembly, "\txorpd {label}(%rip), %xmm0\n")?;
+    write_assembly!(assembly, "\tmovsd {label}(%rip), %xmm1\n")?;
+    assembly.push_str("\txorpd %xmm1, %xmm0\n");
     emit_double_literal_data(&label, 0x8000_0000_0000_0000, target, assembly)
 }
