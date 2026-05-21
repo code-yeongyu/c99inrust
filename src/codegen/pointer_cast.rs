@@ -25,6 +25,7 @@ fn expr_is_pointer(expr: &LoweredExpr) -> bool {
             scalar_type: return_type,
             ..
         } => *return_type == ScalarType::Pointer,
+        LoweredExpr::VaArg { scalar_type, .. } => *scalar_type == ScalarType::Pointer,
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target, .. } => {
             lvalue_is_pointer(target)
         }

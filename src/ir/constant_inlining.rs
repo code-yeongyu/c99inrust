@@ -74,6 +74,9 @@ pub(in crate::ir) fn inline_constant_calls_in_expr(
         LoweredExpr::Unary { expr, .. } | LoweredExpr::Cast { expr, .. } => {
             inline_constant_calls_in_expr(expr, constants);
         }
+        LoweredExpr::VaArg { list, .. } => {
+            inline_constant_calls_in_expr(list, constants);
+        }
         LoweredExpr::GlobalByteSubscript { index, .. }
         | LoweredExpr::GlobalIntSubscript { index, .. }
         | LoweredExpr::GlobalPointerSubscript { index, .. } => {

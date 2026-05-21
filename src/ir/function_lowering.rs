@@ -1,6 +1,6 @@
 use super::{
     GlobalBinding, Instruction, LoweredFunction, LoweredGlobal, LoweringContext,
-    X86_64_VARIADIC_GP_SAVE_BYTES, scalar_size,
+    VARIADIC_GP_SAVE_BYTES, scalar_size,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Function, ReturnType, ScalarType, StructLayout};
@@ -61,7 +61,7 @@ pub(in crate::ir) fn lower_function_with_globals(
     let variadic_save_slot = if function.is_variadic {
         Some(context.declare_anonymous_slot(
             ScalarType::Pointer,
-            X86_64_VARIADIC_GP_SAVE_BYTES,
+            VARIADIC_GP_SAVE_BYTES,
             scalar_size(ScalarType::Pointer),
         )?)
     } else {

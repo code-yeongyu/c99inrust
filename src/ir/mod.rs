@@ -1,5 +1,5 @@
 const POINTER_REFERENT: &str = "*";
-const X86_64_VARIADIC_GP_SAVE_BYTES: usize = 48;
+const VARIADIC_GP_SAVE_BYTES: usize = 64;
 
 mod bindings;
 mod builtin_calls;

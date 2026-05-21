@@ -56,6 +56,8 @@ mod deep_c99_requested_next_wave;
 mod deep_c99_requested_stress;
 #[path = "clang_oracle/deep_c99_requested_ultra.rs"]
 mod deep_c99_requested_ultra;
+#[path = "clang_oracle/deep_c99_variadic_bodies.rs"]
+mod deep_c99_variadic_bodies;
 #[path = "clang_oracle/deep_c99_vla.rs"]
 mod deep_c99_vla;
 #[path = "clang_oracle/doom_platform_layouts.rs"]

@@ -114,6 +114,7 @@ fn eval_integer_initializer_expr_with_context(
         Expr::Call { callee, .. } => Err(CompileError::new(format!(
             "call to {callee} is not an integer initializer"
         ))),
+        Expr::VaArg { .. } => Err(CompileError::new("va_arg is not an integer initializer")),
         Expr::IndirectCall { .. } => Err(CompileError::new(
             "indirect call is not an integer initializer",
         )),

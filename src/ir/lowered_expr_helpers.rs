@@ -22,6 +22,7 @@ pub(in crate::ir) const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Optio
             return_type: scalar_type,
             ..
         }
+        | LoweredExpr::VaArg { scalar_type, .. }
         | LoweredExpr::Cast {
             target: scalar_type,
             ..

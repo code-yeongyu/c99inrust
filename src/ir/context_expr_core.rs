@@ -12,6 +12,12 @@ impl LoweringContext {
             Expr::LongInteger(value) => Ok(LoweredExpr::LongInteger(*value)),
             Expr::DoubleLiteral(value) => Ok(LoweredExpr::DoubleLiteral(value.clone())),
             Expr::StringLiteral(value) => Ok(LoweredExpr::StringLiteral(value.clone())),
+            Expr::VaArg {
+                list, scalar_type, ..
+            } => Ok(LoweredExpr::VaArg {
+                list: Box::new(self.lower_expr(list)?),
+                scalar_type: *scalar_type,
+            }),
             Expr::Member {
                 base,
                 field,

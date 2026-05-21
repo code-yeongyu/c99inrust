@@ -125,6 +125,10 @@ pub enum LoweredExpr {
     LongInteger(i64),
     DoubleLiteral(String),
     StringLiteral(String),
+    VaArg {
+        list: Box<Self>,
+        scalar_type: ScalarType,
+    },
     Global {
         name: String,
         scalar_type: ScalarType,

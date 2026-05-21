@@ -24,6 +24,7 @@ mod aarch64_memory_expr;
 mod aarch64_post_increment;
 mod aarch64_temporaries;
 mod aarch64_unary;
+mod aarch64_variadic;
 mod call_usage;
 mod data_literals;
 mod emit_program;

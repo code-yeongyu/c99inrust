@@ -3,6 +3,7 @@ use super::aarch64_expr::emit_aarch64_expr_with_width;
 use super::aarch64_temporaries::{
     emit_aarch64_load_temporary_to_register, emit_aarch64_store_temporary,
 };
+use super::aarch64_variadic::emit_aarch64_va_start;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::stack_helpers::call_stack_argument_bytes;
@@ -19,6 +20,12 @@ pub(in crate::codegen) fn emit_aarch64_call(
     assembly: &mut String,
 ) -> CompileResult<()> {
     const REGISTERS: [&str; 8] = ["0", "1", "2", "3", "4", "5", "6", "7"];
+    if callee == "va_start" {
+        return emit_aarch64_va_start(args, temporary_base, depth, labels, assembly);
+    }
+    if callee == "va_end" {
+        return Ok(());
+    }
     let register_count = args.len().min(REGISTERS.len());
     let registers = &REGISTERS[..register_count];
     let stack_bytes = call_stack_argument_bytes(args.len(), REGISTERS.len())?;

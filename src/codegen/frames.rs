@@ -11,6 +11,7 @@ pub(in crate::codegen) struct LabelAllocator<'a> {
     pub(in crate::codegen) target: Target,
     pub(in crate::codegen) next_label: usize,
     pub(in crate::codegen) x86_64_variadic: Option<X86_64VariadicFrame>,
+    pub(in crate::codegen) aarch64_variadic: Option<Aarch64VariadicFrame>,
 }
 
 #[derive(Clone, Copy)]
@@ -28,6 +29,7 @@ impl<'a> LabelAllocator<'a> {
             target,
             next_label: next_available_label(function),
             x86_64_variadic: None,
+            aarch64_variadic: None,
         }
     }
 
@@ -42,6 +44,14 @@ pub(in crate::codegen) struct Aarch64Frame {
     pub(in crate::codegen) stack_bytes: usize,
     pub(in crate::codegen) link_register_offset: Option<usize>,
     pub(in crate::codegen) preserved_temp_offset: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::codegen) struct Aarch64VariadicFrame {
+    pub(in crate::codegen) gp_offset: usize,
+    pub(in crate::codegen) overflow_arg_offset: usize,
+    pub(in crate::codegen) register_save_offset: usize,
+    pub(in crate::codegen) register_save_size: usize,
 }
 
 impl Aarch64Frame {

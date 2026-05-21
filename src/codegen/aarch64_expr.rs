@@ -9,6 +9,7 @@ use super::aarch64_loads::{emit_aarch64_load_double_literal, emit_aarch64_load_s
 use super::aarch64_memory_expr::emit_aarch64_memory_expr;
 use super::aarch64_temporaries::emit_aarch64_load_temporary;
 use super::aarch64_unary::emit_aarch64_unary_expr;
+use super::aarch64_variadic::emit_aarch64_va_arg;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::widths::{
@@ -75,6 +76,9 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
         }
         LoweredExpr::StringLiteral(value) => {
             emit_aarch64_load_string_address(value, labels, assembly)
+        }
+        LoweredExpr::VaArg { list, scalar_type } => {
+            emit_aarch64_va_arg(list, *scalar_type, temporary_base, depth, labels, assembly)
         }
         LoweredExpr::LocalAddress { offset, .. } => {
             write_assembly!(assembly, "\tadd x0, sp, #{offset}\n")

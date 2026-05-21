@@ -8,6 +8,7 @@ use super::aarch64_loads::emit_aarch64_store_global;
 use super::aarch64_temporaries::{
     emit_aarch64_init_local_bytes, emit_aarch64_init_local_ints, emit_aarch64_store_result,
 };
+use super::aarch64_variadic::{aarch64_variadic_frame, emit_aarch64_variadic_register_saves};
 use super::data_literals::{branch_label, label_name};
 use super::frames::{Aarch64Epilogue, Aarch64Frame, LabelAllocator};
 use super::stack_helpers::local_offset;
@@ -24,7 +25,7 @@ pub(in crate::codegen) fn emit_aarch64_function(
 ) -> CompileResult<()> {
     let label = label_name(&function.name, target);
     let frame = Aarch64Frame::new(function);
-    let mut labels = LabelAllocator::new(function, target);
+    let mut labels = aarch64_label_allocator(function, target, frame.stack_bytes)?;
     let shared_epilogue = if should_share_aarch64_epilogue(function, frame.stack_bytes) {
         Some(labels.fresh())
     } else {
@@ -39,6 +40,7 @@ pub(in crate::codegen) fn emit_aarch64_function(
         frame.stack_bytes,
         assembly,
     )?;
+    emit_aarch64_variadic_register_saves(function, labels.aarch64_variadic, assembly)?;
     emit_aarch64_parameter_stores(function, assembly)?;
     for instruction in &function.instructions {
         match instruction {
@@ -121,6 +123,16 @@ pub(in crate::codegen) fn emit_aarch64_function(
         )?;
     }
     Ok(())
+}
+
+fn aarch64_label_allocator(
+    function: &LoweredFunction,
+    target: Target,
+    stack_bytes: usize,
+) -> CompileResult<LabelAllocator<'_>> {
+    let mut labels = LabelAllocator::new(function, target);
+    labels.aarch64_variadic = aarch64_variadic_frame(function, stack_bytes)?;
+    Ok(labels)
 }
 
 pub(in crate::codegen) fn emit_aarch64_store_local_instruction(

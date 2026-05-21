@@ -7,6 +7,7 @@ use super::widths::{
 };
 use super::x86_64_addressing::emit_x86_64_address_expr;
 use super::x86_64_binary::{emit_x86_64_binary_expr, emit_x86_64_width_adjustment};
+use super::x86_64_builtin_calls::emit_x86_64_va_arg_expr;
 use super::x86_64_calls::emit_x86_64_call_expr;
 use super::x86_64_conditionals::emit_x86_64_conditional;
 use super::x86_64_expr_special::emit_x86_64_global_or_assignment_expr;
@@ -77,6 +78,9 @@ pub(in crate::codegen) fn emit_x86_64_expr_natural(
         }
         LoweredExpr::StringLiteral(value) => {
             emit_x86_64_load_string_address(value, target, labels, assembly)
+        }
+        expr @ LoweredExpr::VaArg { .. } => {
+            emit_x86_64_va_arg_expr(expr, temporary_base, depth, target, labels, assembly)
         }
         LoweredExpr::LocalAddress { offset, byte_size } => write_assembly!(
             assembly,

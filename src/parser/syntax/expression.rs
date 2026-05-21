@@ -29,6 +29,11 @@ pub enum Expr {
     LongInteger(i64),
     DoubleLiteral(String),
     StringLiteral(String),
+    VaArg {
+        list: Box<Self>,
+        scalar_type: ScalarType,
+        referent: Option<String>,
+    },
     SizeOfExpr {
         expr: Box<Self>,
     },

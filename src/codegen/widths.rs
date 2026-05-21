@@ -82,6 +82,7 @@ pub(in crate::codegen) fn expr_width(expr: &LoweredExpr) -> ValueWidth {
         | LoweredExpr::PointerFieldAddress { .. } => ValueWidth::I64,
         LoweredExpr::Global { scalar_type, .. }
         | LoweredExpr::Local { scalar_type, .. }
+        | LoweredExpr::VaArg { scalar_type, .. }
         | LoweredExpr::Call {
             return_type: scalar_type,
             ..
