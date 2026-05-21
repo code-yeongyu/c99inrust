@@ -27,23 +27,24 @@ manual_run=skipped
 reason=DOOM_MANUAL_RUN=0
 ```
 
-Latest manual harness build-only QA, on commit `6a86d86`:
+Latest manual harness build-only QA, on commit `20120f6`:
 
 ```text
-out=/tmp/c99inrust-doom-manual-6a86d86-build-only
+out=/tmp/c99inrust-doom-manual-20120f6-transcript
 compile_ok=62 compile_fail=0
 link_status=0
-binary=/tmp/c99inrust-doom-manual-6a86d86-build-only/linuxdoom-c99inrust
+binary=/tmp/c99inrust-doom-manual-20120f6-transcript/linuxdoom-c99inrust
 manual_run=skipped
 reason=DOOM_MANUAL_RUN=0
+transcript=/tmp/c99inrust-doom-manual-20120f6-transcript/manual-transcript.txt
 ```
 
 This proves the manual harness still builds and links the official Doom binary
-on current `main`. An older tmux manual harness QA on commit `d7e708e` also
-verified the no-`tmux kill-server` workflow and stopped with
-`manual_run=blocked` when no host display was available. The remaining evidence
-gap is a completed human-visible X11 playthrough transcript, not C compilation
-or Linux/X11 linking.
+on current `main` and now writes a transcript scaffold. An older tmux manual
+harness QA on commit `d7e708e` also verified the no-`tmux kill-server` workflow
+and stopped with `manual_run=blocked` when no host display was available. The
+remaining evidence gap is a completed human-visible X11 playthrough transcript,
+not C compilation or Linux/X11 linking.
 
 Use interactive mode when an X11 display is available:
 

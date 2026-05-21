@@ -529,20 +529,21 @@ cargo build
 DOOM_MANUAL_RUN=0 tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inrust-doom-manual-play
 ```
 
-The latest manual harness build-only recheck on commit `6a86d86` produced:
+The latest manual harness build-only recheck on commit `20120f6` produced:
 
 ```text
-out=/tmp/c99inrust-doom-manual-6a86d86-build-only
+out=/tmp/c99inrust-doom-manual-20120f6-transcript
 compile_ok=62 compile_fail=0
 link_status=0
-binary=/tmp/c99inrust-doom-manual-6a86d86-build-only/linuxdoom-c99inrust
+binary=/tmp/c99inrust-doom-manual-20120f6-transcript/linuxdoom-c99inrust
 manual_run=skipped
 reason=DOOM_MANUAL_RUN=0
+transcript=/tmp/c99inrust-doom-manual-20120f6-transcript/manual-transcript.txt
 ```
 
 This confirms the current manual harness still builds and links the official
-Doom binary. A host X11 display is still required for a human-visible
-interactive manual playthrough.
+Doom binary and writes a transcript scaffold. A host X11 display is still
+required for a human-visible interactive manual playthrough.
 
 Interactive visible-session run:
 
