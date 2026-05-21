@@ -235,7 +235,7 @@ fn address_from_lvalue(
             index: None,
         }),
         LValue::Subscript { array, index } => address_from_subscript(array, index, constants),
-        LValue::Member { .. } => Err(CompileError::new(
+        LValue::Member { .. } | LValue::ScalarCompoundLiteral { .. } => Err(CompileError::new(
             "unsupported global struct initializer address",
         )),
     }

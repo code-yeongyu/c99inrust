@@ -17,6 +17,15 @@ pub(super) fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
             field,
             dereference,
         }),
+        Expr::ScalarCompoundLiteral {
+            scalar_type,
+            referent,
+            value,
+        } => Ok(LValue::ScalarCompoundLiteral {
+            scalar_type,
+            referent,
+            value,
+        }),
         _ => Err(CompileError::new("unsupported assignment target")),
     }
 }

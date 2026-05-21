@@ -1,6 +1,6 @@
 use super::{
     AssignmentOperator, BinaryOp, CompileResult, Expr, Keyword, Parser, ScalarType, UnaryOp,
-    lvalue_from_expr, prefix_update_expr, token_is_punctuator,
+    local_scalar_initializer, lvalue_from_expr, prefix_update_expr, token_is_punctuator,
 };
 
 impl Parser<'_> {
@@ -216,10 +216,20 @@ impl Parser<'_> {
             self.advance();
         }
         self.expect_punctuator("}")?;
-        Ok(Expr::Cast {
-            target,
+        let value = scalar_compound_value(target, referent.as_deref(), expr);
+        Ok(Expr::ScalarCompoundLiteral {
+            scalar_type: target,
             referent,
-            expr: Box::new(expr),
+            value: Box::new(value),
         })
+    }
+}
+
+fn scalar_compound_value(target: ScalarType, referent: Option<&str>, expr: Expr) -> Expr {
+    match referent {
+        Some("byte") => local_scalar_initializer(target, true, false, true, expr),
+        Some("char") => local_scalar_initializer(target, true, false, false, expr),
+        Some("short") => local_scalar_initializer(target, false, true, false, expr),
+        _ => expr,
     }
 }

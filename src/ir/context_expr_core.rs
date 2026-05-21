@@ -15,6 +15,9 @@ impl LoweringContext {
             Expr::StructCompoundLiteral { .. } | Expr::ArrayCompoundLiteral { .. } => Err(
                 CompileError::new("compound literal object cannot be used as a scalar value"),
             ),
+            Expr::ScalarCompoundLiteral {
+                scalar_type, value, ..
+            } => self.lower_cast_expr(*scalar_type, value),
             Expr::VaArg {
                 list, scalar_type, ..
             } => Ok(LoweredExpr::VaArg {

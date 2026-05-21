@@ -76,7 +76,7 @@ impl LoweringContext {
                     Ok(None)
                 }
             }
-            LValue::Subscript { .. } => Ok(None),
+            LValue::Subscript { .. } | LValue::ScalarCompoundLiteral { .. } => Ok(None),
         }
     }
 }

@@ -13,6 +13,11 @@ pub enum LValue {
         field: String,
         dereference: bool,
     },
+    ScalarCompoundLiteral {
+        scalar_type: ScalarType,
+        referent: Option<String>,
+        value: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +45,11 @@ pub enum Expr {
         element_unsigned: bool,
         length: usize,
         values: Vec<Self>,
+    },
+    ScalarCompoundLiteral {
+        scalar_type: ScalarType,
+        referent: Option<String>,
+        value: Box<Self>,
     },
     VaArg {
         list: Box<Self>,

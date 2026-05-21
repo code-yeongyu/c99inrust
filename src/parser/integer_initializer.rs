@@ -126,6 +126,7 @@ fn eval_integer_initializer_expr_with_context(
         Expr::StringLiteral(_)
         | Expr::StructCompoundLiteral { .. }
         | Expr::ArrayCompoundLiteral { .. }
+        | Expr::ScalarCompoundLiteral { .. }
         | Expr::AddressOf { .. }
         | Expr::Dereference { .. }
         | Expr::Member { .. }

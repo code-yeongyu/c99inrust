@@ -37,6 +37,11 @@ impl LoweringContext {
             return self.lower_array_compound_pointer_assignment(target, value);
         }
         if lowered_lvalue_scalar_type(&target) == ScalarType::Pointer
+            && Self::is_scalar_compound_address(value)
+        {
+            return self.lower_scalar_compound_pointer_assignment(target, value);
+        }
+        if lowered_lvalue_scalar_type(&target) == ScalarType::Pointer
             && Self::is_array_compound_element_address(value)
         {
             return self.lower_array_compound_element_pointer_assignment(target, value);
@@ -111,6 +116,9 @@ impl LoweringContext {
                 field,
                 dereference,
             } => self.lower_member_lvalue(base, field, *dereference),
+            LValue::ScalarCompoundLiteral { .. } => Err(CompileError::new(
+                "scalar compound literal assignment is not supported",
+            )),
         }
     }
 
@@ -175,6 +183,7 @@ impl LoweringContext {
                 }
                 Ok(None)
             }
+            LValue::ScalarCompoundLiteral { .. } => Ok(None),
         }
     }
 

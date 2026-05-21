@@ -1,7 +1,7 @@
 use super::{
     CompileError, CompileResult, Expr, Keyword, Parser, ScalarType, Token, TokenKind,
-    function_pointer_cast_type, lvalue_from_expr, matching_top_level_paren,
-    pointer_referent_from_specifiers, supported_cast_type_with_typedefs,
+    declaration_base_referent_type, function_pointer_cast_type, lvalue_from_expr,
+    matching_top_level_paren, pointer_referent_from_specifiers, supported_cast_type_with_typedefs,
 };
 
 impl Parser<'_> {
@@ -98,7 +98,7 @@ impl Parser<'_> {
         let referent = if target == ScalarType::Pointer {
             pointer_referent_from_specifiers(cast_tokens)
         } else {
-            None
+            declaration_base_referent_type(cast_tokens)
         };
         Some((target, referent, close + 1))
     }

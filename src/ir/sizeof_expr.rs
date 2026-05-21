@@ -22,6 +22,7 @@ fn expression_size(context: &LoweringContext, expr: &Expr) -> CompileResult<Opti
         Expr::StructCompoundLiteral { .. } | Expr::ArrayCompoundLiteral { .. } => {
             context.compound_literal_size(expr).map(Some)
         }
+        Expr::ScalarCompoundLiteral { scalar_type, .. } => Ok(Some(scalar_size(*scalar_type))),
         Expr::Identifier(name) => identifier_size(context, name),
         Expr::Dereference { pointer } => pointer_element_size(context, pointer).map(Some),
         Expr::Subscript { array, .. } => subscript_size(context, array),

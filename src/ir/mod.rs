@@ -50,6 +50,7 @@ mod lowered_expr_helpers;
 mod pointer_arithmetic;
 mod pointer_referent;
 mod program_lowering;
+mod scalar_compound_literal_storage;
 mod scalar_global_initializers;
 mod sizeof_expr;
 mod static_local;

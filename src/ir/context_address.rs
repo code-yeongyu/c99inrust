@@ -16,6 +16,9 @@ impl LoweringContext {
                 field,
                 dereference,
             } => self.lower_address_of_member(base, field, *dereference),
+            LValue::ScalarCompoundLiteral { .. } => Err(CompileError::new(
+                "scalar compound literal address requires storage lowering",
+            )),
         }
     }
 
