@@ -29,6 +29,7 @@ fi
 linuxdoom="$root/linuxdoom-1.10"
 compiler="${C99INRUST_BIN:-target/debug/c99inrust}"
 asm="$out/asm"
+transcript="$out/manual-transcript.txt"
 
 if [ ! -d "$linuxdoom" ]; then
 	printf 'error: expected official id-Software/DOOM checkout with linuxdoom-1.10\n' >&2
@@ -45,6 +46,36 @@ mkdir -p "$asm" "$out"
 
 record() {
 	printf '%s\n' "$*" | tee -a "$out/manual-play.log"
+}
+
+write_transcript() {
+	manual_run="$1"
+	final_status="$2"
+	reason="${3:-}"
+	commit="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+	tmux_session="$(tmux display-message -p '#S' 2>/dev/null || printf '%s' "${TMUX:-}")"
+	{
+		printf 'operator=%s\n' "${DOOM_MANUAL_OPERATOR:-}"
+		printf 'date=%s\n' "$(date '+%Y-%m-%d %H:%M %Z')"
+		printf 'commit=%s\n' "$commit"
+		printf 'tmux_session=%s\n' "$tmux_session"
+		printf 'out=%s\n' "$out"
+		printf 'doom_source=%s\n' "$root"
+		printf 'iwad=%s\n' "$wad"
+		printf 'display=%s\n' "${docker_display:-}"
+		printf 'compile_ok=%s compile_fail=%s\n' "$compile_ok" "$compile_fail"
+		printf 'link_status=0\n'
+		printf 'manual_run=%s\n' "$manual_run"
+		printf 'reason=%s\n' "$reason"
+		printf 'window_visible=\n'
+		printf 'map_started=\n'
+		printf 'arrow_keys_move=\n'
+		printf 'strafe_fire_use_respond=\n'
+		printf 'exit_method=\n'
+		printf 'final_status=%s\n' "$final_status"
+		printf 'notes=\n'
+	} >"$transcript"
+	record "transcript=$transcript"
 }
 
 compile_ok=0
@@ -96,6 +127,7 @@ record "binary=$out/linuxdoom-c99inrust"
 if [ "${DOOM_MANUAL_RUN:-1}" = "0" ]; then
 	record "manual_run=skipped"
 	record "reason=DOOM_MANUAL_RUN=0"
+	write_transcript "skipped" "0" "DOOM_MANUAL_RUN=0"
 	exit 0
 fi
 
@@ -103,6 +135,7 @@ docker_display="${DOOM_DOCKER_DISPLAY:-${DISPLAY:-}}"
 if [ -z "$docker_display" ]; then
 	record "manual_run=blocked"
 	record "reason=no DISPLAY or DOOM_DOCKER_DISPLAY"
+	write_transcript "blocked" "20" "no DISPLAY or DOOM_DOCKER_DISPLAY"
 	printf 'error: set DISPLAY or DOOM_DOCKER_DISPLAY, or use DOOM_MANUAL_RUN=0 for build-only mode\n' >&2
 	exit 20
 fi
@@ -117,7 +150,7 @@ record "manual_run=starting"
 record "docker_display=$docker_display"
 record "doom_args=$*"
 
-docker run "${docker_run_args[@]}" \
+if docker run "${docker_run_args[@]}" \
 	-v "$out:/out" \
 	-v "$wad:/doom1.wad:ro" \
 	ubuntu:24.04 bash -lc '
@@ -128,4 +161,12 @@ apt-get install -y --no-install-recommends libx11-6 libxext6 libnsl2 \
   >/out/manual-run-apt-install.log 2>&1
 cd /
 exec /out/linuxdoom-c99inrust -iwad /doom1.wad "$@"
-' bash "$@"
+' bash "$@"; then
+	manual_status=0
+else
+	manual_status=$?
+fi
+record "manual_run=finished"
+record "manual_status=$manual_status"
+write_transcript "finished" "$manual_status"
+exit "$manual_status"

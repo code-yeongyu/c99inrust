@@ -22,6 +22,7 @@ Expected build-only status:
 ```text
 compile_ok=62 compile_fail=0
 link_status=0
+transcript=/tmp/c99inrust-doom-manual-play/manual-transcript.txt
 manual_run=skipped
 reason=DOOM_MANUAL_RUN=0
 ```
@@ -108,6 +109,10 @@ exit_method=
 final_status=
 notes=
 ```
+
+The harness writes these fields to `manual-transcript.txt` in the output
+directory. Build-only and blocked runs prefill the compile/link fields; for a
+human-visible play session, fill in the empty gameplay fields after the run.
 
 ## Current Evidence Status
 
