@@ -124,3 +124,17 @@ jobs:
         run: |
           grep -qx 'compile_ok=62 compile_fail=0' "$RUNNER_TEMP/doom-link-scan/link-scan.log"
           grep -qx 'link_status=0' "$RUNNER_TEMP/doom-link-scan/link-scan.log"
+      - name: Upload Doom compile/link proof
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: doom-compile-link-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/doom-compile-scan.txt
+            ${{ runner.temp }}/doom-link-scan/link-scan.log
+            ${{ runner.temp }}/doom-link-scan/status.log
+            ${{ runner.temp }}/doom-link-scan/link.log
+            ${{ runner.temp }}/doom-link-scan/apt.log
+            ${{ runner.temp }}/doom-link-scan/apt-install.log
+          if-no-files-found: warn
+          retention-days: 30

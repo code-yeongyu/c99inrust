@@ -369,7 +369,8 @@ tools/doom-compile-scan.sh /tmp/c99inrust-doom-src /tmp/c99inrust-doom-compile-s
 ```
 
 CI also runs a no-IWAD link scan that compiles all 62 official units to
-x86_64 Linux assembly and links them into a Linux/X11 ELF:
+x86_64 Linux assembly, links them into a Linux/X11 ELF, and uploads the
+compile/link proof logs as a GitHub Actions artifact:
 
 ```bash
 cargo build
