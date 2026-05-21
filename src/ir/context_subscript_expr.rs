@@ -14,6 +14,9 @@ impl LoweringContext {
         if let Some(value) = self.lower_array_compound_subscript(array, index)? {
             return Ok(value);
         }
+        if let Some(value) = self.lower_struct_compound_array_field_subscript(array, index)? {
+            return Ok(value);
+        }
         if self.should_commute_subscript(array, index) {
             return self.lower_subscript(index, array);
         }
