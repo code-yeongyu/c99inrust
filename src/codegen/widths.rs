@@ -65,7 +65,7 @@ pub(in crate::codegen) const fn scalar_width(scalar_type: ScalarType) -> ValueWi
     match scalar_type {
         ScalarType::Bool | ScalarType::Int => ValueWidth::I32,
         ScalarType::LongLong | ScalarType::Pointer | ScalarType::VaList => ValueWidth::I64,
-        ScalarType::Double => ValueWidth::F64,
+        ScalarType::Double | ScalarType::LongDouble => ValueWidth::F64,
     }
 }
 

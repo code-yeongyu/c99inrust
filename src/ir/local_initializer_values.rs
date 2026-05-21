@@ -4,7 +4,9 @@ use crate::parser::{LocalCharArrayInitializer, ScalarType, StructLayout};
 
 pub(in crate::ir) fn zero_expr_for(scalar_type: ScalarType) -> LoweredExpr {
     match scalar_type {
-        ScalarType::Double => LoweredExpr::DoubleLiteral("0.0".to_string()),
+        ScalarType::Double | ScalarType::LongDouble => {
+            LoweredExpr::DoubleLiteral("0.0".to_string())
+        }
         ScalarType::Bool
         | ScalarType::Int
         | ScalarType::LongLong
@@ -120,7 +122,16 @@ pub(in crate::ir) const fn scalar_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::Bool | ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+        ScalarType::LongDouble => long_double_size(),
         ScalarType::VaList => 24,
+    }
+}
+
+const fn long_double_size() -> usize {
+    if cfg!(all(target_arch = "x86_64", not(target_os = "macos"))) {
+        16
+    } else {
+        8
     }
 }
 

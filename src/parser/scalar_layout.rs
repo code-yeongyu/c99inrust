@@ -19,7 +19,16 @@ pub(super) const fn scalar_size_for_layout(scalar_type: ScalarType) -> usize {
         ScalarType::Bool => 1,
         ScalarType::Int => 4,
         ScalarType::LongLong | ScalarType::Double | ScalarType::Pointer => 8,
+        ScalarType::LongDouble => long_double_size_for_layout(),
         ScalarType::VaList => 24,
+    }
+}
+
+const fn long_double_size_for_layout() -> usize {
+    if cfg!(all(target_arch = "x86_64", not(target_os = "macos"))) {
+        16
+    } else {
+        8
     }
 }
 

@@ -11,6 +11,7 @@ pub enum ScalarType {
     Int,
     LongLong,
     Double,
+    LongDouble,
     Pointer,
     VaList,
 }

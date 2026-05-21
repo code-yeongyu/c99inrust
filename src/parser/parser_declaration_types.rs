@@ -180,8 +180,10 @@ const fn declaration_type_from_flags(
         Some((ScalarType::Pointer, index))
     } else if has_flag(flags, SAW_BOOL) {
         Some((ScalarType::Bool, index))
-    } else if has_flag(flags, SAW_DOUBLE) {
+    } else if has_flag(flags, SAW_DOUBLE) && long_count == 0 {
         Some((ScalarType::Double, index))
+    } else if has_flag(flags, SAW_DOUBLE) {
+        Some((ScalarType::LongDouble, index))
     } else if long_count == 0 {
         Some((ScalarType::Int, index))
     } else {

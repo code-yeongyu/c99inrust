@@ -144,8 +144,10 @@ pub(super) fn supported_cast_type_with_typedefs(
     }
     if saw_bool {
         Some(ScalarType::Bool)
-    } else if saw_double {
+    } else if saw_double && long_count == 0 {
         Some(ScalarType::Double)
+    } else if saw_double {
+        Some(ScalarType::LongDouble)
     } else if long_count == 0 {
         Some(ScalarType::Int)
     } else {

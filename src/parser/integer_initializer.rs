@@ -80,7 +80,7 @@ fn eval_integer_initializer_expr_with_context(
                 | ScalarType::LongLong
                 | ScalarType::Pointer
                 | ScalarType::VaList => Ok(InitializerNumber::integer(value.to_i64_trunc()?)),
-                ScalarType::Double => Ok(value),
+                ScalarType::Double | ScalarType::LongDouble => Ok(value),
             }
         }
         Expr::Binary { op, left, right } => {

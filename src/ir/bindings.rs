@@ -104,7 +104,7 @@ impl GlobalBinding {
             ScalarType::Bool | ScalarType::Int => Ok(Self::Int),
             ScalarType::LongLong => Ok(Self::LongLong),
             ScalarType::Pointer => Ok(Self::Pointer { referent: None }),
-            ScalarType::Double | ScalarType::VaList => {
+            ScalarType::Double | ScalarType::LongDouble | ScalarType::VaList => {
                 Err(CompileError::new("unsupported extern global scalar type"))
             }
         }
