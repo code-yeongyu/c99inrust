@@ -1,6 +1,6 @@
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, builtin_calls, call_args,
-    complex_truth_expr, is_complex_scalar, lowered_expr_scalar_type,
+    complex_truth_expr, lowered_expr_scalar_type,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{BinaryOp, Expr, ScalarType};
@@ -137,10 +137,6 @@ impl LoweringContext {
     }
 
     pub(in crate::ir) fn complex_truth_for_lowered(value: &LoweredExpr) -> Option<LoweredExpr> {
-        let scalar_type = lowered_expr_scalar_type(value)?;
-        if !is_complex_scalar(scalar_type) {
-            return None;
-        }
-        complex_truth_expr(value, scalar_type)
+        complex_truth_expr(value)
     }
 }
