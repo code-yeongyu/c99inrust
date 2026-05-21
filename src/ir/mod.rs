@@ -17,6 +17,7 @@ mod context_declarations;
 mod context_expr_core;
 mod context_expr_ops;
 mod context_identifiers;
+mod context_int_matrices;
 mod context_labels;
 mod context_members;
 mod context_post_increment;
@@ -69,8 +70,9 @@ pub(in crate::ir) use global_initializers::lower_defined_global_initializer;
 pub(in crate::ir) use global_lowering::{lower_extern_global_binding, lower_globals};
 pub(in crate::ir) use local_initializer_values::{
     align_to, local_char_array_initializer_values, local_char_matrix_byte_size,
-    local_char_matrix_initializer_values, local_int_array_byte_size, local_pointer_array_byte_size,
-    local_short_array_byte_size, scalar_size, struct_alignment, zero_expr_for,
+    local_char_matrix_initializer_values, local_int_array_byte_size, local_int_matrix_byte_size,
+    local_pointer_array_byte_size, local_short_array_byte_size, scalar_size, struct_alignment,
+    zero_expr_for,
 };
 pub(in crate::ir) use local_struct_initializer_array::LocalStructArrayField;
 pub(in crate::ir) use lowered_expr_helpers::{

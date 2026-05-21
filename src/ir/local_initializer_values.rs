@@ -91,6 +91,15 @@ pub(in crate::ir) fn local_int_array_byte_size(length: usize) -> CompileResult<u
         .ok_or_else(|| CompileError::new("local int array size overflow"))
 }
 
+pub(in crate::ir) fn local_int_matrix_byte_size(
+    rows: usize,
+    columns: usize,
+) -> CompileResult<usize> {
+    rows.checked_mul(columns)
+        .ok_or_else(|| CompileError::new("local int matrix size overflow"))
+        .and_then(local_int_array_byte_size)
+}
+
 pub(in crate::ir) fn local_short_array_byte_size(length: usize) -> CompileResult<usize> {
     length
         .checked_mul(2)

@@ -137,10 +137,11 @@ impl LoweringContext {
         condition: &Expr,
         cases: &[SwitchCase],
         default: &[Statement],
+        default_position: Option<usize>,
     ) -> CompileResult<()> {
         self.scopes.push(HashMap::new());
         let end_label = self.fresh_label();
-        let default_label = (!default.is_empty()).then(|| self.fresh_label());
+        let default_label = default_position.map(|_| self.fresh_label());
         let case_labels = (0..cases.len())
             .map(|_| self.fresh_label())
             .collect::<Vec<_>>();
@@ -162,13 +163,23 @@ impl LoweringContext {
             label: default_label.unwrap_or(end_label),
         });
         self.break_labels.push(end_label);
-        for (case, label) in cases.iter().zip(case_labels.iter().copied()) {
+        for (index, (case, label)) in cases.iter().zip(case_labels.iter().copied()).enumerate() {
+            if default_position == Some(index)
+                && let Some(label) = default_label
+            {
+                self.instructions.push(Instruction::Label { label });
+                for statement in default {
+                    self.lower_statement(statement)?;
+                }
+            }
             self.instructions.push(Instruction::Label { label });
             for statement in &case.statements {
                 self.lower_statement(statement)?;
             }
         }
-        if let Some(label) = default_label {
+        if default_position == Some(cases.len())
+            && let Some(label) = default_label
+        {
             self.instructions.push(Instruction::Label { label });
             for statement in default {
                 self.lower_statement(statement)?;

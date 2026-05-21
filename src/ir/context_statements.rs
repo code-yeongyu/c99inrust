@@ -14,6 +14,7 @@ impl LoweringContext {
             | Statement::LocalCharArray { .. }
             | Statement::LocalCharMatrix { .. }
             | Statement::LocalIntArray { .. }
+            | Statement::LocalIntMatrix { .. }
             | Statement::LocalShortArray { .. }
             | Statement::LocalPointerArray { .. }
             | Statement::LocalStruct { .. }
@@ -48,7 +49,8 @@ impl LoweringContext {
                 condition,
                 cases,
                 default,
-            } => self.lower_switch(condition, cases, default),
+                default_position,
+            } => self.lower_switch(condition, cases, default, *default_position),
             Statement::Expression(Expr::PostIncrement { target, decrement }) => {
                 self.lower_post_increment_statement(target, *decrement)
             }
@@ -104,6 +106,12 @@ impl LoweringContext {
                 length,
                 initializer,
             } => Some(self.lower_local_int_array(name, *length, initializer.as_deref())),
+            Statement::LocalIntMatrix {
+                name,
+                rows,
+                columns,
+                initializer,
+            } => Some(self.lower_local_int_matrix(name, *rows, *columns, initializer.as_deref())),
             Statement::LocalShortArray {
                 name,
                 length,

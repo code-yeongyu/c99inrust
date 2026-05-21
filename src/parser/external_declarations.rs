@@ -1,6 +1,7 @@
 use crate::front_end::lexer::{Keyword, Token};
 
 use super::declarator_types::pointer_referent_from_specifiers;
+use super::function_pointer_declarators::{function_pointer_variable, pointer_return_declarator};
 use super::token_scan::{
     array_declarator_name, last_token_is_punctuator, last_top_level_identifier,
     previous_identifier, previous_identifier_index, token_has_keyword, token_identifier,
@@ -30,7 +31,9 @@ pub(super) fn classify_external_item(tokens: &[Token]) -> Option<ExternalItem> {
 
 pub(super) fn function_definition_name(tokens: &[Token]) -> Option<String> {
     if last_token_is_punctuator(tokens, "}") {
-        return normal_function_name(tokens);
+        return pointer_return_declarator(tokens)
+            .map(|declarator| declarator.name)
+            .or_else(|| normal_function_name(tokens));
     }
     None
 }
@@ -46,6 +49,13 @@ pub(super) fn function_prototype_name(tokens: &[Token]) -> Option<String> {
 }
 
 pub(super) fn pointer_return_function(tokens: &[Token]) -> Option<PointerReturnFunction> {
+    if let Some(declarator) = pointer_return_declarator(tokens) {
+        supported_return_type(&tokens[..declarator.specifier_end])?;
+        return Some(PointerReturnFunction {
+            name: declarator.name,
+            referent: None,
+        });
+    }
     let open_index = top_level_function_open_paren(tokens)?;
     let name_index = previous_identifier_index(tokens, open_index)?;
     if supported_return_type(&tokens[..name_index]) != Some(ReturnType::Pointer) {
@@ -59,6 +69,12 @@ pub(super) fn pointer_return_function(tokens: &[Token]) -> Option<PointerReturnF
 }
 
 pub(super) fn function_definition_has_supported_signature(tokens: &[Token]) -> bool {
+    if let Some(declarator) = pointer_return_declarator(tokens) {
+        if supported_return_type(&tokens[..declarator.specifier_end]).is_none() {
+            return false;
+        }
+        return function_body_follows(tokens, declarator.suffix_end);
+    }
     let Some(open_index) = top_level_function_open_paren(tokens) else {
         return false;
     };
@@ -166,34 +182,7 @@ pub(super) fn function_pointer_cast_type(tokens: &[Token]) -> bool {
 }
 
 pub(super) fn function_pointer_name(tokens: &[Token]) -> Option<String> {
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-    for (index, token) in tokens.iter().enumerate() {
-        if paren_depth == 0
-            && bracket_depth == 0
-            && brace_depth == 0
-            && token_is_punctuator(token, "(")
-            && tokens
-                .get(index + 1)
-                .is_some_and(|next| token_is_punctuator(next, "*"))
-            && tokens
-                .get(index + 3)
-                .is_some_and(|next| token_is_punctuator(next, ")"))
-        {
-            return tokens
-                .get(index + 2)
-                .and_then(token_identifier)
-                .map(ToOwned::to_owned);
-        }
-        update_depths(
-            token,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-        );
-    }
-    None
+    function_pointer_variable(tokens).map(|declarator| declarator.name)
 }
 
 fn normal_function_name(tokens: &[Token]) -> Option<String> {

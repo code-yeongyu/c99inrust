@@ -9,6 +9,7 @@ mod declarator_types;
 mod doom_layout;
 mod enum_declarations;
 mod external_declarations;
+mod function_pointer_declarators;
 mod global_byte_declarations;
 mod global_byte_initializers;
 mod global_declarations;
@@ -16,6 +17,7 @@ mod global_double_declarations;
 mod global_int_arrays;
 mod global_int_initializers;
 mod global_pointer_arrays;
+mod global_pointer_scalars;
 mod global_scalar_declarations;
 mod global_short_declarations;
 mod global_sizeof;
@@ -38,6 +40,8 @@ mod parser_expression_postfix;
 mod parser_functions;
 mod parser_local_arrays;
 mod parser_local_declarations;
+mod parser_local_function_pointers;
+mod parser_local_int_matrices;
 mod parser_local_pointer_arrays;
 mod parser_local_structs;
 mod parser_sizeof_type;
@@ -73,6 +77,7 @@ use external_declarations::{
     function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
     function_prototype_name, pointer_return_function, top_level_function_open_paren,
 };
+use function_pointer_declarators::{function_pointer_variable, pointer_return_declarator};
 use global_declarations::{
     parse_supported_global_declaration, parse_supported_global_declarations,
     unsupported_data_declaration_blocks_empty_unit,

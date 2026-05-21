@@ -11,6 +11,9 @@ impl LoweringContext {
         array: &Expr,
         index: &Expr,
     ) -> CompileResult<LoweredExpr> {
+        if self.should_commute_subscript(array, index) {
+            return self.lower_subscript(index, array);
+        }
         if let Some(subscript) = self.lower_global_array_subscript_expr(array, index)? {
             return Ok(subscript);
         }
@@ -31,6 +34,9 @@ impl LoweringContext {
         array: &Expr,
         index: &Expr,
     ) -> CompileResult<LoweredLValue> {
+        if self.should_commute_subscript(array, index) {
+            return self.lower_subscript_lvalue(index, array);
+        }
         if let Some(subscript) = self.lower_global_array_subscript_lvalue(array, index)? {
             return Ok(subscript);
         }
@@ -142,6 +148,9 @@ impl LoweringContext {
         if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
             return Ok(Some(address.pointer));
         }
+        if let Some(pointer) = self.resolve_local_int_matrix_row(array, index)? {
+            return Ok(Some(pointer));
+        }
         self.resolve_local_char_matrix_row(array, index)
     }
 
@@ -201,5 +210,10 @@ impl LoweringContext {
             element_byte_size,
             self.pointer_subscript_element_unsigned(array),
         ))
+    }
+
+    fn should_commute_subscript(&self, array: &Expr, index: &Expr) -> bool {
+        self.pointer_referent_for_expr(array).is_err()
+            && self.pointer_referent_for_expr(index).is_ok()
     }
 }

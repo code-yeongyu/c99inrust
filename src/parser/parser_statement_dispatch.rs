@@ -16,6 +16,9 @@ impl Parser<'_> {
         if let Some(statement) = self.block_extern_declaration()? {
             return Ok(statement);
         }
+        if let Some(statement) = self.local_function_pointer_declaration()? {
+            return Ok(statement);
+        }
         if let Some(statement) = self.local_function_pointer_array_declaration()? {
             return Ok(statement);
         }

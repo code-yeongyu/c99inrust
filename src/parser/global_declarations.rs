@@ -11,9 +11,9 @@ use super::global_pointer_arrays::{
     parse_global_extern_pointer_array, parse_global_pointer_array, parse_global_pointer_name_array,
     parse_global_pointer_string_array,
 };
+use super::global_pointer_scalars::parse_global_pointer;
 use super::global_scalar_declarations::{
     parse_global_extern_scalar, parse_global_int, parse_global_int_declarator_list,
-    parse_global_pointer,
 };
 use super::global_short_declarations::{parse_global_extern_int_array, parse_global_short_array};
 use super::global_specifiers::global_specifiers_are_static_const_char;

@@ -1,8 +1,9 @@
 use super::{
     CompileError, CompileResult, Function, Parameter, Parser, Program, ReturnType, ScalarType,
     function_pointer_name, parameter_is_variadic, parameter_is_void, parameter_scalar_type,
-    pointer_referent_type, previous_identifier_index, supported_return_type, token_identifier,
-    top_level_function_open_paren, top_level_punctuator_index,
+    pointer_referent_type, pointer_return_declarator, previous_identifier_index,
+    supported_return_type, token_identifier, token_is_punctuator, top_level_function_open_paren,
+    top_level_punctuator_index,
 };
 
 impl Parser<'_> {
@@ -24,6 +25,7 @@ impl Parser<'_> {
     pub(super) fn function(&mut self) -> CompileResult<Function> {
         let (return_type, name) = self.function_signature()?;
         let (mut parameters, is_variadic) = self.parameter_list()?;
+        self.skip_function_pointer_return_suffix()?;
         self.apply_old_style_parameter_declarations(&mut parameters)?;
         self.expect_punctuator("{")?;
         let mut statements = Vec::new();
@@ -42,6 +44,12 @@ impl Parser<'_> {
 
     pub(super) fn function_signature(&mut self) -> CompileResult<(ReturnType, String)> {
         let tokens = &self.tokens[self.index..];
+        if let Some(declarator) = pointer_return_declarator(tokens) {
+            supported_return_type(&tokens[..declarator.specifier_end])
+                .ok_or_else(|| CompileError::new("unsupported function return type"))?;
+            self.index += declarator.parameter_open + 1;
+            return Ok((ReturnType::Pointer, declarator.name));
+        }
         let Some(open_index) = top_level_function_open_paren(tokens) else {
             return self.expected("function parameter list");
         };
@@ -55,6 +63,19 @@ impl Parser<'_> {
             .to_owned();
         self.index += open_index + 1;
         Ok((return_type, name))
+    }
+
+    fn skip_function_pointer_return_suffix(&mut self) -> CompileResult<()> {
+        if !self.check_punctuator(")")
+            || !self
+                .tokens
+                .get(self.index + 1)
+                .is_some_and(|token| token_is_punctuator(token, "("))
+        {
+            return Ok(());
+        }
+        self.advance();
+        self.skip_balanced_parentheses()
     }
 
     pub(super) fn parameter_list(&mut self) -> CompileResult<(Vec<Parameter>, bool)> {

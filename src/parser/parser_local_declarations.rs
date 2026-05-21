@@ -50,11 +50,7 @@ impl Parser<'_> {
             return Ok(values);
         }
         loop {
-            let value = eval_integer_initializer_expr_with_constants(
-                &self.assignment()?,
-                self.known_constants,
-            )?
-            .to_i64_trunc()?;
+            let value = self.local_int_initializer_value()?;
             values.push(
                 i32::try_from(value)
                     .map_err(|_| CompileError::new("local int array initializer too large"))?,
@@ -69,6 +65,17 @@ impl Parser<'_> {
                 return Ok(values);
             }
         }
+    }
+
+    pub(super) fn local_int_initializer_value(&mut self) -> CompileResult<i64> {
+        if self.check_punctuator("{") {
+            self.advance();
+            let value = self.local_int_initializer_value()?;
+            self.expect_punctuator("}")?;
+            return Ok(value);
+        }
+        eval_integer_initializer_expr_with_constants(&self.assignment()?, self.known_constants)?
+            .to_i64_trunc()
     }
 
     pub(super) fn local_enum_declaration(&mut self) -> CompileResult<Option<Statement>> {

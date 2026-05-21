@@ -178,7 +178,9 @@ impl LoweringContext {
                 LocalBinding::CharArray { is_unsigned, .. } => {
                     Some(if is_unsigned { "byte" } else { "char" }.to_owned())
                 }
-                LocalBinding::IntArray { .. } => Some("int".to_owned()),
+                LocalBinding::IntArray { .. } | LocalBinding::IntMatrix { .. } => {
+                    Some("int".to_owned())
+                }
                 LocalBinding::ShortArray { .. } => Some("short".to_owned()),
                 LocalBinding::PointerArray { .. } => {
                     Some(pointer_arithmetic::nested_referent(None))
@@ -196,6 +198,18 @@ impl LoweringContext {
         if let Some(GlobalBinding::StructArray { struct_name, .. }) = self.global_bindings.get(name)
         {
             return Some(struct_name.clone());
+        }
+        if matches!(
+            self.global_bindings.get(name),
+            Some(GlobalBinding::IntArray)
+        ) {
+            return Some("int".to_owned());
+        }
+        if matches!(
+            self.global_bindings.get(name),
+            Some(GlobalBinding::IntMatrix { .. })
+        ) {
+            return Some("int".to_owned());
         }
         if matches!(
             self.global_bindings.get(name),

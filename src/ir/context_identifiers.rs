@@ -1,7 +1,7 @@
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, local_char_matrix_byte_size,
-    local_int_array_byte_size, local_pointer_array_byte_size, local_short_array_byte_size,
-    scalar_size,
+    local_int_array_byte_size, local_int_matrix_byte_size, local_pointer_array_byte_size,
+    local_short_array_byte_size, scalar_size,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::ScalarType;
@@ -80,6 +80,14 @@ impl LoweringContext {
             LocalBinding::IntArray { slot, length } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,
                 byte_size: local_int_array_byte_size(*length)?,
+            }),
+            LocalBinding::IntMatrix {
+                slot,
+                rows,
+                columns,
+            } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: local_int_matrix_byte_size(*rows, *columns)?,
             }),
             LocalBinding::ShortArray { slot, length, .. } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,

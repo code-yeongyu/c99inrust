@@ -3,8 +3,8 @@ use crate::parser::{Expr, ScalarType};
 
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, local_char_matrix_byte_size,
-    local_int_array_byte_size, local_pointer_array_byte_size, local_short_array_byte_size,
-    lowered_expr_scalar_type, scalar_size,
+    local_int_array_byte_size, local_int_matrix_byte_size, local_pointer_array_byte_size,
+    local_short_array_byte_size, lowered_expr_scalar_type, scalar_size,
 };
 
 pub(in crate::ir) fn lower(context: &LoweringContext, expr: &Expr) -> CompileResult<LoweredExpr> {
@@ -21,23 +21,26 @@ fn expression_size(context: &LoweringContext, expr: &Expr) -> CompileResult<Opti
     match expr {
         Expr::Identifier(name) => identifier_size(context, name),
         Expr::Dereference { pointer } => pointer_element_size(context, pointer).map(Some),
-        Expr::Subscript { array, .. } => Ok(subscript_size(context, array)),
+        Expr::Subscript { array, .. } => subscript_size(context, array),
         _ => Ok(None),
     }
 }
 
-fn subscript_size(context: &LoweringContext, array: &Expr) -> Option<usize> {
+fn subscript_size(context: &LoweringContext, array: &Expr) -> CompileResult<Option<usize>> {
     if let Expr::Identifier(name) = array {
         if let Some(LocalBinding::CharMatrix { columns, .. }) = context.local_binding(name) {
-            return Some(columns);
+            return Ok(Some(columns));
+        }
+        if let Some(LocalBinding::IntMatrix { columns, .. }) = context.local_binding(name) {
+            return local_int_array_byte_size(columns).map(Some);
         }
         if let Some(GlobalBinding::UnsignedCharMatrix { columns, .. }) =
             context.global_bindings.get(name)
         {
-            return Some(*columns);
+            return Ok(Some(*columns));
         }
     }
-    pointer_element_size(context, array).ok()
+    Ok(pointer_element_size(context, array).ok())
 }
 
 fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Option<usize>> {
@@ -71,6 +74,9 @@ fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
             local_char_matrix_byte_size(*rows, *columns)
         }
         LocalBinding::IntArray { length, .. } => local_int_array_byte_size(*length),
+        LocalBinding::IntMatrix { rows, columns, .. } => {
+            local_int_matrix_byte_size(*rows, *columns)
+        }
         LocalBinding::ShortArray { length, .. } => local_short_array_byte_size(*length),
         LocalBinding::PointerArray { length, .. } => local_pointer_array_byte_size(*length),
         LocalBinding::StructObject { byte_size, .. } => Ok(*byte_size),

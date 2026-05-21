@@ -48,6 +48,7 @@ impl LoweringContext {
                         LocalBinding::CharArray { .. }
                         | LocalBinding::CharMatrix { .. }
                         | LocalBinding::IntArray { .. }
+                        | LocalBinding::IntMatrix { .. }
                         | LocalBinding::ShortArray { .. } => Err(CompileError::new(
                             "assignment to local array is not supported",
                         )),

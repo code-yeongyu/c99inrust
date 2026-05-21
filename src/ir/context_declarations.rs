@@ -120,6 +120,23 @@ impl LoweringContext {
         Ok(())
     }
 
+    pub(in crate::ir) fn lower_local_int_matrix(
+        &mut self,
+        name: &str,
+        rows: usize,
+        columns: usize,
+        initializer: Option<&[i32]>,
+    ) -> CompileResult<()> {
+        let slot = self.declare_int_matrix(name, rows, columns)?;
+        if let Some(values) = initializer {
+            self.instructions.push(Instruction::InitLocalInts {
+                offset: self.local_offset(slot)?,
+                values: values.to_vec(),
+            });
+        }
+        Ok(())
+    }
+
     pub(in crate::ir) fn lower_local_short_array(
         &mut self,
         name: &str,

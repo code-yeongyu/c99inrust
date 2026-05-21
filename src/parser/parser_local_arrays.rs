@@ -43,6 +43,9 @@ impl Parser<'_> {
         if type_includes_char {
             return self.local_char_array_declaration(name, explicit_length, type_is_unsigned);
         }
+        if !type_includes_short && self.check_punctuator("[") {
+            return self.local_int_matrix_declaration(name, explicit_length);
+        }
         if type_includes_short {
             return self.local_short_array_declaration(name, explicit_length, type_is_unsigned);
         }

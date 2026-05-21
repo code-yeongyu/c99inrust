@@ -71,6 +71,14 @@ fn array_referent(context: &LoweringContext, array: &Expr) -> Option<String> {
         return Some("char".to_owned());
     }
     if let Expr::Identifier(name) = array
+        && matches!(
+            context.local_binding(name),
+            Some(LocalBinding::IntMatrix { .. })
+        )
+    {
+        return Some("int".to_owned());
+    }
+    if let Expr::Identifier(name) = array
         && let Some(GlobalBinding::UnsignedCharMatrix { is_unsigned, .. }) =
             context.global_bindings.get(name)
     {

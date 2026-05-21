@@ -35,6 +35,12 @@ pub enum Statement {
         length: usize,
         initializer: Option<Vec<i32>>,
     },
+    LocalIntMatrix {
+        name: String,
+        rows: usize,
+        columns: usize,
+        initializer: Option<Vec<i32>>,
+    },
     LocalShortArray {
         name: String,
         length: usize,
@@ -89,6 +95,7 @@ pub enum Statement {
         condition: Expr,
         cases: Vec<SwitchCase>,
         default: Vec<Self>,
+        default_position: Option<usize>,
     },
     Expression(Expr),
     Break,

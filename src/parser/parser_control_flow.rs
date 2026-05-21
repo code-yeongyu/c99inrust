@@ -84,6 +84,7 @@ impl Parser<'_> {
         self.expect_punctuator("{")?;
         let mut cases = Vec::new();
         let mut default = Vec::new();
+        let mut default_position = None;
         let mut saw_default = false;
         while !self.check_punctuator("}") {
             if self.check_keyword(Keyword::Case) {
@@ -99,6 +100,7 @@ impl Parser<'_> {
                     return Err(CompileError::new("duplicate default label"));
                 }
                 saw_default = true;
+                default_position = Some(cases.len());
                 self.advance();
                 self.expect_punctuator(":")?;
                 default = self.switch_label_statements()?;
@@ -111,6 +113,7 @@ impl Parser<'_> {
             condition,
             cases,
             default,
+            default_position,
         })
     }
 

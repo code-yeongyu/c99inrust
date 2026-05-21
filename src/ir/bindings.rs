@@ -28,6 +28,11 @@ pub(in crate::ir) enum LocalBinding {
         slot: usize,
         length: usize,
     },
+    IntMatrix {
+        slot: usize,
+        rows: usize,
+        columns: usize,
+    },
     ShortArray {
         slot: usize,
         length: usize,
