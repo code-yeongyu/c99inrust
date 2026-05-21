@@ -41,6 +41,11 @@ impl LoweringContext {
         {
             return self.lower_array_compound_element_pointer_assignment(target, value);
         }
+        if lowered_lvalue_scalar_type(&target) == ScalarType::Pointer
+            && Self::is_struct_compound_member_address(value)
+        {
+            return self.lower_struct_compound_member_pointer_assignment(target, value);
+        }
         let value = self.lower_expr(value)?;
         self.push_store(target, value)
     }

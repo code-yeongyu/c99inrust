@@ -1,10 +1,17 @@
-use super::{LoweredExpr, LoweredLValue, LoweringContext, zero_expr_for};
+use super::{
+    LoweredExpr, LoweredLValue, LoweringContext, StructAddress, pointer_field_address,
+    struct_alignment, zero_expr_for,
+};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, LValue, ScalarType};
+use crate::parser::{Expr, LValue, LocalStructInitializerValue, ScalarType};
 
 impl LoweringContext {
     pub(in crate::ir) fn is_array_compound_element_address(initializer: &Expr) -> bool {
         array_compound_element_address(initializer).is_ok()
+    }
+
+    pub(in crate::ir) fn is_struct_compound_member_address(initializer: &Expr) -> bool {
+        struct_compound_member_address(initializer).is_ok()
     }
 
     pub(in crate::ir) fn lower_array_compound_pointer_initializer(
@@ -57,6 +64,28 @@ impl LoweringContext {
         self.push_store(target, element_pointer)
     }
 
+    pub(in crate::ir) fn lower_struct_compound_member_pointer_initializer(
+        &mut self,
+        pointer_slot: usize,
+        initializer: &Expr,
+    ) -> CompileResult<()> {
+        let target = LoweredLValue::Local {
+            slot: pointer_slot,
+            offset: self.local_offset(pointer_slot)?,
+            scalar_type: ScalarType::Pointer,
+        };
+        self.lower_struct_compound_member_pointer_assignment(target, initializer)
+    }
+
+    pub(in crate::ir) fn lower_struct_compound_member_pointer_assignment(
+        &mut self,
+        target: LoweredLValue,
+        initializer: &Expr,
+    ) -> CompileResult<()> {
+        let pointer = self.lower_struct_compound_member_pointer(initializer)?;
+        self.push_store(target, pointer)
+    }
+
     fn lower_array_compound_pointer(
         &mut self,
         initializer: &Expr,
@@ -99,6 +128,34 @@ impl LoweringContext {
             )?;
         }
         Ok((array_pointer, *element_byte_size))
+    }
+
+    fn lower_struct_compound_member_pointer(
+        &mut self,
+        initializer: &Expr,
+    ) -> CompileResult<LoweredExpr> {
+        let (struct_name, values, field) = struct_compound_member_address(initializer)?;
+        let (byte_size, alignment, field_offset) = {
+            let layout = self.struct_layout(struct_name)?;
+            let field = layout
+                .fields
+                .iter()
+                .find(|candidate| candidate.name == field)
+                .ok_or_else(|| CompileError::new(format!("unknown struct field: {field}")))?;
+            (layout.size, struct_alignment(layout), field.offset)
+        };
+        let slot = self.declare_anonymous_slot(ScalarType::Pointer, byte_size, alignment)?;
+        let pointer = LoweredExpr::LocalAddress {
+            offset: self.local_offset(slot)?,
+            byte_size,
+        };
+        let target = StructAddress {
+            pointer: pointer.clone(),
+            offset: 0,
+            struct_name: struct_name.to_owned(),
+        };
+        self.copy_struct_compound_literal_initializer(&target, struct_name, values)?;
+        Ok(pointer_field_address(pointer, field_offset))
     }
 
     fn lower_array_compound_pointer_value(
@@ -149,4 +206,32 @@ fn array_compound_element_address(initializer: &Expr) -> CompileResult<(&Expr, &
             "expected address of array compound literal element",
         ))
     }
+}
+
+fn struct_compound_member_address(
+    initializer: &Expr,
+) -> CompileResult<(&str, &[LocalStructInitializerValue], &str)> {
+    let Expr::AddressOf {
+        target:
+            LValue::Member {
+                base,
+                field,
+                dereference: false,
+            },
+    } = initializer
+    else {
+        return Err(CompileError::new(
+            "expected address of struct compound literal member",
+        ));
+    };
+    let Expr::StructCompoundLiteral {
+        struct_name,
+        values,
+    } = base.as_ref()
+    else {
+        return Err(CompileError::new(
+            "expected address of struct compound literal member",
+        ));
+    };
+    Ok((struct_name, values, field))
 }

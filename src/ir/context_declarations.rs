@@ -35,6 +35,12 @@ impl LoweringContext {
         {
             return self.lower_array_compound_element_pointer_initializer(slot, initializer);
         }
+        if scalar_type == ScalarType::Pointer
+            && let Some(initializer @ Expr::AddressOf { .. }) = initializer
+            && Self::is_struct_compound_member_address(initializer)
+        {
+            return self.lower_struct_compound_member_pointer_initializer(slot, initializer);
+        }
         let value = if scalar_type == ScalarType::Bool {
             initializer.map_or_else(
                 || Ok(zero_expr_for(scalar_type)),

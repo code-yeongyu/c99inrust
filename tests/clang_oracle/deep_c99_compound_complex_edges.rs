@@ -183,3 +183,39 @@ fn pointer_array_compound_literal_element_address_matches_host_stdout_and_exit_c
     // when/then
     assert_case("pointer_array_compound_literal_element_address", source);
 }
+
+#[test]
+fn struct_compound_literal_member_address_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; int main(void) { int *p = &((pair_t){ 3, 4 }).y; puts(\"compound-member-address-init\"); return *p == 4 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("struct_compound_literal_member_address_initializer", source);
+}
+
+#[test]
+fn struct_compound_literal_member_address_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; int main(void) { int *p; p = &((pair_t){ .x = 8, .y = 9 }).x; puts(\"compound-member-address-assign\"); return *p == 8 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("struct_compound_literal_member_address_assignment", source);
+}
+
+#[test]
+fn complex_struct_compound_literal_member_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { double _Complex z; int tag; } box_t; int main(void) { double _Complex z = 5.0; double *zp = (double *)&z; zp[1] = 6.0; double _Complex *p = &((box_t){ z, 2 }).z; double *raw = (double *)p; puts(\"compound-complex-member-address\"); return raw[0] == 5.0 && raw[1] == 6.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_struct_compound_literal_member_address", source);
+}
+
+#[test]
+fn pointer_struct_compound_literal_member_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { char *text; int tag; } box_t; int main(void) { char **p = &((box_t){ \"az\", 7 }).text; puts(\"compound-pointer-member-address\"); return (*p)[1] == 'z' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("pointer_struct_compound_literal_member_address", source);
+}
