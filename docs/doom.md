@@ -555,6 +555,8 @@ tools/doom-manual-play.sh /tmp/c99inrust-doom-src /path/to/doom1.wad /tmp/c99inr
 
 Evidence and tmux instructions are recorded in
 `docs/qa/2026-05-20-doom-manual-play.md`.
+Use `tools/doom-validate-manual-transcript.sh` on a completed
+`manual-transcript.txt` before treating a human-visible run as final evidence.
 
 ## Playability Gate
 

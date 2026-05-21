@@ -115,6 +115,19 @@ The harness writes these fields to `manual-transcript.txt` in the output
 directory. Build-only and blocked runs prefill the compile/link fields; for a
 human-visible play session, fill in the empty gameplay fields after the run.
 
+Validate a completed transcript before claiming human-visible manual
+playability:
+
+```bash
+tools/doom-validate-manual-transcript.sh /tmp/c99inrust-doom-manual-play/manual-transcript.txt
+```
+
+The validator fails skipped or blocked runs. It only accepts a transcript with
+`manual_run=finished`, `final_status=0`, `compile_ok=62 compile_fail=0`,
+`link_status=0`, a real commit, a tmux session, a display, and truthy
+`window_visible`, `map_started`, `arrow_keys_move`, and
+`strafe_fire_use_respond` fields.
+
 ## Current Evidence Status
 
 The automated movement smoke already proves visible-window startup, scripted

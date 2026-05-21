@@ -80,6 +80,56 @@ jobs:
           bash -n tools/doom-input-smoke.sh
           bash -n tools/doom-movement-smoke.sh
           bash -n tools/doom-manual-play.sh
+          bash -n tools/doom-validate-manual-transcript.sh
+      - name: Manual transcript validator smoke
+        run: |
+          valid="$RUNNER_TEMP/manual-transcript-valid.txt"
+          skipped="$RUNNER_TEMP/manual-transcript-skipped.txt"
+          printf '%s\n' \
+            'operator=CI Operator' \
+            'date=2026-05-21 00:00 UTC' \
+            'commit=ci-proof' \
+            'tmux_session=c99inrust-doom-manual' \
+            'out=/tmp/c99inrust-doom-manual-play' \
+            'doom_source=/tmp/c99inrust-doom-src' \
+            'iwad=/tmp/doom1.wad' \
+            'display=:0' \
+            'compile_ok=62 compile_fail=0' \
+            'link_status=0' \
+            'manual_run=finished' \
+            'reason=' \
+            'window_visible=yes' \
+            'map_started=yes' \
+            'arrow_keys_move=yes' \
+            'strafe_fire_use_respond=yes' \
+            'exit_method=menu quit' \
+            'final_status=0' \
+            'notes=validator smoke' > "$valid"
+          tools/doom-validate-manual-transcript.sh "$valid"
+          printf '%s\n' \
+            'operator=' \
+            'date=2026-05-21 00:00 UTC' \
+            'commit=ci-proof' \
+            'tmux_session=c99inrust-doom-manual' \
+            'out=/tmp/c99inrust-doom-manual-play' \
+            'doom_source=/tmp/c99inrust-doom-src' \
+            'iwad=/tmp/doom1.wad' \
+            'display=' \
+            'compile_ok=62 compile_fail=0' \
+            'link_status=0' \
+            'manual_run=skipped' \
+            'reason=DOOM_MANUAL_RUN=0' \
+            'window_visible=' \
+            'map_started=' \
+            'arrow_keys_move=' \
+            'strafe_fire_use_respond=' \
+            'exit_method=' \
+            'final_status=0' \
+            'notes=' > "$skipped"
+          if tools/doom-validate-manual-transcript.sh "$skipped"; then
+            printf 'expected skipped manual transcript to fail validation\n' >&2
+            exit 1
+          fi
       - name: Rust no-excuse rules
         run: tools/check-rust-no-excuses.sh src tests
       - name: Nextest
