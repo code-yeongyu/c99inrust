@@ -111,10 +111,11 @@ The link scan is also a CI gate and does not require an IWAD: it proves that all
 62 official C translation units compile to x86_64 Linux assembly and link into a
 Linux/X11 ELF.
 
-The latest manual harness run on commit `d7e708e` compiled all 62 official C
-files and linked the Doom binary, then stopped with `manual_run=blocked` because
-this host had no `DISPLAY` or `DOOM_DOCKER_DISPLAY` for a human-visible X11
-session.
+The latest manual harness build-only run on commit `6a86d86` compiled all 62
+official C files, linked the Doom binary, and stopped deliberately with
+`manual_run=skipped` because `DOOM_MANUAL_RUN=0` was set. A completed
+human-visible X11 playthrough transcript is still the remaining manual evidence
+gap.
 
 ## Development
 
