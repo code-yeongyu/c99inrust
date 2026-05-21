@@ -110,3 +110,22 @@ link_status=0
 /out/linuxdoom-c99inrust: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, BuildID[sha1]=fb94a33afbca55422922016083b19176afb27bbf, for GNU/Linux 3.2.0, with debug_info, not stripped
 binary=/tmp/c99inrust-doom-link-scan-d9836c4-mega-c/linuxdoom-c99inrust
 ```
+
+## CI Recheck After Mega-D Oracle Wave
+
+Date: 2026-05-21 09:24 KST
+Commit: `5a2f0bb test(c99): add mega oracle edge wave`
+GitHub Actions run: `26197824812`
+
+The full CI workflow completed successfully after adding another 20
+Clang-oracle edge cases. The `doom compile/link scan` job rebuilt the compiler,
+cloned the official public Doom source, compiled all 62 official translation
+units, and linked the Linux/X11 executable without requiring an IWAD or display.
+
+Result:
+
+```text
+compile_ok=62 compile_fail=0
+link_status=0
+conclusion=success
+```

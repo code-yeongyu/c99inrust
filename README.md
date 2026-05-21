@@ -83,7 +83,7 @@ with system `gcc`. The latest local no-IWAD compile/link recheck on commit
 `d9836c4` produced `compile_ok=62 compile_fail=0`, `link_status=0`, and an
 x86_64 Linux/X11 ELF with BuildID
 `fb94a33afbca55422922016083b19176afb27bbf`. The latest CI no-IWAD
-compile/link gate on commit `2000360` in GitHub Actions run `26190196636`
+compile/link gate on commit `5a2f0bb` in GitHub Actions run `26197824812`
 also produced `compile_ok=62 compile_fail=0` and `link_status=0`. The latest
 automated Xvfb movement smoke on commit `2eb3f12` produced
 `compile_ok=62 compile_fail=0`, `link_status=0`, `display_status=0`,

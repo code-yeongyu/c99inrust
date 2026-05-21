@@ -391,8 +391,8 @@ Evidence is recorded in `docs/qa/2026-05-21-doom-link-scan.md`.
 Latest CI recheck:
 
 ```text
-commit=2000360
-github_actions_run=26190196636
+commit=5a2f0bb
+github_actions_run=26197824812
 job=doom compile/link scan
 compile_ok=62 compile_fail=0
 link_status=0
