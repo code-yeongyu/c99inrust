@@ -6,7 +6,11 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{FieldType, ScalarType};
 
 impl LoweringContext {
-    pub(in crate::ir) fn push_store(&mut self, target: LoweredLValue, value: LoweredExpr) {
+    pub(in crate::ir) fn push_store(
+        &mut self,
+        target: LoweredLValue,
+        value: LoweredExpr,
+    ) -> CompileResult<()> {
         match target {
             LoweredLValue::Local {
                 slot,
@@ -26,6 +30,7 @@ impl LoweringContext {
                     scalar_type,
                     value: store_value_for_scalar(scalar_type, value),
                 });
+                Ok(())
             }
             LoweredLValue::Global { name, scalar_type } => {
                 if is_complex_scalar(scalar_type) {
@@ -37,14 +42,15 @@ impl LoweringContext {
                     scalar_type,
                     value: store_value_for_scalar(scalar_type, value),
                 });
+                Ok(())
             }
             target @ (LoweredLValue::GlobalByteSubscript { .. }
             | LoweredLValue::GlobalIntSubscript { .. }
             | LoweredLValue::GlobalPointerSubscript { .. }
             | LoweredLValue::PointerSubscript { .. }
             | LoweredLValue::PointerField { .. }) => {
-                if self.push_complex_indirect_store(&target, value.clone()) {
-                    return;
+                if self.push_complex_indirect_store(&target, value.clone())? {
+                    return Ok(());
                 }
                 let value = store_value_for_lvalue(&target, value);
                 self.instructions
@@ -52,6 +58,7 @@ impl LoweringContext {
                         target,
                         value: Box::new(value),
                     }));
+                Ok(())
             }
         }
     }
@@ -79,7 +86,7 @@ impl LoweringContext {
                     source_offset,
                     field.scalar_type,
                     field.byte_size,
-                ),
+                )?,
                 FieldType::Pointer { .. } => self.push_struct_scalar_copy(
                     target,
                     source,
@@ -87,7 +94,7 @@ impl LoweringContext {
                     source_offset,
                     ScalarType::Pointer,
                     scalar_size(ScalarType::Pointer),
-                ),
+                )?,
                 FieldType::Array {
                     element_type,
                     element_size,
@@ -110,7 +117,7 @@ impl LoweringContext {
                             source_element_offset,
                             element_type,
                             element_size,
-                        );
+                        )?;
                     }
                 }
                 FieldType::Struct(struct_name) => {
@@ -168,7 +175,7 @@ impl LoweringContext {
         source_offset: usize,
         scalar_type: ScalarType,
         byte_size: usize,
-    ) {
+    ) -> CompileResult<()> {
         self.push_store(
             LoweredLValue::PointerField {
                 pointer: Box::new(target.pointer.clone()),
@@ -184,7 +191,7 @@ impl LoweringContext {
                 byte_size,
                 is_unsigned: false,
             },
-        );
+        )
     }
 }
 

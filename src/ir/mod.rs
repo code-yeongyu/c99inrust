@@ -4,6 +4,8 @@ const VARIADIC_GP_SAVE_BYTES: usize = 64;
 mod bindings;
 mod builtin_calls;
 mod call_args;
+mod complex_arithmetic_store;
+mod complex_scalar_parts;
 mod complex_scalar_store;
 mod compound_literal_storage;
 mod compound_literals;
@@ -62,7 +64,10 @@ pub(in crate::ir) use bindings::{
     ArrayFieldSubscript, GlobalBinding, LocalBinding, NestedArrayFieldSubscript, ResolvedMember,
     StructAddress,
 };
-pub(in crate::ir) use complex_scalar_store::is_complex_scalar;
+pub(in crate::ir) use complex_scalar_parts::{
+    complex_binary_operands, complex_indirect_target, complex_lane_byte_size, complex_lane_expr,
+    complex_object_pointer, is_complex_scalar,
+};
 pub(in crate::ir) use const_eval::{cast_const_value, eval_binary};
 pub(in crate::ir) use constant_inlining::{constant_return_functions, inline_constant_calls};
 pub(in crate::ir) use constant_tables::{

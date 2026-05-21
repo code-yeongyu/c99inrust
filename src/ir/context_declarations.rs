@@ -47,8 +47,7 @@ impl LoweringContext {
                 scalar_type,
             },
             value,
-        );
-        Ok(())
+        )
     }
 
     pub(in crate::ir) fn lower_static_declaration(
@@ -180,7 +179,7 @@ impl LoweringContext {
                     element_unsigned: false,
                 };
                 let value = self.lower_expr(value)?;
-                self.push_store(target, value);
+                self.push_store(target, value)?;
             }
         }
         Ok(())

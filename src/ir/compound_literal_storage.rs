@@ -58,8 +58,7 @@ impl LoweringContext {
                 values.get(index),
             )?;
         }
-        self.push_store(target, array_pointer);
-        Ok(())
+        self.push_store(target, array_pointer)
     }
 
     fn lower_array_compound_pointer_value(
@@ -86,8 +85,7 @@ impl LoweringContext {
                 element_unsigned,
             },
             value,
-        );
-        Ok(())
+        )
     }
 }
 

@@ -26,8 +26,7 @@ impl LoweringContext {
             return self.lower_array_compound_pointer_assignment(target, value);
         }
         let value = self.lower_expr(value)?;
-        self.push_store(target, value);
-        Ok(())
+        self.push_store(target, value)
     }
 
     pub(in crate::ir) fn lower_lvalue(&self, target: &LValue) -> CompileResult<LoweredLValue> {

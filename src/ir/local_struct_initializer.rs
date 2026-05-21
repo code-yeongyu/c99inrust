@@ -117,7 +117,7 @@ impl LoweringContext {
                             is_unsigned: field.is_unsigned,
                         },
                         self.lower_expr(expr)?,
-                    );
+                    )?;
                 }
                 FieldType::Pointer { .. } => {
                     let expr = expr_initializer_value(&values[*value_index])?;
@@ -131,7 +131,7 @@ impl LoweringContext {
                             is_unsigned: false,
                         },
                         self.lower_expr(expr)?,
-                    );
+                    )?;
                 }
                 FieldType::Struct(struct_name) => {
                     let nested_target = StructAddress {

@@ -67,7 +67,7 @@ impl LoweringContext {
                     is_unsigned: field.element_unsigned,
                 },
                 self.lower_expr(expr)?,
-            );
+            )?;
         }
         Ok(())
     }
@@ -93,7 +93,7 @@ impl LoweringContext {
                     is_unsigned: field.element_unsigned,
                 },
                 self.lower_expr(expr)?,
-            );
+            )?;
         }
         Ok(())
     }
@@ -114,7 +114,7 @@ impl LoweringContext {
                     is_unsigned: field.element_unsigned,
                 },
                 LoweredExpr::Integer(i64::from(*byte)),
-            );
+            )?;
         }
         Ok(())
     }

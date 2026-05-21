@@ -22,8 +22,7 @@ impl LoweringContext {
                 left: Box::new(current),
                 right: Box::new(LoweredExpr::Integer(increment)),
             },
-        );
-        Ok(())
+        )
     }
 
     pub(in crate::ir) fn lower_post_increment_expr(
