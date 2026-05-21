@@ -34,6 +34,7 @@ mod model;
 mod parser_assignment_ops;
 mod parser_control_flow;
 mod parser_declaration_types;
+mod parser_designated_initializers;
 mod parser_expression_core;
 mod parser_expression_helpers;
 mod parser_expression_postfix;
@@ -97,6 +98,7 @@ pub use model::{
     GlobalStructInitializerValue, PointerReturnFunction, ReturnType, ScalarFieldType, ScalarType,
     StructField, StructLayout,
 };
+use parser_designated_initializers::{struct_field_designator, struct_field_index, zero_expr};
 use parser_expression_helpers::{lvalue_from_expr, prefix_update_expr, statement_from_expression};
 pub use program::{Function, Parameter, Program};
 use surface_parser::SurfaceParser;

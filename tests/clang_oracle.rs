@@ -6,6 +6,8 @@ mod control_flow;
 mod deep_c99_bughunt_wave_a;
 #[path = "clang_oracle/deep_c99_calls_more.rs"]
 mod deep_c99_calls_more;
+#[path = "clang_oracle/deep_c99_designated_initializers.rs"]
+mod deep_c99_designated_initializers;
 #[path = "clang_oracle/deep_c99_doom_adjacent_next.rs"]
 mod deep_c99_doom_adjacent_next;
 #[path = "clang_oracle/deep_c99_doom_runtime_tables.rs"]

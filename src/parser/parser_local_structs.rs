@@ -4,7 +4,8 @@ use super::token_scan::top_level_comma_ranges;
 use super::{
     CompileError, CompileResult, Keyword, LocalStructInitializer, LocalStructInitializerValue,
     Parser, Statement, TokenKind, anonymous_union_struct_name, local_array_length,
-    matching_top_level_brace, token_identifier, token_is_keyword, token_is_punctuator,
+    matching_top_level_brace, struct_field_designator, struct_field_index, token_identifier,
+    token_is_keyword, token_is_punctuator, zero_expr,
 };
 
 impl Parser<'_> {
@@ -47,7 +48,7 @@ impl Parser<'_> {
                 Statement::LocalStruct {
                     name,
                     struct_name: struct_name.clone(),
-                    initializer: Some(self.local_struct_initializer()?),
+                    initializer: Some(self.local_struct_initializer(&struct_name)?),
                 }
             } else {
                 Statement::LocalStruct {
@@ -129,13 +130,31 @@ impl Parser<'_> {
         }))
     }
 
-    fn local_struct_initializer(&mut self) -> CompileResult<LocalStructInitializer> {
+    fn local_struct_initializer(
+        &mut self,
+        struct_name: &str,
+    ) -> CompileResult<LocalStructInitializer> {
         if self.check_punctuator("{") {
             return self
-                .local_struct_initializer_values()
+                .local_struct_initializer_values_for_struct(struct_name)
                 .map(LocalStructInitializer::Values);
         }
         self.expression().map(LocalStructInitializer::Copy)
+    }
+
+    fn local_struct_initializer_values_for_struct(
+        &mut self,
+        struct_name: &str,
+    ) -> CompileResult<Vec<LocalStructInitializerValue>> {
+        let open_brace = self.index;
+        let close_brace = matching_top_level_brace(self.tokens, open_brace)
+            .ok_or_else(|| CompileError::new("unterminated local struct initializer"))?;
+        let values = self.parse_local_struct_initializer_values_for_struct(
+            struct_name,
+            &self.tokens[open_brace + 1..close_brace],
+        )?;
+        self.index = close_brace + 1;
+        Ok(values)
     }
 
     fn local_struct_initializer_values(
@@ -160,6 +179,36 @@ impl Parser<'_> {
                 continue;
             }
             values.push(self.parse_local_struct_initializer_value(&tokens[start..end])?);
+        }
+        Ok(values)
+    }
+
+    fn parse_local_struct_initializer_values_for_struct(
+        &self,
+        struct_name: &str,
+        tokens: &[Token],
+    ) -> CompileResult<Vec<LocalStructInitializerValue>> {
+        let mut values = Vec::new();
+        let mut next_index = 0usize;
+        for (start, end) in top_level_comma_ranges(tokens) {
+            if start == end {
+                continue;
+            }
+            let item = &tokens[start..end];
+            let (index, value_tokens) =
+                if let Some((field_name, value_tokens)) = struct_field_designator(item)? {
+                    let index = struct_field_index(self.known_structs, struct_name, field_name)?;
+                    next_index = index + 1;
+                    (index, value_tokens)
+                } else {
+                    let index = next_index;
+                    next_index += 1;
+                    (index, item)
+                };
+            if values.len() <= index {
+                values.resize_with(index + 1, || LocalStructInitializerValue::Expr(zero_expr()));
+            }
+            values[index] = self.parse_local_struct_initializer_value(value_tokens)?;
         }
         Ok(values)
     }

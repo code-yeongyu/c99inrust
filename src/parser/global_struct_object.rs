@@ -45,6 +45,7 @@ pub(super) fn parse(
     } else {
         global_struct_initializer::parse_object(
             &declaration[end_index + 1..],
+            &struct_name,
             known_structs,
             constants,
         )?

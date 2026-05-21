@@ -118,13 +118,25 @@ impl Parser<'_> {
             self.advance();
             return Ok(values);
         }
+        let mut next_index = 0usize;
         loop {
+            let index = if let Some(index) = self.local_array_designator_index()? {
+                next_index = index + 1;
+                index
+            } else {
+                let index = next_index;
+                next_index += 1;
+                index
+            };
             let value = eval_integer_initializer_expr_with_constants(
                 &self.assignment()?,
                 self.known_constants,
             )?
             .to_i64_trunc()?;
-            values.push(local_char_initializer_byte(value)?);
+            if values.len() <= index {
+                values.resize(index + 1, 0);
+            }
+            values[index] = local_char_initializer_byte(value)?;
             if self.check_punctuator("}") {
                 self.advance();
                 return Ok(values);

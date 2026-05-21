@@ -49,12 +49,22 @@ impl Parser<'_> {
             self.advance();
             return Ok(values);
         }
+        let mut next_index = 0usize;
         loop {
+            let index = if let Some(index) = self.local_array_designator_index()? {
+                next_index = index + 1;
+                index
+            } else {
+                let index = next_index;
+                next_index += 1;
+                index
+            };
             let value = self.local_int_initializer_value()?;
-            values.push(
-                i32::try_from(value)
-                    .map_err(|_| CompileError::new("local int array initializer too large"))?,
-            );
+            if values.len() <= index {
+                values.resize(index + 1, 0);
+            }
+            values[index] = i32::try_from(value)
+                .map_err(|_| CompileError::new("local int array initializer too large"))?;
             if self.check_punctuator("}") {
                 self.advance();
                 return Ok(values);

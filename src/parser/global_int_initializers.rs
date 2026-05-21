@@ -58,6 +58,7 @@ pub(super) fn parse_int_array_initializer(
 
     let mut values = Vec::new();
     let mut start = 1usize;
+    let mut next_index = 0usize;
     while start < close_brace {
         let item = &tokens[start..close_brace];
         let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
@@ -83,9 +84,12 @@ pub(super) fn parse_int_array_initializer(
                 parse_integer_initializer_with_context(&item[1..close], constants, sizeof_symbols)?;
             let index = usize::try_from(index)
                 .map_err(|_| CompileError::new("global int array designator is negative"))?;
+            next_index = index + 1;
             (index, &item[(close + 2)..])
         } else {
-            (values.len(), item)
+            let index = next_index;
+            next_index += 1;
+            (index, item)
         };
         let value =
             parse_integer_initializer_with_context(value_tokens, constants, sizeof_symbols)?;

@@ -4,7 +4,8 @@ use crate::front_end::lexer::Token;
 use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
     Constant, Expr, GlobalStructInitializerAddress, GlobalStructInitializerValue, LValue, Parser,
-    StructLayout, eval_integer_initializer_expr_with_constants,
+    StructLayout, eval_integer_initializer_expr_with_constants, struct_field_designator,
+    struct_field_index,
 };
 
 pub(super) fn parse(
@@ -49,6 +50,7 @@ pub(super) fn parse(
 
 pub(super) fn parse_object(
     tokens: &[Token],
+    struct_name: &str,
     known_structs: &[StructLayout],
     constants: &[Constant],
 ) -> CompileResult<Vec<GlobalStructInitializerValue>> {
@@ -70,7 +72,12 @@ pub(super) fn parse_object(
         );
     }
 
-    parse_values(&tokens[1..close_brace], known_structs, constants)
+    parse_values_for_struct(
+        &tokens[1..close_brace],
+        struct_name,
+        known_structs,
+        constants,
+    )
 }
 
 fn parse_row(
@@ -110,6 +117,37 @@ fn parse_values(
             continue;
         }
         values.push(parse_value(&tokens[start..end], known_structs, constants)?);
+    }
+    Ok(values)
+}
+
+fn parse_values_for_struct(
+    tokens: &[Token],
+    struct_name: &str,
+    known_structs: &[StructLayout],
+    constants: &[Constant],
+) -> CompileResult<Vec<GlobalStructInitializerValue>> {
+    let mut values = Vec::new();
+    let mut next_index = 0usize;
+    for (start, end) in top_level_comma_ranges(tokens) {
+        if start == end {
+            continue;
+        }
+        let item = &tokens[start..end];
+        let (index, value_tokens) =
+            if let Some((field_name, value_tokens)) = struct_field_designator(item)? {
+                let index = struct_field_index(known_structs, struct_name, field_name)?;
+                next_index = index + 1;
+                (index, value_tokens)
+            } else {
+                let index = next_index;
+                next_index += 1;
+                (index, item)
+            };
+        if values.len() <= index {
+            values.resize(index + 1, GlobalStructInitializerValue::Integer(0));
+        }
+        values[index] = parse_value(value_tokens, known_structs, constants)?;
     }
     Ok(values)
 }
