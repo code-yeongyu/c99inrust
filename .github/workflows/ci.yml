@@ -5,9 +5,6 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   rust:
     name: rust (${{ matrix.os }})
@@ -179,7 +176,7 @@ jobs:
           grep -qx 'link_status=0' "$RUNNER_TEMP/doom-link-scan/link-scan.log"
       - name: Upload Doom compile/link proof
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: doom-compile-link-proof-${{ github.sha }}
           path: |
