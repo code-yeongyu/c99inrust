@@ -43,6 +43,9 @@ impl LoweringContext {
             | LoweredLValue::GlobalPointerSubscript { .. }
             | LoweredLValue::PointerSubscript { .. }
             | LoweredLValue::PointerField { .. }) => {
+                if self.push_complex_indirect_store(&target, value.clone()) {
+                    return;
+                }
                 let value = store_value_for_lvalue(&target, value);
                 self.instructions
                     .push(Instruction::Eval(LoweredExpr::Assign {

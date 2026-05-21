@@ -288,3 +288,55 @@ fn local_complex_float_assignment_preserves_imaginary_lane_matches_host_stdout_a
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn complex_struct_field_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "complex_struct_field_assignment_preserves_imaginary_lane";
+    let source = "int puts(char*); typedef struct { int tag; double _Complex z; } box_t; int main(void) { double _Complex a = 1.0; double *ap = (double *)&a; ap[1] = 7.0; box_t box; box.z = a; double *bp = (double *)&box.z; puts(\"complex-field-assign\"); return (int)bp[0] + (int)bp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn complex_pointer_subscript_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code()
+{
+    // given
+    let name = "complex_pointer_subscript_assignment_preserves_imaginary_lane";
+    let source = "int puts(char*); void *malloc(int); int main(void) { double _Complex *items = (double _Complex*)malloc(2 * sizeof(double _Complex)); double *raw = (double *)items; raw[2] = 3.0; raw[3] = 4.0; items[0] = items[1]; puts(\"complex-pointer-assign\"); return (int)raw[0] + (int)raw[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn complex_array_compound_literal_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "complex_array_compound_literal_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { double _Complex a = 2.0; double *ap = (double *)&a; ap[1] = 5.0; double _Complex *items = (double _Complex[]){ 0.0, a }; double *raw = (double *)&items[1]; puts(\"complex-compound-array\"); return (int)raw[0] + (int)raw[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn complex_addition_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "complex_addition_assignment_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { double _Complex a = 1.0; double _Complex b = 3.0; double *ap = (double *)&a; double *bp = (double *)&b; ap[1] = 2.0; bp[1] = 4.0; double _Complex sum = a + b; double *sp = (double *)&sum; puts(\"complex-add\"); return (int)sp[0] + (int)sp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn complex_float_subtraction_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code()
+{
+    // given
+    let name = "complex_float_subtraction_assignment_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { float _Complex a = 9.0; float _Complex b = 4.0; float *ap = (float *)&a; float *bp = (float *)&b; ap[1] = 7.0; bp[1] = 2.0; float _Complex diff = a - b; float *dp = (float *)&diff; puts(\"complex-float-sub\"); return (int)dp[0] * 10 + (int)dp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
