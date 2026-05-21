@@ -1,7 +1,7 @@
 use super::{
-    CompileError, CompileResult, Expr, LocalCharArrayInitializer, Parser, ScalarType, Statement,
-    eval_integer_initializer_expr_with_constants, inferred_local_char_array_length,
-    local_array_length, validate_local_char_array_initializer,
+    CompileError, CompileResult, Expr, LocalCharArrayInitializer, LocalVlaElement, Parser,
+    ScalarType, Statement, eval_integer_initializer_expr_with_constants,
+    inferred_local_char_array_length, local_array_length,
     validate_local_char_array_initializer_size,
 };
 
@@ -20,16 +20,17 @@ impl Parser<'_> {
         name: String,
     ) -> CompileResult<Statement> {
         self.advance();
-        let explicit_length = if self.check_punctuator("]") {
+        let explicit_length_expr = if self.check_punctuator("]") {
             None
         } else {
-            Some(local_array_length(
-                &self.expression()?,
-                self.known_constants,
-            )?)
+            Some(self.expression()?)
         };
         self.expect_punctuator("]")?;
         if scalar_type == ScalarType::Pointer {
+            let explicit_length = explicit_length_expr
+                .as_ref()
+                .map(|expr| local_array_length(expr, self.known_constants))
+                .transpose()?;
             return self.local_pointer_array_declaration(name, explicit_length);
         }
         if scalar_type != ScalarType::Int {
@@ -37,7 +38,29 @@ impl Parser<'_> {
                 "only local int, char, and pointer arrays are supported",
             ));
         }
-        if type_includes_char && self.check_punctuator("[") {
+        let has_second_dimension = self.check_punctuator("[");
+        if let Some(length) = &explicit_length_expr {
+            let element = if type_includes_char {
+                Some(LocalVlaElement::Char {
+                    is_unsigned: type_is_unsigned,
+                })
+            } else if type_includes_short {
+                None
+            } else {
+                Some(LocalVlaElement::Int)
+            };
+            if let Some(element) = element
+                && let Some(statement) =
+                    self.local_vla_array_declaration(element, &name, length, has_second_dimension)?
+            {
+                return Ok(statement);
+            }
+        }
+        let explicit_length = explicit_length_expr
+            .as_ref()
+            .map(|expr| local_array_length(expr, self.known_constants))
+            .transpose()?;
+        if type_includes_char && has_second_dimension {
             return self.local_char_matrix_declaration(name, explicit_length);
         }
         if type_includes_char {
@@ -137,61 +160,6 @@ impl Parser<'_> {
                 values.resize(index + 1, 0);
             }
             values[index] = local_char_initializer_byte(value)?;
-            if self.check_punctuator("}") {
-                self.advance();
-                return Ok(values);
-            }
-            self.expect_punctuator(",")?;
-            if self.check_punctuator("}") {
-                self.advance();
-                return Ok(values);
-            }
-        }
-    }
-
-    pub(super) fn local_char_matrix_declaration(
-        &mut self,
-        name: String,
-        explicit_rows: Option<usize>,
-    ) -> CompileResult<Statement> {
-        let Some(rows) = explicit_rows else {
-            return Err(CompileError::new("local char matrix rows require a size"));
-        };
-        self.expect_punctuator("[")?;
-        let columns = local_array_length(&self.expression()?, self.known_constants)?;
-        self.expect_punctuator("]")?;
-        let initializer = if self.check_punctuator("=") {
-            self.advance();
-            Some(self.local_string_list_initializer(columns)?)
-        } else {
-            None
-        };
-        Ok(Statement::LocalCharMatrix {
-            name,
-            rows,
-            columns,
-            initializer,
-        })
-    }
-
-    pub(super) fn local_string_list_initializer(
-        &mut self,
-        columns: usize,
-    ) -> CompileResult<Vec<String>> {
-        self.expect_punctuator("{")?;
-        let mut values = Vec::new();
-        if self.check_punctuator("}") {
-            self.advance();
-            return Ok(values);
-        }
-        loop {
-            let Expr::StringLiteral(value) = self.assignment()? else {
-                return Err(CompileError::new(
-                    "local char matrix initializers require string literals",
-                ));
-            };
-            validate_local_char_array_initializer(&value, columns)?;
-            values.push(value);
             if self.check_punctuator("}") {
                 self.advance();
                 return Ok(values);
