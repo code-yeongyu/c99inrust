@@ -36,6 +36,8 @@ mod deep_c99_requested_more_eval;
 mod deep_c99_requested_more_layout;
 #[path = "clang_oracle/deep_c99_requested_next_wave.rs"]
 mod deep_c99_requested_next_wave;
+#[path = "clang_oracle/deep_c99_requested_stress.rs"]
+mod deep_c99_requested_stress;
 #[path = "clang_oracle/deep_c99_requested_ultra.rs"]
 mod deep_c99_requested_ultra;
 #[path = "clang_oracle/doom_platform_layouts.rs"]
