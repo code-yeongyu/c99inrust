@@ -40,12 +40,22 @@ pub(in crate::ir) fn merge_global_binding(
     }
     match (existing, incoming) {
         (
-            GlobalBinding::PointerArray { referent, columns },
+            GlobalBinding::PointerArray {
+                referent,
+                length,
+                columns,
+            },
             GlobalBinding::PointerArray {
                 referent: incoming_referent,
+                length: incoming_length,
                 columns: incoming_columns,
             },
         ) if referent == incoming_referent => {
+            let OptionalUsizeMerge::Compatible(merged_length) =
+                merge_optional_usize(*length, *incoming_length)
+            else {
+                return None;
+            };
             let OptionalUsizeMerge::Compatible(merged_columns) =
                 merge_optional_usize(*columns, *incoming_columns)
             else {
@@ -53,6 +63,7 @@ pub(in crate::ir) fn merge_global_binding(
             };
             Some(GlobalBinding::PointerArray {
                 referent: referent.clone(),
+                length: merged_length,
                 columns: merged_columns,
             })
         }

@@ -71,6 +71,7 @@ pub(in crate::ir) enum GlobalBinding {
     },
     PointerArray {
         referent: Option<String>,
+        length: Option<usize>,
         columns: Option<usize>,
     },
     StructObject {

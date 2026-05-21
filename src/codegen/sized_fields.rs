@@ -13,10 +13,16 @@ pub(in crate::codegen) fn emit_aarch64_load(
     offset: usize,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    if byte_size == 1 && width == ValueWidth::I32 {
+    if byte_size == 1 && width == ValueWidth::I32 && is_unsigned {
         return write_assembly(
             assembly,
             format_args!("\tldrb w0, [{base_register}, #{offset}]\n"),
+        );
+    }
+    if byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly(
+            assembly,
+            format_args!("\tldrsb w0, [{base_register}, #{offset}]\n"),
         );
     }
     if byte_size == 2 && width == ValueWidth::I32 && is_unsigned {
@@ -80,10 +86,16 @@ pub(in crate::codegen) fn emit_x86_64_load(
     offset: usize,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    if byte_size == 1 && width == ValueWidth::I32 {
+    if byte_size == 1 && width == ValueWidth::I32 && is_unsigned {
         return write_assembly(
             assembly,
             format_args!("\tmovzbl {offset}({base_register}), %eax\n"),
+        );
+    }
+    if byte_size == 1 && width == ValueWidth::I32 {
+        return write_assembly(
+            assembly,
+            format_args!("\tmovsbl {offset}({base_register}), %eax\n"),
         );
     }
     if byte_size == 2 && width == ValueWidth::I32 && is_unsigned {

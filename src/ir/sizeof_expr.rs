@@ -54,6 +54,10 @@ fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Optio
             .ok_or_else(|| CompileError::new("sizeof global array overflow"))
             .map(Some),
         Some(GlobalBinding::StructObject { byte_size, .. }) => Ok(Some(*byte_size)),
+        Some(GlobalBinding::PointerArray {
+            length: Some(length),
+            ..
+        }) => local_pointer_array_byte_size(*length).map(Some),
         _ => Ok(None),
     }
 }

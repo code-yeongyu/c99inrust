@@ -6,6 +6,8 @@ mod control_flow;
 mod deep_c99_calls_more;
 #[path = "clang_oracle/deep_c99_doom_adjacent_next.rs"]
 mod deep_c99_doom_adjacent_next;
+#[path = "clang_oracle/deep_c99_doom_runtime_tables.rs"]
+mod deep_c99_doom_runtime_tables;
 #[path = "clang_oracle/deep_c99_edges.rs"]
 mod deep_c99_edges;
 #[path = "clang_oracle/deep_c99_expressions_more.rs"]

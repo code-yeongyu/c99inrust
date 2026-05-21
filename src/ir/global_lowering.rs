@@ -58,6 +58,7 @@ pub(in crate::ir) fn lower_extern_global_binding(
         GlobalInitializer::ExternPointerArray { referent, columns } => {
             GlobalBinding::PointerArray {
                 referent: referent.clone(),
+                length: None,
                 columns: *columns,
             }
         }

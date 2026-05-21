@@ -88,8 +88,9 @@ fn array_referent(context: &LoweringContext, array: &Expr) -> Option<String> {
         return Some("short".to_owned());
     }
     if let Expr::Identifier(name) = array
-        && let Some(GlobalBinding::PointerArray { referent, columns }) =
-            context.global_bindings.get(name)
+        && let Some(GlobalBinding::PointerArray {
+            referent, columns, ..
+        }) = context.global_bindings.get(name)
     {
         if columns.is_some() {
             return Some(pointer_arithmetic::nested_referent(referent.as_deref()));
