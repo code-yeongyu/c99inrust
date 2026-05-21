@@ -147,3 +147,39 @@ fn struct_array_field_compound_literal_assignment_matches_host_stdout_and_exit_c
     // when/then
     assert_case("struct_array_field_compound_literal_assignment", source);
 }
+
+#[test]
+fn array_compound_literal_element_address_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int *p = &(int[3]){ 4, 5, 6 }[1]; puts(\"compound-element-address-init\"); return *p == 5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("array_compound_literal_element_address_initializer", source);
+}
+
+#[test]
+fn array_compound_literal_element_address_assignment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { unsigned char *p; p = &(unsigned char[3]){ 250, 4, 6 }[0]; puts(\"compound-element-address-assign\"); return p[0] + p[1] == 254 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("array_compound_literal_element_address_assignment", source);
+}
+
+#[test]
+fn complex_array_compound_literal_element_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 3.0; double *zp = (double *)&z; zp[1] = 4.0; double _Complex *p = &(double _Complex[2]){ 0.0, z }[1]; double *raw = (double *)p; puts(\"compound-complex-element-address\"); return raw[0] == 3.0 && raw[1] == 4.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_array_compound_literal_element_address", source);
+}
+
+#[test]
+fn pointer_array_compound_literal_element_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { char **p = &(char *[2]){ \"a\", \"bc\" }[1]; puts(\"compound-pointer-element-address\"); return (*p)[1] == 'c' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("pointer_array_compound_literal_element_address", source);
+}

@@ -1,8 +1,12 @@
 use super::{LoweredExpr, LoweredLValue, LoweringContext, zero_expr_for};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, ScalarType};
+use crate::parser::{Expr, LValue, ScalarType};
 
 impl LoweringContext {
+    pub(in crate::ir) fn is_array_compound_element_address(initializer: &Expr) -> bool {
+        array_compound_element_address(initializer).is_ok()
+    }
+
     pub(in crate::ir) fn lower_array_compound_pointer_initializer(
         &mut self,
         pointer_slot: usize,
@@ -21,6 +25,42 @@ impl LoweringContext {
         target: LoweredLValue,
         initializer: &Expr,
     ) -> CompileResult<()> {
+        let (array_pointer, _) = self.lower_array_compound_pointer(initializer)?;
+        self.push_store(target, array_pointer)
+    }
+
+    pub(in crate::ir) fn lower_array_compound_element_pointer_initializer(
+        &mut self,
+        pointer_slot: usize,
+        initializer: &Expr,
+    ) -> CompileResult<()> {
+        let target = LoweredLValue::Local {
+            slot: pointer_slot,
+            offset: self.local_offset(pointer_slot)?,
+            scalar_type: ScalarType::Pointer,
+        };
+        self.lower_array_compound_element_pointer_assignment(target, initializer)
+    }
+
+    pub(in crate::ir) fn lower_array_compound_element_pointer_assignment(
+        &mut self,
+        target: LoweredLValue,
+        initializer: &Expr,
+    ) -> CompileResult<()> {
+        let (array, index) = array_compound_element_address(initializer)?;
+        let (array_pointer, element_byte_size) = self.lower_array_compound_pointer(array)?;
+        let element_pointer = LoweredExpr::PointerOffset {
+            pointer: Box::new(array_pointer),
+            index: Box::new(self.lower_expr(index)?),
+            byte_size: element_byte_size,
+        };
+        self.push_store(target, element_pointer)
+    }
+
+    fn lower_array_compound_pointer(
+        &mut self,
+        initializer: &Expr,
+    ) -> CompileResult<(LoweredExpr, usize)> {
         let Expr::ArrayCompoundLiteral {
             element_type,
             element_byte_size,
@@ -58,7 +98,7 @@ impl LoweringContext {
                 values.get(index),
             )?;
         }
-        self.push_store(target, array_pointer)
+        Ok((array_pointer, *element_byte_size))
     }
 
     fn lower_array_compound_pointer_value(
@@ -91,4 +131,22 @@ impl LoweringContext {
 
 fn compound_array_alignment(element_byte_size: usize) -> usize {
     element_byte_size.clamp(1, 8)
+}
+
+fn array_compound_element_address(initializer: &Expr) -> CompileResult<(&Expr, &Expr)> {
+    let Expr::AddressOf {
+        target: LValue::Subscript { array, index },
+    } = initializer
+    else {
+        return Err(CompileError::new(
+            "expected address of array compound literal element",
+        ));
+    };
+    if matches!(array.as_ref(), Expr::ArrayCompoundLiteral { .. }) {
+        Ok((array, index))
+    } else {
+        Err(CompileError::new(
+            "expected address of array compound literal element",
+        ))
+    }
 }

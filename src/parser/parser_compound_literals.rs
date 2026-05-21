@@ -202,7 +202,9 @@ struct CompoundArrayType {
 }
 
 fn compound_array_element_size(tokens: &[Token], element_type: ScalarType) -> usize {
-    if tokens
+    if element_type == ScalarType::Pointer {
+        sizeof_scalar_type(tokens, element_type)
+    } else if tokens
         .iter()
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Char)))
     {
