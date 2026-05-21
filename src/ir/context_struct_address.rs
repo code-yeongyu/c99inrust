@@ -63,6 +63,9 @@ impl LoweringContext {
             });
         }
         if let Expr::Subscript { array, index } = expr {
+            if let Some(address) = self.resolve_local_struct_subscript_address(array, index)? {
+                return Ok(address);
+            }
             if let Some(address) = self.resolve_global_struct_subscript_address(array, index)? {
                 return Ok(address);
             }
@@ -74,6 +77,39 @@ impl LoweringContext {
             return self.resolve_pointer_struct_subscript_address(array, index);
         }
         Err(CompileError::new("member access requires a struct base"))
+    }
+
+    pub(in crate::ir) fn resolve_local_struct_subscript_address(
+        &self,
+        array: &Expr,
+        index: &Expr,
+    ) -> CompileResult<Option<StructAddress>> {
+        let Expr::Identifier(name) = array else {
+            return Ok(None);
+        };
+        let Some(LocalBinding::StructArray {
+            slot,
+            struct_name,
+            byte_size,
+            length,
+        }) = self.local_binding(name)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(StructAddress {
+            pointer: LoweredExpr::PointerOffset {
+                pointer: Box::new(LoweredExpr::LocalAddress {
+                    offset: self.local_offset(slot)?,
+                    byte_size: byte_size
+                        .checked_mul(length)
+                        .ok_or_else(|| CompileError::new("local struct array size overflow"))?,
+                }),
+                index: Box::new(self.lower_expr(index)?),
+                byte_size,
+            },
+            offset: 0,
+            struct_name,
+        }))
     }
 
     pub(in crate::ir) fn resolve_global_struct_subscript_address(
@@ -147,6 +183,7 @@ impl LoweringContext {
                 LocalBinding::PointerArray { .. } => {
                     Some(pointer_arithmetic::nested_referent(None))
                 }
+                LocalBinding::StructArray { struct_name, .. } => Some(struct_name),
                 _ => None,
             };
         }

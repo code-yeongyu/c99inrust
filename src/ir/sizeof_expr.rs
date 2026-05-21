@@ -70,6 +70,11 @@ fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
         LocalBinding::ShortArray { length, .. } => local_short_array_byte_size(*length),
         LocalBinding::PointerArray { length, .. } => local_pointer_array_byte_size(*length),
         LocalBinding::StructObject { byte_size, .. } => Ok(*byte_size),
+        LocalBinding::StructArray {
+            byte_size, length, ..
+        } => byte_size
+            .checked_mul(*length)
+            .ok_or_else(|| CompileError::new("sizeof local struct array overflow")),
         LocalBinding::VaList { .. } => Ok(scalar_size(ScalarType::VaList)),
     }
 }

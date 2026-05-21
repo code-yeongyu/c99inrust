@@ -3,8 +3,8 @@ use crate::front_end::lexer::Token;
 use super::token_scan::top_level_comma_ranges;
 use super::{
     CompileError, CompileResult, Keyword, LocalStructInitializer, LocalStructInitializerValue,
-    Parser, Statement, TokenKind, anonymous_union_struct_name, matching_top_level_brace,
-    token_identifier, token_is_keyword, token_is_punctuator,
+    Parser, Statement, TokenKind, anonymous_union_struct_name, local_array_length,
+    matching_top_level_brace, token_identifier, token_is_keyword, token_is_punctuator,
 };
 
 impl Parser<'_> {
@@ -21,17 +21,35 @@ impl Parser<'_> {
         let mut declarations = Vec::new();
         loop {
             let name = self.expect_identifier()?;
-            let initializer = if self.check_punctuator("=") {
+            let statement = if self.check_punctuator("[") {
                 self.advance();
-                Some(self.local_struct_initializer()?)
+                let length = local_array_length(&self.expression()?, self.known_constants)?;
+                self.expect_punctuator("]")?;
+                if self.check_punctuator("=") {
+                    return Err(CompileError::new(
+                        "local struct array initializers are not supported",
+                    ));
+                }
+                Statement::LocalStructArray {
+                    name,
+                    struct_name: struct_name.clone(),
+                    length,
+                }
+            } else if self.check_punctuator("=") {
+                self.advance();
+                Statement::LocalStruct {
+                    name,
+                    struct_name: struct_name.clone(),
+                    initializer: Some(self.local_struct_initializer()?),
+                }
             } else {
-                None
+                Statement::LocalStruct {
+                    name,
+                    struct_name: struct_name.clone(),
+                    initializer: None,
+                }
             };
-            declarations.push(Statement::LocalStruct {
-                name,
-                struct_name: struct_name.clone(),
-                initializer,
-            });
+            declarations.push(statement);
             if self.check_punctuator(",") {
                 self.advance();
                 continue;

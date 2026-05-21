@@ -42,6 +42,12 @@ pub(in crate::ir) enum LocalBinding {
         struct_name: String,
         byte_size: usize,
     },
+    StructArray {
+        slot: usize,
+        struct_name: String,
+        byte_size: usize,
+        length: usize,
+    },
     VaList {
         slot: usize,
     },

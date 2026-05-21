@@ -183,6 +183,16 @@ impl LoweringContext {
         Ok(())
     }
 
+    pub(in crate::ir) fn lower_local_struct_array(
+        &mut self,
+        name: &str,
+        struct_name: &str,
+        length: usize,
+    ) -> CompileResult<()> {
+        self.declare_struct_array(name, struct_name, length)?;
+        Ok(())
+    }
+
     pub(in crate::ir) fn lower_block(&mut self, statements: &[Statement]) -> CompileResult<()> {
         self.scopes.push(HashMap::new());
         for statement in statements {

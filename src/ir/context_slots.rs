@@ -189,6 +189,31 @@ impl LoweringContext {
         )
     }
 
+    pub(in crate::ir) fn declare_struct_array(
+        &mut self,
+        name: &str,
+        struct_name: &str,
+        length: usize,
+    ) -> CompileResult<usize> {
+        let layout = self.struct_layout(struct_name)?.clone();
+        let byte_size = layout
+            .size
+            .checked_mul(length)
+            .ok_or_else(|| CompileError::new("local struct array size overflow"))?;
+        self.declare_slot(
+            name,
+            ScalarType::Pointer,
+            byte_size,
+            struct_alignment(&layout),
+            LocalBinding::StructArray {
+                slot: self.local_slots.len(),
+                struct_name: struct_name.to_owned(),
+                byte_size: layout.size,
+                length,
+            },
+        )
+    }
+
     pub(in crate::ir) fn declare_slot(
         &mut self,
         name: &str,

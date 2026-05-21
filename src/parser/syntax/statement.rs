@@ -50,6 +50,11 @@ pub enum Statement {
         struct_name: String,
         initializer: Option<LocalStructInitializer>,
     },
+    LocalStructArray {
+        name: String,
+        struct_name: String,
+        length: usize,
+    },
     LocalConstants(Vec<Constant>),
     DeclarationList(Vec<Self>),
     ExpressionList(Vec<Self>),

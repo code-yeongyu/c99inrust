@@ -4,64 +4,27 @@ use crate::parser::{Expr, ReturnType, Statement};
 
 impl LoweringContext {
     pub(in crate::ir) fn lower_statement(&mut self, statement: &Statement) -> CompileResult<()> {
+        if let Some(result) = self.lower_declaration_like_statement(statement) {
+            return result;
+        }
         match statement {
             Statement::Empty => Ok(()),
             Statement::Block(statements) => self.lower_block(statements),
-            Statement::Declaration {
-                is_static,
-                scalar_type,
-                name,
-                referent,
-                initializer,
-            } => self.lower_declaration(
-                *is_static,
-                *scalar_type,
-                name,
-                referent.clone(),
-                initializer.as_ref(),
-            ),
-            Statement::LocalCharArray {
-                name,
-                length,
-                is_unsigned,
-                initializer,
-            } => self.lower_local_char_array(name, *length, *is_unsigned, initializer.as_ref()),
-            Statement::LocalCharMatrix {
-                name,
-                rows,
-                columns,
-                initializer,
-            } => self.lower_local_char_matrix(name, *rows, *columns, initializer.as_deref()),
-            Statement::LocalIntArray {
-                name,
-                length,
-                initializer,
-            } => self.lower_local_int_array(name, *length, initializer.as_deref()),
-            Statement::LocalShortArray {
-                name,
-                length,
-                is_unsigned,
-            } => self.lower_local_short_array(name, *length, *is_unsigned),
-            Statement::LocalPointerArray {
-                name,
-                length,
-                initializer,
-            } => self.lower_local_pointer_array(name, *length, initializer.as_deref()),
-            Statement::LocalStruct {
-                name,
-                struct_name,
-                initializer,
-            } => self.lower_local_struct_object(name, struct_name, initializer.as_ref()),
-            Statement::LocalConstants(constants) => {
-                for constant in constants {
-                    self.constants.insert(constant.name.clone(), constant.value);
-                }
-                Ok(())
-            }
+            Statement::Declaration { .. }
+            | Statement::LocalCharArray { .. }
+            | Statement::LocalCharMatrix { .. }
+            | Statement::LocalIntArray { .. }
+            | Statement::LocalShortArray { .. }
+            | Statement::LocalPointerArray { .. }
+            | Statement::LocalStruct { .. }
+            | Statement::LocalStructArray { .. }
+            | Statement::LocalConstants(_)
+            | Statement::ExternGlobal(_) => Err(CompileError::new(
+                "internal error: declaration statement was not lowered",
+            )),
             Statement::DeclarationList(declarations) | Statement::ExpressionList(declarations) => {
                 self.lower_statement_list(declarations)
             }
-            Statement::ExternGlobal(global) => self.lower_extern_global(global),
             Statement::Assignment { target, value } => self.lower_assignment(target, value),
             Statement::If {
                 condition,
@@ -101,6 +64,89 @@ impl LoweringContext {
                 Ok(())
             }
             Statement::Return(expr) => self.lower_return(expr.as_ref()),
+        }
+    }
+
+    fn lower_declaration_like_statement(
+        &mut self,
+        statement: &Statement,
+    ) -> Option<CompileResult<()>> {
+        match statement {
+            Statement::Declaration {
+                is_static,
+                scalar_type,
+                name,
+                referent,
+                initializer,
+            } => Some(self.lower_declaration(
+                *is_static,
+                *scalar_type,
+                name,
+                referent.clone(),
+                initializer.as_ref(),
+            )),
+            Statement::LocalCharArray {
+                name,
+                length,
+                is_unsigned,
+                initializer,
+            } => {
+                Some(self.lower_local_char_array(name, *length, *is_unsigned, initializer.as_ref()))
+            }
+            Statement::LocalCharMatrix {
+                name,
+                rows,
+                columns,
+                initializer,
+            } => Some(self.lower_local_char_matrix(name, *rows, *columns, initializer.as_deref())),
+            Statement::LocalIntArray {
+                name,
+                length,
+                initializer,
+            } => Some(self.lower_local_int_array(name, *length, initializer.as_deref())),
+            Statement::LocalShortArray {
+                name,
+                length,
+                is_unsigned,
+            } => Some(self.lower_local_short_array(name, *length, *is_unsigned)),
+            Statement::LocalPointerArray {
+                name,
+                length,
+                initializer,
+            } => Some(self.lower_local_pointer_array(name, *length, initializer.as_deref())),
+            Statement::LocalStruct {
+                name,
+                struct_name,
+                initializer,
+            } => Some(self.lower_local_struct_object(name, struct_name, initializer.as_ref())),
+            Statement::LocalStructArray {
+                name,
+                struct_name,
+                length,
+            } => Some(self.lower_local_struct_array(name, struct_name, *length)),
+            Statement::LocalConstants(constants) => {
+                for constant in constants {
+                    self.constants.insert(constant.name.clone(), constant.value);
+                }
+                Some(Ok(()))
+            }
+            Statement::ExternGlobal(global) => Some(self.lower_extern_global(global)),
+            Statement::Empty
+            | Statement::Block(_)
+            | Statement::DeclarationList(_)
+            | Statement::ExpressionList(_)
+            | Statement::Assignment { .. }
+            | Statement::If { .. }
+            | Statement::While { .. }
+            | Statement::DoWhile { .. }
+            | Statement::For { .. }
+            | Statement::Switch { .. }
+            | Statement::Expression(_)
+            | Statement::Break
+            | Statement::Continue
+            | Statement::Label(_)
+            | Statement::Goto(_)
+            | Statement::Return(_) => None,
         }
     }
 

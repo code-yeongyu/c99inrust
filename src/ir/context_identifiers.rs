@@ -95,6 +95,17 @@ impl LoweringContext {
                 offset: self.local_offset(*slot)?,
                 byte_size: *byte_size,
             }),
+            LocalBinding::StructArray {
+                slot,
+                byte_size,
+                length,
+                ..
+            } => Ok(LoweredExpr::LocalAddress {
+                offset: self.local_offset(*slot)?,
+                byte_size: byte_size
+                    .checked_mul(*length)
+                    .ok_or_else(|| CompileError::new("local struct array size overflow"))?,
+            }),
             LocalBinding::VaList { slot } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,
                 byte_size: scalar_size(ScalarType::VaList),

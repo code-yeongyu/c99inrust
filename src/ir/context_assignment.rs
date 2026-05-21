@@ -57,6 +57,9 @@ impl LoweringContext {
                         LocalBinding::StructObject { .. } => Err(CompileError::new(
                             "direct assignment to local struct object is not supported",
                         )),
+                        LocalBinding::StructArray { .. } => Err(CompileError::new(
+                            "assignment to local struct array is not supported",
+                        )),
                         LocalBinding::VaList { .. } => {
                             Err(CompileError::new("assignment to va_list is not supported"))
                         }
@@ -133,6 +136,9 @@ impl LoweringContext {
                 }))
             }
             LValue::Subscript { array, index } => {
+                if let Some(address) = self.resolve_local_struct_subscript_address(array, index)? {
+                    return Ok(Some(address));
+                }
                 if let Some(address) =
                     self.resolve_struct_array_field_subscript_address(array, index)?
                 {

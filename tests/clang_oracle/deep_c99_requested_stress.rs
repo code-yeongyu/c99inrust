@@ -58,6 +58,16 @@ fn stress_typeof_attribute_pointer_expression_matches_host_stdout_and_exit_code(
 }
 
 #[test]
+fn stress_local_struct_array_pointer_decay_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "stress_local_struct_array_pointer_decay";
+    let source = "int puts(char*); typedef struct { int value; int extra; } item_t; int main(void) { item_t items[2]; item_t *cursor = items + 1; items[0].value = 11; items[1].value = 23; cursor->extra = 5; puts(\"stress-local-struct-array\"); return items[0].value + cursor->value + items[1].extra; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
 fn stress_multifile_extern_function_pointer_state_matches_host_stdout_and_exit_code() {
     // given
     let case = OracleMultiFileCase {
