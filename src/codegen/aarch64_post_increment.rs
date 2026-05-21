@@ -1,8 +1,8 @@
-use super::aarch64_assign::{
-    emit_aarch64_load_pointer_subscript_result, emit_aarch64_store_pointer_subscript_result,
-};
 use super::aarch64_expr::emit_aarch64_expr_with_width;
 use super::aarch64_loads::{emit_aarch64_load_global, emit_aarch64_store_global};
+use super::aarch64_pointer_subscript::{
+    emit_aarch64_load_pointer_subscript_result, emit_aarch64_store_pointer_subscript_result,
+};
 use super::aarch64_temporaries::{
     emit_aarch64_load_temporary, emit_aarch64_load_temporary_to_register,
     emit_aarch64_store_result, emit_aarch64_store_temporary,

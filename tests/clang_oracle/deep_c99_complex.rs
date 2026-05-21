@@ -82,6 +82,36 @@ fn local_complex_float_declaration_size_matches_host_stdout_and_exit_code() {
 }
 
 #[test]
+fn local_complex_float_real_initializer_zeroes_imaginary_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_float_real_initializer_zeroes_imaginary_part";
+    let source = "int puts(char*); int main(void) { float _Complex z = 3.0; int *parts = (int *)&z; puts(\"complex-float-layout\"); return parts[0] == 0x40400000 && parts[1] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_complex_float_real_initializer_cast_reads_real_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_float_real_initializer_cast_reads_real_part";
+    let source = "int puts(char*); int main(void) { float _Complex z = 6.0; puts(\"complex-float-cast\"); return (int)z; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_complex_float_real_assignment_zeroes_imaginary_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_float_real_assignment_zeroes_imaginary_part";
+    let source = "int puts(char*); int main(void) { float _Complex z = 1.0; int *parts = (int *)&z; parts[1] = -1; z = 4.0; puts(\"complex-float-assign\"); return parts[0] == 0x40800000 && parts[1] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
 fn local_complex_pointer_declaration_matches_host_stdout_and_exit_code() {
     // given
     let name = "local_complex_pointer_declaration";
@@ -146,6 +176,16 @@ fn global_complex_double_layout_zeroes_imaginary_part_stdout_and_exit_code() {
     // given
     let name = "global_complex_double_layout_zeroes_imaginary_part";
     let source = "int puts(char*); double _Complex g = 5.0; int main(void) { double *parts = (double *)&g; puts(\"complex-global-layout\"); return (int)parts[0] + (int)parts[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn global_complex_float_layout_zeroes_imaginary_part_stdout_and_exit_code() {
+    // given
+    let name = "global_complex_float_layout_zeroes_imaginary_part";
+    let source = "int puts(char*); float _Complex g = 3.0; int main(void) { int *parts = (int *)&g; puts(\"complex-global-float-layout\"); return parts[0] == 0x40400000 && parts[1] == 0 ? 0 : 1; }\n";
 
     // when/then
     assert_case(name, source);

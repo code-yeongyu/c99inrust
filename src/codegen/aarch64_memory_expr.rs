@@ -2,14 +2,15 @@ use super::aarch64_addressing::emit_aarch64_load_pointer_field;
 use super::aarch64_assign::emit_aarch64_assign;
 use super::aarch64_loads::{
     emit_aarch64_load_global, emit_aarch64_load_global_byte_subscript,
-    emit_aarch64_load_global_int_subscript, emit_aarch64_load_global_pointer_subscript,
-    emit_aarch64_load_pointer_subscript,
+    emit_aarch64_load_global_f32_as_f64, emit_aarch64_load_global_int_subscript,
+    emit_aarch64_load_global_pointer_subscript, emit_aarch64_load_pointer_subscript,
 };
 use super::aarch64_post_increment::emit_aarch64_post_increment;
 use super::frames::LabelAllocator;
 use super::widths::{PointerFieldExpr, PointerSubscriptExpr, scalar_width};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::LoweredExpr;
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_aarch64_memory_expr(
     expr: &LoweredExpr,
@@ -20,6 +21,9 @@ pub(in crate::codegen) fn emit_aarch64_memory_expr(
 ) -> CompileResult<()> {
     match expr {
         LoweredExpr::Global { name, scalar_type } => {
+            if *scalar_type == ScalarType::ComplexFloat {
+                return emit_aarch64_load_global_f32_as_f64(name, labels.target, assembly);
+            }
             emit_aarch64_load_global(name, scalar_width(*scalar_type), labels.target, assembly)
         }
         LoweredExpr::GlobalByteSubscript {

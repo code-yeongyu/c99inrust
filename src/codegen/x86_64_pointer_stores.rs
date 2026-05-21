@@ -58,6 +58,10 @@ pub(in crate::codegen) fn emit_x86_64_store_pointer_subscript(
     assembly.push_str("\tmovq %rax, %rdx\n");
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
     emit_x86_64_load_temporary(width, value_offset, assembly)?;
+    if subscript.element_byte_size == 4 && width == ValueWidth::F64 {
+        assembly.push_str("\tcvtsd2ss %xmm0, %xmm0\n");
+        return write_assembly!(assembly, "\tmovss %xmm0, (%rcx,%rdx,4)\n");
+    }
     if subscript.element_byte_size == 1 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovb %al, (%rcx,%rdx,1)\n");
     }
@@ -96,6 +100,9 @@ pub(in crate::codegen) fn emit_x86_64_load_pointer_subscript_result(
     if element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovswl (%rcx,%rdx,2), %eax\n");
     }
+    if element_byte_size == 4 && width == ValueWidth::F64 {
+        return write_assembly!(assembly, "\tcvtss2sd (%rcx,%rdx,4), %xmm0\n");
+    }
     let Some(scale) = memory_scale_bytes_for_byte_size(element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",
@@ -120,6 +127,10 @@ pub(in crate::codegen) fn emit_x86_64_store_pointer_subscript_result(
     }
     if element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tmovw %ax, (%rcx,%rdx,2)\n");
+    }
+    if element_byte_size == 4 && width == ValueWidth::F64 {
+        assembly.push_str("\tcvtsd2ss %xmm0, %xmm0\n");
+        return write_assembly!(assembly, "\tmovss %xmm0, (%rcx,%rdx,4)\n");
     }
     let Some(scale) = memory_scale_bytes_for_byte_size(element_byte_size) else {
         return Err(CompileError::new(

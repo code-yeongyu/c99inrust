@@ -8,16 +8,18 @@ impl LoweringContext {
         scalar_type: ScalarType,
         value: LoweredExpr,
     ) {
-        self.push_complex_element_store(pointer, 0, value);
+        self.push_complex_element_store(pointer, 0, complex_lane_byte_size(scalar_type), value);
         self.zero_complex_tail(pointer, scalar_type);
     }
 
     fn zero_complex_tail(&mut self, pointer: &LoweredExpr, scalar_type: ScalarType) {
-        let tail_slots = scalar_size(scalar_type) / scalar_size(ScalarType::Double);
+        let element_byte_size = complex_lane_byte_size(scalar_type);
+        let tail_slots = scalar_size(scalar_type) / element_byte_size;
         for (index_value, _) in (1_i64..).zip(1..tail_slots) {
             self.push_complex_element_store(
                 pointer,
                 index_value,
+                element_byte_size,
                 LoweredExpr::DoubleLiteral("0.0".to_owned()),
             );
         }
@@ -27,6 +29,7 @@ impl LoweringContext {
         &mut self,
         pointer: &LoweredExpr,
         index: i64,
+        element_byte_size: usize,
         value: LoweredExpr,
     ) {
         self.push_store(
@@ -34,11 +37,18 @@ impl LoweringContext {
                 pointer: Box::new(pointer.clone()),
                 index: Box::new(LoweredExpr::Integer(index)),
                 element_type: ScalarType::Double,
-                element_byte_size: scalar_size(ScalarType::Double),
+                element_byte_size,
                 element_unsigned: false,
             },
             value,
         );
+    }
+}
+
+const fn complex_lane_byte_size(scalar_type: ScalarType) -> usize {
+    match scalar_type {
+        ScalarType::ComplexFloat => 4,
+        _ => scalar_size(ScalarType::Double),
     }
 }
 

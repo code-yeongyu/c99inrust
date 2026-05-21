@@ -7,12 +7,13 @@ use super::x86_64_addressing::emit_x86_64_load_pointer_field;
 use super::x86_64_assign::emit_x86_64_assign;
 use super::x86_64_loads::{
     emit_x86_64_load_global, emit_x86_64_load_global_byte_subscript,
-    emit_x86_64_load_global_int_subscript, emit_x86_64_load_global_pointer_subscript,
-    emit_x86_64_load_pointer_subscript,
+    emit_x86_64_load_global_f32_as_f64, emit_x86_64_load_global_int_subscript,
+    emit_x86_64_load_global_pointer_subscript, emit_x86_64_load_pointer_subscript,
 };
 use super::x86_64_post_increment::emit_x86_64_post_increment;
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::LoweredExpr;
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_x86_64_global_or_assignment_expr(
     expr: &LoweredExpr,
@@ -24,6 +25,9 @@ pub(in crate::codegen) fn emit_x86_64_global_or_assignment_expr(
 ) -> CompileResult<()> {
     match expr {
         LoweredExpr::Global { name, scalar_type } => {
+            if *scalar_type == ScalarType::ComplexFloat {
+                return emit_x86_64_load_global_f32_as_f64(name, target, assembly);
+            }
             emit_x86_64_load_global(name, scalar_width(*scalar_type), target, assembly)
         }
         LoweredExpr::GlobalByteSubscript {

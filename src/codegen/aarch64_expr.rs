@@ -7,7 +7,7 @@ use super::aarch64_calls::emit_aarch64_call_expr;
 use super::aarch64_conditionals::emit_aarch64_conditional;
 use super::aarch64_loads::{emit_aarch64_load_double_literal, emit_aarch64_load_string_address};
 use super::aarch64_memory_expr::emit_aarch64_memory_expr;
-use super::aarch64_temporaries::emit_aarch64_load_temporary;
+use super::aarch64_temporaries::{emit_aarch64_load_f32_local, emit_aarch64_load_temporary};
 use super::aarch64_unary::emit_aarch64_unary_expr;
 use super::aarch64_variadic::emit_aarch64_va_arg;
 use super::data_literals::label_name;
@@ -18,6 +18,7 @@ use super::widths::{
 };
 use crate::diagnostics::CompileResult;
 use crate::ir::LoweredExpr;
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_aarch64_expr(
     expr: &LoweredExpr,
@@ -120,7 +121,7 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
         LoweredExpr::Local {
             offset,
             scalar_type,
-        } => emit_aarch64_load_temporary(scalar_width(*scalar_type), *offset, assembly),
+        } => emit_aarch64_local_expr(*offset, *scalar_type, assembly),
         LoweredExpr::Unary { op, expr } => {
             emit_aarch64_unary_expr(*op, expr, temporary_base, depth, labels, assembly)
         }
@@ -164,6 +165,17 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             assembly,
         ),
     }
+}
+
+fn emit_aarch64_local_expr(
+    offset: usize,
+    scalar_type: ScalarType,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if scalar_type == ScalarType::ComplexFloat {
+        return emit_aarch64_load_f32_local(offset, assembly);
+    }
+    emit_aarch64_load_temporary(scalar_width(scalar_type), offset, assembly)
 }
 
 fn emit_aarch64_pointer_field_address(

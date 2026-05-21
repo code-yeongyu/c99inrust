@@ -50,6 +50,21 @@ pub(in crate::codegen) fn emit_aarch64_load_global(
     write_assembly!(assembly, "\tldr {register}, [x16, {label}@PAGEOFF]\n")
 }
 
+pub(in crate::codegen) fn emit_aarch64_load_global_f32_as_f64(
+    name: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if target != Target::Aarch64AppleDarwin {
+        return Err(CompileError::new("unsupported AArch64 global target"));
+    }
+    let label = label_name(name, target);
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tldr s0, [x16, {label}@PAGEOFF]\n")?;
+    assembly.push_str("\tfcvt d0, s0\n");
+    Ok(())
+}
+
 pub(in crate::codegen) fn emit_aarch64_store_global(
     name: &str,
     width: ValueWidth,

@@ -104,6 +104,18 @@ pub(in crate::codegen) fn emit_x86_64_load_object_start(
     )
 }
 
+pub(in crate::codegen) fn emit_x86_64_load_f32_object_start(
+    offset: usize,
+    byte_size: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    write_assembly!(
+        assembly,
+        "\tcvtss2sd {}(%rbp), %xmm0\n",
+        x86_stack_object_offset(offset, byte_size)
+    )
+}
+
 pub(in crate::codegen) fn emit_x86_64_load_temporary_to_register(
     width: ValueWidth,
     offset: usize,

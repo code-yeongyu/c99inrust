@@ -12,7 +12,9 @@ use super::x86_64_calls::emit_x86_64_call_expr;
 use super::x86_64_conditionals::emit_x86_64_conditional;
 use super::x86_64_expr_special::emit_x86_64_global_or_assignment_expr;
 use super::x86_64_loads::{emit_x86_64_load_double_literal, emit_x86_64_load_string_address};
-use super::x86_64_temporaries::{emit_x86_64_load_object_start, emit_x86_64_load_temporary};
+use super::x86_64_temporaries::{
+    emit_x86_64_load_f32_object_start, emit_x86_64_load_object_start, emit_x86_64_load_temporary,
+};
 use super::x86_64_unary::{emit_x86_64_i64_integer, emit_x86_64_integer, emit_x86_64_unary_expr};
 use crate::diagnostics::CompileResult;
 use crate::ir::LoweredExpr;
@@ -171,6 +173,9 @@ fn emit_x86_64_load_local(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = scalar_width(scalar_type);
+    if scalar_type == ScalarType::ComplexFloat {
+        return emit_x86_64_load_f32_object_start(offset, scalar_byte_size(scalar_type), assembly);
+    }
     if is_complex_scalar(scalar_type) {
         return emit_x86_64_load_object_start(
             width,

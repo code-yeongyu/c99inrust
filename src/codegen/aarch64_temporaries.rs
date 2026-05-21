@@ -64,6 +64,15 @@ pub(in crate::codegen) fn emit_aarch64_load_temporary(
     write_assembly!(assembly, "\tldr {register}, [sp, #{offset}]\n")
 }
 
+pub(in crate::codegen) fn emit_aarch64_load_f32_local(
+    offset: usize,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    write_assembly!(assembly, "\tldr s0, [sp, #{offset}]\n")?;
+    assembly.push_str("\tfcvt d0, s0\n");
+    Ok(())
+}
+
 pub(in crate::codegen) fn emit_aarch64_load_temporary_to_register(
     width: ValueWidth,
     offset: usize,

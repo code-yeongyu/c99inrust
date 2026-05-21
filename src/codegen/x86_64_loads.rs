@@ -55,6 +55,15 @@ pub(in crate::codegen) fn emit_x86_64_load_global(
     write_assembly!(assembly, "\tmov{suffix} {label}(%rip), {register}\n")
 }
 
+pub(in crate::codegen) fn emit_x86_64_load_global_f32_as_f64(
+    name: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    write_assembly!(assembly, "\tcvtss2sd {label}(%rip), %xmm0\n")
+}
+
 pub(in crate::codegen) fn emit_x86_64_store_global(
     name: &str,
     width: ValueWidth,
