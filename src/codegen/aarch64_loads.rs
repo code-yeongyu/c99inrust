@@ -193,6 +193,11 @@ pub(in crate::codegen) fn emit_aarch64_load_pointer_subscript(
     if subscript.element_byte_size == 2 && width == ValueWidth::I32 {
         return write_assembly!(assembly, "\tldrsh w0, [x16, w0, sxtw #1]\n");
     }
+    if subscript.element_byte_size == 4 && width == ValueWidth::F64 {
+        assembly.push_str("\tldr s0, [x16, w0, sxtw #2]\n");
+        assembly.push_str("\tfcvt d0, s0\n");
+        return Ok(());
+    }
     let Some(shift) = memory_scale_shift_for_byte_size(subscript.element_byte_size) else {
         return Err(CompileError::new(
             "unsupported pointer subscript element size",

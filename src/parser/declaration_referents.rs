@@ -30,6 +30,7 @@ pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String>
     }
     complex_referent(tokens)
         .or_else(|| double_referent(tokens))
+        .or_else(|| float_referent(tokens))
         .or_else(|| long_referent(tokens))
         .or_else(|| void_referent(tokens))
         .or_else(|| typedef_or_named_referent(tokens))
@@ -110,6 +111,13 @@ fn double_referent(tokens: &[Token]) -> Option<String> {
     } else {
         Some("double".to_owned())
     }
+}
+
+fn float_referent(tokens: &[Token]) -> Option<String> {
+    tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Float)))
+        .then(|| "float".to_owned())
 }
 
 fn void_referent(tokens: &[Token]) -> Option<String> {

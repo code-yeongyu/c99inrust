@@ -248,3 +248,43 @@ fn global_complex_double_real_assignment_zeroes_imaginary_part_matches_host_stdo
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn local_complex_double_copy_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_double_copy_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { double _Complex a = 1.0; double *ap = (double *)&a; ap[1] = 7.0; double _Complex b = a; double *bp = (double *)&b; puts(\"complex-local-copy\"); return (int)bp[0] + (int)bp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_complex_float_copy_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_float_copy_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { float _Complex a = 2.0; float *ap = (float *)&a; ap[1] = 5.0; float _Complex b = a; float *bp = (float *)&b; puts(\"complex-float-copy\"); return (int)bp[0] + (int)bp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_complex_double_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_double_assignment_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { double _Complex a = 3.0; double *ap = (double *)&a; ap[1] = 4.0; double _Complex b = 0.0; b = a; double *bp = (double *)&b; puts(\"complex-local-assign-copy\"); return (int)bp[0] + (int)bp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_complex_float_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_float_assignment_preserves_imaginary_lane";
+    let source = "int puts(char*); int main(void) { float _Complex a = 4.0; float *ap = (float *)&a; ap[1] = 6.0; float _Complex b = 0.0; b = a; float *bp = (float *)&b; puts(\"complex-float-assign-copy\"); return (int)bp[0] + (int)bp[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

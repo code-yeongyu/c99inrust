@@ -14,6 +14,8 @@ pub(in crate::ir) fn byte_size(referent: &str) -> Option<usize> {
         Some(scalar_size(ScalarType::Int))
     } else if referent == "long long" {
         Some(scalar_size(ScalarType::LongLong))
+    } else if referent == "float" {
+        Some(4)
     } else if referent == "double" {
         Some(scalar_size(ScalarType::Double))
     } else if referent == "long double" {

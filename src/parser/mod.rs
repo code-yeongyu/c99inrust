@@ -6,6 +6,7 @@ mod anonymous_union;
 mod builtin_field;
 mod builtin_layout;
 mod declaration_referents;
+mod declaration_type_flags;
 mod declarator_types;
 mod doom_layout;
 mod enum_declarations;

@@ -1,3 +1,7 @@
+use super::declaration_type_flags::{
+    SAW_BOOL, SAW_COMPLEX, SAW_DOUBLE, SAW_FLOAT, SAW_POINTER, SAW_STORAGE_CLASS, SAW_TYPE,
+    bool_flag, declaration_type_from_flags,
+};
 use super::{
     CompileError, CompileResult, Keyword, Parser, ScalarType, TokenKind, matching_top_level_paren,
     supported_typedef_scalar, token_identifier, token_is_punctuator,
@@ -114,6 +118,9 @@ impl Parser<'_> {
             | bool_flag(saw_double, SAW_DOUBLE)
             | bool_flag(saw_complex, SAW_COMPLEX)
             | bool_flag(saw_float, SAW_FLOAT);
+        if saw_float && !saw_complex && self.struct_pointer_declarator_follows(index) {
+            return Some((ScalarType::Double, index));
+        }
         declaration_type_from_flags(flags, long_count, index)
     }
 
@@ -205,60 +212,4 @@ enum DeclarationIdentifier {
     StructPointer,
     Unsupported,
     VaList,
-}
-
-const SAW_TYPE: u8 = 1;
-const SAW_STORAGE_CLASS: u8 = 2;
-const SAW_POINTER: u8 = 4;
-const SAW_BOOL: u8 = 8;
-const SAW_DOUBLE: u8 = 16;
-const SAW_COMPLEX: u8 = 32;
-const SAW_FLOAT: u8 = 64;
-
-const fn declaration_type_from_flags(
-    flags: u8,
-    long_count: usize,
-    index: usize,
-) -> Option<(ScalarType, usize)> {
-    if !has_flag(flags, SAW_TYPE) {
-        if has_flag(flags, SAW_STORAGE_CLASS) {
-            return Some((ScalarType::Int, index));
-        }
-        return None;
-    }
-    if has_flag(flags, SAW_POINTER) {
-        Some((ScalarType::Pointer, index))
-    } else if has_flag(flags, SAW_COMPLEX) {
-        Some((complex_declaration_type(flags, long_count), index))
-    } else if has_flag(flags, SAW_FLOAT) {
-        None
-    } else if has_flag(flags, SAW_BOOL) {
-        Some((ScalarType::Bool, index))
-    } else if has_flag(flags, SAW_DOUBLE) && long_count == 0 {
-        Some((ScalarType::Double, index))
-    } else if has_flag(flags, SAW_DOUBLE) {
-        Some((ScalarType::LongDouble, index))
-    } else if long_count == 0 {
-        Some((ScalarType::Int, index))
-    } else {
-        Some((ScalarType::LongLong, index))
-    }
-}
-
-const fn complex_declaration_type(flags: u8, long_count: usize) -> ScalarType {
-    if has_flag(flags, SAW_FLOAT) {
-        ScalarType::ComplexFloat
-    } else if long_count == 0 {
-        ScalarType::ComplexDouble
-    } else {
-        ScalarType::ComplexLongDouble
-    }
-}
-
-const fn bool_flag(value: bool, flag: u8) -> u8 {
-    if value { flag } else { 0 }
-}
-
-const fn has_flag(flags: u8, flag: u8) -> bool {
-    flags & flag != 0
 }
