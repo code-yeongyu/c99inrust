@@ -10,6 +10,14 @@ mod deep_c99_doom_adjacent_next;
 mod deep_c99_edges;
 #[path = "clang_oracle/deep_c99_expressions_more.rs"]
 mod deep_c99_expressions_more;
+#[path = "clang_oracle/deep_c99_extra_calls_linkage.rs"]
+mod deep_c99_extra_calls_linkage;
+#[path = "clang_oracle/deep_c99_extra_eval_numeric.rs"]
+mod deep_c99_extra_eval_numeric;
+#[path = "clang_oracle/deep_c99_extra_layout_types.rs"]
+mod deep_c99_extra_layout_types;
+#[path = "clang_oracle/deep_c99_extra_preprocessor.rs"]
+mod deep_c99_extra_preprocessor;
 #[path = "clang_oracle/deep_c99_layout_more.rs"]
 mod deep_c99_layout_more;
 #[path = "clang_oracle/deep_c99_local_struct_init.rs"]
