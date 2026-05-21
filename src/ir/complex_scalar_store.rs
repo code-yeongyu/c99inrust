@@ -1,9 +1,9 @@
 use super::{
     Instruction, LoweredExpr, LoweredLValue, LoweringContext, complex_binary_operands,
-    complex_indirect_target, complex_lane_byte_size, complex_lane_expr, complex_object_pointer,
-    complex_unary_operand, scalar_size,
+    complex_expr_scalar_type, complex_indirect_target, complex_lane_byte_size, complex_lane_expr,
+    complex_lane_value_expr, complex_object_pointer, complex_unary_operand, scalar_size,
 };
-use crate::diagnostics::CompileResult;
+use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{ScalarType, UnaryOp};
 
 impl LoweringContext {
@@ -39,6 +39,9 @@ impl LoweringContext {
         }
         if let Some((op, left, right)) = complex_binary_operands(&value, scalar_type) {
             return self.push_complex_binary_store(pointer, scalar_type, op, &left, &right);
+        }
+        if complex_expr_scalar_type(&value) == Some(scalar_type) {
+            return self.push_complex_expr_store(pointer, scalar_type, &value);
         }
         self.push_complex_element_store(pointer, 0, complex_lane_byte_size(scalar_type), value)?;
         self.zero_complex_tail(pointer, scalar_type)
@@ -121,6 +124,28 @@ impl LoweringContext {
             )?;
         }
         Ok(())
+    }
+
+    fn push_complex_expr_store(
+        &mut self,
+        pointer: &LoweredExpr,
+        scalar_type: ScalarType,
+        value: &LoweredExpr,
+    ) -> CompileResult<()> {
+        let byte_size = scalar_size(scalar_type);
+        let slot = self.declare_anonymous_slot(scalar_type, byte_size, byte_size)?;
+        let temp_pointer = LoweredExpr::LocalAddress {
+            offset: self.local_offset(slot)?,
+            byte_size,
+        };
+        let element_byte_size = complex_lane_byte_size(scalar_type);
+        let tail_slots = scalar_size(scalar_type) / element_byte_size;
+        for (index_value, _) in (0_i64..).zip(0..tail_slots) {
+            let lane = complex_lane_value_expr(value, scalar_type, index_value, element_byte_size)
+                .ok_or_else(|| CompileError::new("complex expression lane is unsupported"))?;
+            self.push_complex_element_store(&temp_pointer, index_value, element_byte_size, lane)?;
+        }
+        self.push_complex_object_copy(pointer, &temp_pointer, scalar_type)
     }
 
     pub(in crate::ir) fn push_complex_element_store(

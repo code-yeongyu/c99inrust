@@ -1,7 +1,7 @@
 use super::{
     ComplexBinaryLanes, LoweredExpr, complex_arithmetic_lane_expr, complex_lane_byte_size,
     complex_lane_expr, complex_object_pointer, is_complex_scalar, lowered_expr_scalar_type,
-    scalar_size,
+    real_scalar_expr_type, real_scalar_lane_expr, scalar_size,
 };
 use crate::parser::{BinaryOp, ScalarType, UnaryOp};
 
@@ -24,7 +24,7 @@ pub(in crate::ir) fn complex_equality_expr(
     if !matches!(op, BinaryOp::Equal | BinaryOp::NotEqual) {
         return None;
     }
-    let scalar_type = same_complex_type(left, right)?;
+    let scalar_type = complex_binary_result_type(left, right)?;
     let lane_op = if op == BinaryOp::Equal {
         BinaryOp::Equal
     } else {
@@ -56,7 +56,7 @@ pub(in crate::ir) fn complex_equality_expr(
     Some(expr)
 }
 
-fn complex_expr_scalar_type(value: &LoweredExpr) -> Option<ScalarType> {
+pub(in crate::ir) fn complex_expr_scalar_type(value: &LoweredExpr) -> Option<ScalarType> {
     let scalar_type = lowered_expr_scalar_type(value);
     if scalar_type.is_some_and(is_complex_scalar) {
         return scalar_type;
@@ -68,13 +68,13 @@ fn complex_expr_scalar_type(value: &LoweredExpr) -> Option<ScalarType> {
         } => complex_expr_scalar_type(expr),
         LoweredExpr::Cast { target, .. } if is_complex_scalar(*target) => Some(*target),
         LoweredExpr::Binary { op, left, right } if is_complex_arithmetic_op(*op) => {
-            same_complex_type(left, right)
+            complex_binary_result_type(left, right)
         }
         _ => None,
     }
 }
 
-fn complex_lane_value_expr(
+pub(in crate::ir) fn complex_lane_value_expr(
     value: &LoweredExpr,
     scalar_type: ScalarType,
     index: i64,
@@ -93,6 +93,7 @@ fn complex_lane_value_expr(
         LoweredExpr::Binary { op, left, right } if is_complex_arithmetic_op(*op) => {
             complex_binary_lane_expr(*op, left, right, scalar_type, index, element_byte_size)
         }
+        _ if real_scalar_expr_type(value).is_some() => Some(real_scalar_lane_expr(value, index)),
         _ => None,
     }
 }
@@ -105,7 +106,7 @@ fn complex_binary_lane_expr(
     index: i64,
     element_byte_size: usize,
 ) -> Option<LoweredExpr> {
-    if same_complex_type(left, right)? != scalar_type {
+    if complex_binary_result_type(left, right)? != scalar_type {
         return None;
     }
     match op {
@@ -193,12 +194,17 @@ fn lane_not_zero(
     ))
 }
 
-fn same_complex_type(left: &LoweredExpr, right: &LoweredExpr) -> Option<ScalarType> {
-    let scalar_type = complex_expr_scalar_type(left)?;
-    if scalar_type == complex_expr_scalar_type(right)? {
-        Some(scalar_type)
-    } else {
-        None
+fn complex_binary_result_type(left: &LoweredExpr, right: &LoweredExpr) -> Option<ScalarType> {
+    match (
+        complex_expr_scalar_type(left),
+        complex_expr_scalar_type(right),
+        real_scalar_expr_type(left),
+        real_scalar_expr_type(right),
+    ) {
+        (Some(left_type), Some(right_type), _, _) if left_type == right_type => Some(left_type),
+        (Some(left_type), None, _, Some(_)) => Some(left_type),
+        (None, Some(right_type), Some(_), _) => Some(right_type),
+        _ => None,
     }
 }
 

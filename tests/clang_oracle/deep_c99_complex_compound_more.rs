@@ -229,3 +229,48 @@ fn complex_arithmetic_logical_not_uses_imaginary_lane_matches_host_stdout_and_ex
     // when/then
     assert_case("complex_arithmetic_logical_not_uses_imaginary_lane", source);
 }
+
+#[test]
+fn complex_plus_real_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 2.0; double *zp = (double *)&z; zp[1] = 7.0; double _Complex sum = z + 5.0; double *sp = (double *)&sum; puts(\"complex-plus-real\"); return sp[0] == 7.0 && sp[1] == 7.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_plus_real_preserves_imaginary_lane", source);
+}
+
+#[test]
+fn real_plus_complex_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 4.0; double *zp = (double *)&z; zp[1] = -6.0; double _Complex sum = 3.0 + z; double *sp = (double *)&sum; puts(\"real-plus-complex\"); return sp[0] == 7.0 && sp[1] == -6.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("real_plus_complex_preserves_imaginary_lane", source);
+}
+
+#[test]
+fn complex_times_real_scales_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 3.0; double *zp = (double *)&z; zp[1] = 4.0; double _Complex product = z * 2.0; double *pp = (double *)&product; puts(\"complex-times-real\"); return pp[0] == 6.0 && pp[1] == 8.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_times_real_scales_imaginary_lane", source);
+}
+
+#[test]
+fn real_minus_complex_negates_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 2.0; double *zp = (double *)&z; zp[1] = 5.0; double _Complex diff = 9.0 - z; double *dp = (double *)&diff; puts(\"real-minus-complex\"); return dp[0] == 7.0 && dp[1] == -5.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("real_minus_complex_negates_imaginary_lane", source);
+}
+
+#[test]
+fn complex_equals_real_requires_zero_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double _Complex z = 3.0; double *zp = (double *)&z; zp[1] = 1.0; puts(\"complex-eq-real\"); return z == 3.0 ? 1 : 0; }\n";
+
+    // when/then
+    assert_case("complex_equals_real_requires_zero_imaginary_lane", source);
+}
