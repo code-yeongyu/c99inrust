@@ -168,3 +168,33 @@ fn extern_complex_double_global_matches_host_stdout_and_exit_code() {
     // when/then
     assert_multifile_case("extern_complex_double_global", FILES);
 }
+
+#[test]
+fn local_complex_double_real_initializer_zeroes_imaginary_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_double_real_initializer_zeroes_imaginary_part";
+    let source = "int puts(char*); int main(void) { double _Complex z = 5.0; double *parts = (double *)&z; puts(\"complex-local-init-zero-imag\"); return (int)parts[0] + (int)parts[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn local_complex_double_real_assignment_zeroes_imaginary_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "local_complex_double_real_assignment_zeroes_imaginary_part";
+    let source = "int puts(char*); int main(void) { double _Complex z = 1.0; double *parts = (double *)&z; parts[1] = 9.0; z = 5.0; puts(\"complex-local-assign-zero-imag\"); return (int)parts[0] + (int)parts[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn global_complex_double_real_assignment_zeroes_imaginary_part_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "global_complex_double_real_assignment_zeroes_imaginary_part";
+    let source = "int puts(char*); double _Complex g = 1.0; int main(void) { double *parts = (double *)&g; parts[1] = 8.0; g = 4.0; puts(\"complex-global-assign-zero-imag\"); return (int)parts[0] + (int)parts[1]; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

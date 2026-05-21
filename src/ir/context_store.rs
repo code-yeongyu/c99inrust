@@ -9,18 +9,27 @@ impl LoweringContext {
                 slot,
                 offset,
                 scalar_type,
-            } => self.instructions.push(Instruction::StoreLocal {
-                slot,
-                offset,
-                scalar_type,
-                value: store_value_for_scalar(scalar_type, value),
-            }),
-            LoweredLValue::Global { name, scalar_type } => {
-                self.instructions.push(Instruction::StoreGlobal {
-                    name,
+            } => {
+                self.instructions.push(Instruction::StoreLocal {
+                    slot,
+                    offset,
                     scalar_type,
                     value: store_value_for_scalar(scalar_type, value),
                 });
+                let pointer = LoweredExpr::LocalAddress {
+                    offset,
+                    byte_size: scalar_size(scalar_type),
+                };
+                self.zero_complex_tail(&pointer, scalar_type);
+            }
+            LoweredLValue::Global { name, scalar_type } => {
+                self.instructions.push(Instruction::StoreGlobal {
+                    name: name.clone(),
+                    scalar_type,
+                    value: store_value_for_scalar(scalar_type, value),
+                });
+                let pointer = LoweredExpr::GlobalAddress { name };
+                self.zero_complex_tail(&pointer, scalar_type);
             }
             target @ (LoweredLValue::GlobalByteSubscript { .. }
             | LoweredLValue::GlobalIntSubscript { .. }
@@ -34,6 +43,28 @@ impl LoweringContext {
                         value: Box::new(value),
                     }));
             }
+        }
+    }
+
+    fn zero_complex_tail(&mut self, pointer: &LoweredExpr, scalar_type: ScalarType) {
+        if !matches!(
+            scalar_type,
+            ScalarType::ComplexFloat | ScalarType::ComplexDouble | ScalarType::ComplexLongDouble
+        ) {
+            return;
+        }
+        let tail_slots = scalar_size(scalar_type) / scalar_size(ScalarType::Double);
+        for (index_value, _) in (1_i64..).zip(1..tail_slots) {
+            self.push_store(
+                LoweredLValue::PointerSubscript {
+                    pointer: Box::new(pointer.clone()),
+                    index: Box::new(LoweredExpr::Integer(index_value)),
+                    element_type: ScalarType::Double,
+                    element_byte_size: scalar_size(ScalarType::Double),
+                    element_unsigned: false,
+                },
+                LoweredExpr::DoubleLiteral("0.0".to_owned()),
+            );
         }
     }
 
