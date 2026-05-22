@@ -78,6 +78,10 @@ pub enum Expr {
         target: LValue,
         value: Box<Self>,
     },
+    PrefixIncrement {
+        target: LValue,
+        decrement: bool,
+    },
     PostIncrement {
         target: LValue,
         decrement: bool,

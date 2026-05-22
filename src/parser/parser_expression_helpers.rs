@@ -1,4 +1,4 @@
-use super::{BinaryOp, CompileError, CompileResult, Expr, LValue, Statement};
+use super::{CompileError, CompileResult, Expr, LValue, Statement};
 
 pub(super) fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
     match expr {
@@ -30,16 +30,9 @@ pub(super) fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
     }
 }
 
-pub(super) fn prefix_update_expr(expr: Expr, op: BinaryOp) -> CompileResult<Expr> {
-    let target = lvalue_from_expr(expr.clone())?;
-    Ok(Expr::Assignment {
-        target,
-        value: Box::new(Expr::Binary {
-            op,
-            left: Box::new(expr),
-            right: Box::new(Expr::Integer(1)),
-        }),
-    })
+pub(super) fn prefix_update_expr(expr: Expr, decrement: bool) -> CompileResult<Expr> {
+    let target = lvalue_from_expr(expr)?;
+    Ok(Expr::PrefixIncrement { target, decrement })
 }
 
 pub(super) fn statement_from_expression(expr: Expr) -> Statement {

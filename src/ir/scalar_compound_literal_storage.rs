@@ -1,6 +1,6 @@
 use super::{LoweredExpr, LoweredLValue, LoweringContext, pointer_arithmetic, scalar_size};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, LValue, ScalarType};
+use crate::parser::{Expr, LValue, ScalarType};
 
 impl LoweringContext {
     pub(in crate::ir) fn is_scalar_compound_address(initializer: &Expr) -> bool {
@@ -48,64 +48,6 @@ impl LoweringContext {
         self.push_store(target, value)?;
         Ok(pointer)
     }
-
-    pub(in crate::ir) fn lower_scalar_compound_assignment_expr(
-        &self,
-        target: &LValue,
-        value: &Expr,
-    ) -> CompileResult<Option<LoweredExpr>> {
-        let LValue::ScalarCompoundLiteral {
-            scalar_type,
-            referent,
-            value: initializer,
-        } = target
-        else {
-            return Ok(None);
-        };
-        Ok(Some(LoweredExpr::Comma {
-            left: Box::new(self.lower_scalar_compound_value(
-                *scalar_type,
-                referent.as_deref(),
-                initializer,
-            )?),
-            right: Box::new(self.lower_scalar_compound_value(
-                *scalar_type,
-                referent.as_deref(),
-                value,
-            )?),
-        }))
-    }
-
-    fn lower_scalar_compound_value(
-        &self,
-        scalar_type: ScalarType,
-        referent: Option<&str>,
-        value: &Expr,
-    ) -> CompileResult<LoweredExpr> {
-        if scalar_type == ScalarType::Int {
-            match referent {
-                Some("byte") => return Ok(masked_integer(self.lower_expr(value)?, 255)),
-                Some("char") => {
-                    return Ok(signed_narrow_integer(
-                        self.lower_expr(value)?,
-                        255,
-                        128,
-                        256,
-                    ));
-                }
-                Some("short") => {
-                    return Ok(signed_narrow_integer(
-                        self.lower_expr(value)?,
-                        65_535,
-                        32_768,
-                        65_536,
-                    ));
-                }
-                _ => {}
-            }
-        }
-        self.lower_cast_expr(scalar_type, value)
-    }
 }
 
 fn scalar_compound_address(initializer: &Expr) -> CompileResult<(ScalarType, Option<&str>, &Expr)> {
@@ -132,29 +74,4 @@ fn scalar_compound_byte_size(scalar_type: ScalarType, referent: Option<&str>) ->
         return byte_size;
     }
     scalar_size(scalar_type)
-}
-
-fn signed_narrow_integer(expr: LoweredExpr, mask: i64, sign_bit: i64, range: i64) -> LoweredExpr {
-    let masked = masked_integer(expr, mask);
-    LoweredExpr::Conditional {
-        condition: Box::new(LoweredExpr::Binary {
-            op: BinaryOp::GreaterEqual,
-            left: Box::new(masked.clone()),
-            right: Box::new(LoweredExpr::Integer(sign_bit)),
-        }),
-        then_expr: Box::new(LoweredExpr::Binary {
-            op: BinaryOp::Sub,
-            left: Box::new(masked.clone()),
-            right: Box::new(LoweredExpr::Integer(range)),
-        }),
-        else_expr: Box::new(masked),
-    }
-}
-
-fn masked_integer(expr: LoweredExpr, mask: i64) -> LoweredExpr {
-    LoweredExpr::Binary {
-        op: BinaryOp::BitAnd,
-        left: Box::new(expr),
-        right: Box::new(LoweredExpr::Integer(mask)),
-    }
 }

@@ -129,6 +129,19 @@ fn scalar_compound_literal_assignment_evaluates_initializer_matches_host_stdout_
 }
 
 #[test]
+fn scalar_compound_literal_assignment_rhs_compound_evaluates_both_initializers_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int hits = 0; int bump(void) { hits = hits + 1; return 4; } int main(void) { int saved = ((int){ bump() } = (int){ bump() } + 1); puts(\"scalar-compound-manual-assign\"); return hits == 2 && saved == 5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_compound_literal_assignment_rhs_compound_evaluates_both_initializers",
+        source,
+    );
+}
+
+#[test]
 fn scalar_unsigned_char_compound_literal_assignment_narrows_rhs_matches_host_stdout_and_exit_code()
 {
     // given
@@ -149,6 +162,76 @@ fn scalar_short_compound_literal_assignment_narrows_rhs_matches_host_stdout_and_
     // when/then
     assert_case(
         "scalar_short_compound_literal_assignment_narrows_rhs",
+        source,
+    );
+}
+
+#[test]
+fn scalar_int_compound_literal_post_increment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = (int){ 4 }++; puts(\"scalar-compound-int-postinc\"); return saved == 4 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("scalar_int_compound_literal_post_increment", source);
+}
+
+#[test]
+fn scalar_int_compound_literal_pre_increment_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = ++(int){ 4 }; puts(\"scalar-compound-int-preinc\"); return saved == 5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("scalar_int_compound_literal_pre_increment", source);
+}
+
+#[test]
+fn scalar_compound_literal_pre_increment_evaluates_initializer_once_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int hits = 0; int bump(void) { hits = hits + 1; return 4; } int main(void) { int saved = ++(int){ bump() }; puts(\"scalar-compound-preinc-init\"); return hits == 1 && saved == 5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_compound_literal_pre_increment_evaluates_initializer_once",
+        source,
+    );
+}
+
+#[test]
+fn scalar_compound_literal_post_increment_evaluates_initializer_matches_host_stdout_and_exit_code()
+{
+    // given
+    let source = "int puts(char*); int hits = 0; int bump(void) { hits = hits + 1; return 4; } int main(void) { (int){ bump() }++; puts(\"scalar-compound-postinc-init\"); return hits == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_compound_literal_post_increment_evaluates_initializer",
+        source,
+    );
+}
+
+#[test]
+fn scalar_unsigned_char_compound_literal_post_increment_narrows_old_value_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = (unsigned char){ 300 }++; puts(\"scalar-compound-uchar-postinc\"); return saved == 44 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_char_compound_literal_post_increment_narrows_old_value",
+        source,
+    );
+}
+
+#[test]
+fn scalar_short_compound_literal_post_decrement_narrows_old_value_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = (short){ 65535 }--; puts(\"scalar-compound-short-postdec\"); return saved == -1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_short_compound_literal_post_decrement_narrows_old_value",
         source,
     );
 }

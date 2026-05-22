@@ -48,7 +48,7 @@ pub(in crate::ir) fn for_expr(context: &LoweringContext, expr: &Expr) -> Compile
     if let Expr::Dereference { pointer } = expr {
         return nested_referent(context, pointer);
     }
-    if let Expr::PostIncrement { target, .. } = expr
+    if let Expr::PrefixIncrement { target, .. } | Expr::PostIncrement { target, .. } = expr
         && let Some(referent) = context.pointer_referent_for_lvalue(target)?
     {
         return Ok(referent);

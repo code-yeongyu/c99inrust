@@ -54,8 +54,8 @@ pub fn const_eval(expr: &Expr) -> CompileResult<i64> {
         Expr::Comma { .. } => Err(CompileError::new(
             "comma expression is not an integer constant expression",
         )),
-        Expr::PostIncrement { .. } => Err(CompileError::new(
-            "post-increment expression is not an integer constant expression",
+        Expr::PrefixIncrement { .. } | Expr::PostIncrement { .. } => Err(CompileError::new(
+            "increment expression is not an integer constant expression",
         )),
         Expr::Unary { op, expr } => {
             let value = const_eval(expr)?;

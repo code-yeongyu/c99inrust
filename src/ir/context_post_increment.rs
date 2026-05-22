@@ -1,5 +1,5 @@
 use super::{
-    LoweredExpr, LoweredLValue, LoweringContext, ensure_post_increment_scalar,
+    Instruction, LoweredExpr, LoweredLValue, LoweringContext, ensure_post_increment_scalar,
     lowered_lvalue_scalar_type, lowered_lvalue_to_expr,
 };
 use crate::diagnostics::{CompileError, CompileResult};
@@ -11,6 +11,10 @@ impl LoweringContext {
         target: &LValue,
         decrement: bool,
     ) -> CompileResult<()> {
+        if let Some(value) = self.lower_scalar_compound_post_increment_expr(target)? {
+            self.instructions.push(Instruction::Eval(value));
+            return Ok(());
+        }
         let lowered = self.lower_lvalue(target)?;
         ensure_post_increment_scalar(&lowered)?;
         let increment = self.post_increment_amount(target, &lowered, decrement)?;
@@ -30,12 +34,36 @@ impl LoweringContext {
         target: &LValue,
         decrement: bool,
     ) -> CompileResult<LoweredExpr> {
+        if let Some(value) = self.lower_scalar_compound_post_increment_expr(target)? {
+            return Ok(value);
+        }
         let lowered = self.lower_lvalue(target)?;
         ensure_post_increment_scalar(&lowered)?;
         let increment = self.post_increment_amount(target, &lowered, decrement)?;
         Ok(LoweredExpr::PostIncrement {
             target: lowered,
             increment,
+        })
+    }
+
+    pub(in crate::ir) fn lower_prefix_increment_expr(
+        &self,
+        target: &LValue,
+        decrement: bool,
+    ) -> CompileResult<LoweredExpr> {
+        if let Some(value) = self.lower_scalar_compound_prefix_increment_expr(target, decrement)? {
+            return Ok(value);
+        }
+        let lowered = self.lower_lvalue(target)?;
+        ensure_post_increment_scalar(&lowered)?;
+        let increment = self.post_increment_amount(target, &lowered, decrement)?;
+        Ok(LoweredExpr::Assign {
+            target: lowered.clone(),
+            value: Box::new(LoweredExpr::Binary {
+                op: BinaryOp::Add,
+                left: Box::new(lowered_lvalue_to_expr(&lowered)),
+                right: Box::new(LoweredExpr::Integer(increment)),
+            }),
         })
     }
 

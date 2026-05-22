@@ -34,6 +34,9 @@ impl LoweringContext {
             Expr::AddressOf { target } => self.lower_address_of(target),
             Expr::Subscript { array, index } => self.lower_subscript(array, index),
             Expr::Assignment { target, value } => self.lower_assignment_expr(target, value),
+            Expr::PrefixIncrement { target, decrement } => {
+                self.lower_prefix_increment_expr(target, *decrement)
+            }
             Expr::PostIncrement { target, decrement } => {
                 self.lower_post_increment_expr(target, *decrement)
             }

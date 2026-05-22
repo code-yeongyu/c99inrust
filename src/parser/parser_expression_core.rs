@@ -153,7 +153,8 @@ impl Parser<'_> {
                 .is_some_and(|token| token_is_punctuator(token, "{"))
             {
                 self.index = next_index;
-                return self.scalar_compound_literal(target, referent);
+                let expr = self.scalar_compound_literal(target, referent)?;
+                return self.postfix_suffixes(expr);
             }
             self.index = next_index;
             return Ok(Expr::Cast {
@@ -167,11 +168,11 @@ impl Parser<'_> {
         }
         if self.check_punctuator("++") {
             self.advance();
-            return prefix_update_expr(self.unary()?, BinaryOp::Add);
+            return prefix_update_expr(self.unary()?, false);
         }
         if self.check_punctuator("--") {
             self.advance();
-            return prefix_update_expr(self.unary()?, BinaryOp::Sub);
+            return prefix_update_expr(self.unary()?, true);
         }
         if self.check_punctuator("&") {
             self.advance();
