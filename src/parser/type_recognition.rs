@@ -52,6 +52,7 @@ pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
         (true, false, false) => Some(ReturnType::Void),
         (_, _, true) if saw_void || saw_non_void_type => Some(ReturnType::Pointer),
         (false, true, false) if saw_double && long_count == 0 => Some(ReturnType::Double),
+        (false, true, false) if saw_double => Some(ReturnType::LongDouble),
         (false, true, false) => Some(ReturnType::Int),
         _ => None,
     }

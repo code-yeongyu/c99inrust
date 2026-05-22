@@ -78,7 +78,7 @@ pub(in crate::ir) fn lower_function_with_globals(
     }
     if matches!(
         function.return_type,
-        ReturnType::Int | ReturnType::Pointer | ReturnType::Double
+        ReturnType::Int | ReturnType::Pointer | ReturnType::Double | ReturnType::LongDouble
     ) && !context.has_return
     {
         return Err(CompileError::new(format!(

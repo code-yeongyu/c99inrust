@@ -208,7 +208,10 @@ impl LoweringContext {
 
     pub(in crate::ir) fn lower_return(&mut self, expr: Option<&Expr>) -> CompileResult<()> {
         match (self.return_type, expr) {
-            (ReturnType::Int | ReturnType::Pointer | ReturnType::Double, Some(expr)) => {
+            (
+                ReturnType::Int | ReturnType::Pointer | ReturnType::Double | ReturnType::LongDouble,
+                Some(expr),
+            ) => {
                 let value = self.lower_expr(expr)?;
                 self.instructions.push(Instruction::Return(Some(value)));
             }
@@ -220,6 +223,11 @@ impl LoweringContext {
             }
             (ReturnType::Double, None) => {
                 return Err(CompileError::new("double function must return a value"));
+            }
+            (ReturnType::LongDouble, None) => {
+                return Err(CompileError::new(
+                    "long double function must return a value",
+                ));
             }
             (ReturnType::Void, Some(_)) => {
                 return Err(CompileError::new("void function cannot return a value"));

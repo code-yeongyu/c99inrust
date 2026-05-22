@@ -85,3 +85,13 @@ fn extra_double_return_libc_prototype_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn extra_double_parameter_function_definition_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "extra_double_parameter_function_definition";
+    let source = "int puts(char*); double half(double x) { return x / 2.0; } int main(void) { double y = half(7.0); puts(\"extra-double-param\"); return y == 3.5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

@@ -33,3 +33,13 @@ fn long_double_sizeof_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn long_double_function_return_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "long_double_function_return";
+    let source = "int puts(char*); long double widen(long double x) { return x + 0.5L; } int main(void) { long double y = widen(1.5L); puts(\"ld-return\"); return (int)(y * 10.0L) == 20 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

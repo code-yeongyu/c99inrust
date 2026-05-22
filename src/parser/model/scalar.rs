@@ -3,6 +3,7 @@ pub enum ReturnType {
     Int,
     Pointer,
     Double,
+    LongDouble,
     Void,
 }
 

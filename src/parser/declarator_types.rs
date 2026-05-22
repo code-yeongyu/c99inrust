@@ -124,6 +124,7 @@ fn integer_parameter_type_with_typedefs(
 ) -> Option<ScalarType> {
     let mut saw_type = false;
     let mut saw_bool = false;
+    let mut saw_double = false;
     let mut long_count = 0usize;
     for token in tokens {
         match &token.kind {
@@ -137,6 +138,10 @@ fn integer_parameter_type_with_typedefs(
             TokenKind::Keyword(
                 Keyword::Char | Keyword::Int | Keyword::Short | Keyword::Signed | Keyword::Unsigned,
             ) => saw_type = true,
+            TokenKind::Keyword(Keyword::Double) => {
+                saw_type = true;
+                saw_double = true;
+            }
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
                 long_count += 1;
@@ -161,6 +166,10 @@ fn integer_parameter_type_with_typedefs(
     }
     if saw_bool {
         Some(ScalarType::Bool)
+    } else if saw_double && long_count == 0 {
+        Some(ScalarType::Double)
+    } else if saw_double {
+        Some(ScalarType::LongDouble)
     } else if long_count == 0 {
         Some(ScalarType::Int)
     } else {

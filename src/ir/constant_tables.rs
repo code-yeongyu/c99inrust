@@ -68,6 +68,7 @@ const fn function_return_type(return_type: ReturnType) -> Option<ScalarType> {
         ReturnType::Int => Some(ScalarType::Int),
         ReturnType::Pointer => Some(ScalarType::Pointer),
         ReturnType::Double => Some(ScalarType::Double),
+        ReturnType::LongDouble => Some(ScalarType::LongDouble),
         ReturnType::Void => None,
     }
 }
