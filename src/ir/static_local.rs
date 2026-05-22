@@ -3,9 +3,29 @@ use std::collections::HashMap;
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{BinaryOp, Expr, ScalarType, UnaryOp};
 
-use super::{LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary};
+use super::{LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary, scalar_size};
 
 pub(in crate::ir) fn scalar_initializer(
+    scalar_type: ScalarType,
+    initializer: Option<&Expr>,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<LoweredGlobalInitializer> {
+    match scalar_type {
+        ScalarType::Bool | ScalarType::Int | ScalarType::LongLong => {
+            integer_scalar_initializer(scalar_type, initializer, constants)
+        }
+        ScalarType::Pointer => pointer_initializer(initializer, constants),
+        ScalarType::Double | ScalarType::LongDouble => {
+            real_initializer(initializer, constants).map(LoweredGlobalInitializer::Double)
+        }
+        ScalarType::ComplexFloat | ScalarType::ComplexDouble | ScalarType::ComplexLongDouble => {
+            complex_initializer(scalar_type, initializer, constants)
+        }
+        ScalarType::VaList => Err(CompileError::new("static local does not support va_list")),
+    }
+}
+
+fn integer_scalar_initializer(
     scalar_type: ScalarType,
     initializer: Option<&Expr>,
     constants: &HashMap<String, i64>,
@@ -17,20 +37,76 @@ pub(in crate::ir) fn scalar_initializer(
             i32::try_from(value)
                 .map_err(|_| CompileError::new("static local int initializer does not fit i32"))?,
         )),
-        ScalarType::Pointer if value == 0 => Ok(LoweredGlobalInitializer::PointerNull),
-        ScalarType::Pointer => Err(CompileError::new(
-            "static local pointer initializer must be null",
-        )),
-        ScalarType::LongLong
-        | ScalarType::ComplexFloat
-        | ScalarType::ComplexDouble
-        | ScalarType::ComplexLongDouble
-        | ScalarType::Double
-        | ScalarType::LongDouble
-        | ScalarType::VaList => Err(CompileError::new(
-            "static local currently supports int and pointer scalars only",
-        )),
+        ScalarType::LongLong => Ok(LoweredGlobalInitializer::LongLong(value)),
+        _ => Err(CompileError::new("expected static integer scalar")),
     }
+}
+
+fn pointer_initializer(
+    initializer: Option<&Expr>,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<LoweredGlobalInitializer> {
+    let value = initializer.map_or(Ok(0), |expr| eval_with_constants(expr, constants))?;
+    if value == 0 {
+        return Ok(LoweredGlobalInitializer::PointerNull);
+    }
+    Err(CompileError::new(
+        "static local pointer initializer must be null",
+    ))
+}
+
+fn complex_initializer(
+    scalar_type: ScalarType,
+    initializer: Option<&Expr>,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<LoweredGlobalInitializer> {
+    initializer.map_or_else(
+        || {
+            Ok(LoweredGlobalInitializer::ZeroBytes(scalar_size(
+                scalar_type,
+            )))
+        },
+        |expr| {
+            real_expr(expr, constants).map(|real| LoweredGlobalInitializer::RealThenZero {
+                real,
+                byte_len: scalar_size(scalar_type),
+            })
+        },
+    )
+}
+
+fn real_initializer(
+    initializer: Option<&Expr>,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<String> {
+    initializer.map_or_else(|| Ok("0".to_owned()), |expr| real_expr(expr, constants))
+}
+
+fn real_expr(expr: &Expr, constants: &HashMap<String, i64>) -> CompileResult<String> {
+    match expr {
+        Expr::DoubleLiteral(value) => Ok(value.clone()),
+        Expr::Integer(value) | Expr::LongInteger(value) => Ok(value.to_string()),
+        Expr::Identifier(name) => constants
+            .get(name)
+            .map(ToString::to_string)
+            .ok_or_else(|| CompileError::new(format!("identifier {name} is not a constant"))),
+        Expr::Unary {
+            op: UnaryOp::Plus,
+            expr,
+        }
+        | Expr::Cast { expr, .. } => real_expr(expr, constants),
+        Expr::Unary {
+            op: UnaryOp::Minus,
+            expr,
+        } => real_expr(expr, constants).map(|value| negated_real(&value)),
+        _ => eval_with_constants(expr, constants).map(|value| value.to_string()),
+    }
+}
+
+fn negated_real(value: &str) -> String {
+    value
+        .strip_prefix('-')
+        .map_or_else(|| format!("-{value}"), ToOwned::to_owned)
 }
 
 fn eval_with_constants(expr: &Expr, constants: &HashMap<String, i64>) -> CompileResult<i64> {

@@ -76,13 +76,8 @@ impl LoweringContext {
         referent: Option<String>,
         initializer: Option<&Expr>,
     ) -> CompileResult<()> {
-        if !matches!(
-            scalar_type,
-            ScalarType::Bool | ScalarType::Int | ScalarType::Pointer
-        ) {
-            return Err(CompileError::new(
-                "static local currently supports int and pointer scalars only",
-            ));
+        if scalar_type == ScalarType::VaList {
+            return Err(CompileError::new("static local does not support va_list"));
         }
         let initializer =
             static_local::scalar_initializer(scalar_type, initializer, &self.constants)?;
