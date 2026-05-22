@@ -16,17 +16,20 @@ pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String>
     {
         return Some("char".to_owned());
     }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Int)))
-    {
-        return Some("int".to_owned());
+    if specifiers_are_unsigned_short(tokens) {
+        return Some("unsigned short".to_owned());
     }
     if tokens
         .iter()
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Short)))
     {
         return Some("short".to_owned());
+    }
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Int)))
+    {
+        return Some("int".to_owned());
     }
     complex_referent(tokens)
         .or_else(|| double_referent(tokens))
@@ -154,4 +157,17 @@ fn specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
         }
     }
     saw_unsigned && saw_char
+}
+
+fn specifiers_are_unsigned_short(tokens: &[Token]) -> bool {
+    let mut saw_unsigned = false;
+    let mut saw_short = false;
+    for token in tokens {
+        match token.kind {
+            TokenKind::Keyword(Keyword::Unsigned) => saw_unsigned = true,
+            TokenKind::Keyword(Keyword::Short) => saw_short = true,
+            _ => {}
+        }
+    }
+    saw_unsigned && saw_short
 }

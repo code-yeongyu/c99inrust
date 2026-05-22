@@ -43,7 +43,7 @@ impl LoweringContext {
             index: Box::new(LoweredExpr::Integer(0)),
             element_type: scalar_type,
             element_byte_size: byte_size,
-            element_unsigned: referent == Some("byte"),
+            element_unsigned: referent.is_some_and(pointer_arithmetic::is_unsigned_integer),
         };
         let value = self.lower_expr(value)?;
         self.push_store(target, value)?;

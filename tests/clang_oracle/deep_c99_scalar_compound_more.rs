@@ -167,6 +167,43 @@ fn scalar_short_compound_literal_assignment_narrows_rhs_matches_host_stdout_and_
 }
 
 #[test]
+fn scalar_unsigned_short_compound_literal_assignment_wraps_rhs_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = ((unsigned short){ 1 } = 65536); puts(\"scalar-compound-ushort-assign\"); return saved == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_short_compound_literal_assignment_wraps_rhs",
+        source,
+    );
+}
+
+#[test]
+fn scalar_unsigned_short_compound_literal_keeps_unsigned_max_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = (unsigned short){ 65535 }; puts(\"scalar-compound-ushort-max\"); return saved == 65535 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_short_compound_literal_keeps_unsigned_max",
+        source,
+    );
+}
+
+#[test]
+fn scalar_unsigned_short_compound_literal_assignment_keeps_unsigned_max_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = ((unsigned short){ 0 } = 65535); puts(\"scalar-compound-ushort-assign-max\"); return saved == 65535 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_short_compound_literal_assignment_keeps_unsigned_max",
+        source,
+    );
+}
+
+#[test]
 fn scalar_int_compound_literal_post_increment_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); int main(void) { int saved = (int){ 4 }++; puts(\"scalar-compound-int-postinc\"); return saved == 4 ? 0 : 1; }\n";
@@ -219,6 +256,45 @@ fn scalar_unsigned_char_compound_literal_post_increment_narrows_old_value_matche
     // when/then
     assert_case(
         "scalar_unsigned_char_compound_literal_post_increment_narrows_old_value",
+        source,
+    );
+}
+
+#[test]
+fn scalar_unsigned_short_compound_literal_post_increment_wraps_old_value_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = (unsigned short){ 65536 }++; puts(\"scalar-compound-ushort-postinc\"); return saved == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_short_compound_literal_post_increment_wraps_old_value",
+        source,
+    );
+}
+
+#[test]
+fn scalar_unsigned_short_compound_literal_post_increment_keeps_unsigned_old_value_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = (unsigned short){ 65535 }++; puts(\"scalar-compound-ushort-postinc-max\"); return saved == 65535 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_short_compound_literal_post_increment_keeps_unsigned_old_value",
+        source,
+    );
+}
+
+#[test]
+fn scalar_unsigned_short_compound_literal_pre_increment_wraps_new_value_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int main(void) { int saved = ++(unsigned short){ 65535 }; puts(\"scalar-compound-ushort-preinc\"); return saved == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_unsigned_short_compound_literal_pre_increment_wraps_new_value",
         source,
     );
 }

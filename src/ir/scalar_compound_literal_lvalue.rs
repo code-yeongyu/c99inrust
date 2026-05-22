@@ -55,7 +55,9 @@ impl LoweringContext {
         referent: Option<&str>,
         value: &Expr,
     ) -> CompileResult<LoweredExpr> {
-        if scalar_type == ScalarType::Int && matches!(referent, Some("byte" | "char" | "short")) {
+        if scalar_type == ScalarType::Int
+            && matches!(referent, Some("byte" | "char" | "unsigned short" | "short"))
+        {
             return Ok(scalar_compound_lowered_value(
                 scalar_type,
                 referent,
@@ -105,6 +107,7 @@ fn scalar_compound_lowered_value(
         match referent {
             Some("byte") => return masked_integer(value, 255),
             Some("char") => return signed_narrow_integer(value, 255, 128, 256),
+            Some("unsigned short") => return masked_integer(value, 65_535),
             Some("short") => return signed_narrow_integer(value, 65_535, 32_768, 65_536),
             _ => {}
         }

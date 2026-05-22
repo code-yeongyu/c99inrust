@@ -230,6 +230,7 @@ fn scalar_compound_value(target: ScalarType, referent: Option<&str>, expr: Expr)
     match referent {
         Some("byte") => local_scalar_initializer(target, true, false, true, expr),
         Some("char") => local_scalar_initializer(target, true, false, false, expr),
+        Some("unsigned short") => local_scalar_initializer(target, false, true, true, expr),
         Some("short") => local_scalar_initializer(target, false, true, false, expr),
         _ => expr,
     }

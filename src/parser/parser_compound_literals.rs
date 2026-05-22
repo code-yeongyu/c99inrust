@@ -85,7 +85,7 @@ impl Parser<'_> {
         Ok(Some(CompoundArrayType {
             element_type,
             element_byte_size: compound_array_element_size(specifiers, element_type),
-            element_unsigned: specifiers_are_unsigned_char(specifiers),
+            element_unsigned: specifiers_are_unsigned_narrow_integer(specifiers),
             length,
         }))
     }
@@ -219,15 +219,15 @@ fn compound_array_element_size(tokens: &[Token], element_type: ScalarType) -> us
     }
 }
 
-fn specifiers_are_unsigned_char(tokens: &[Token]) -> bool {
+fn specifiers_are_unsigned_narrow_integer(tokens: &[Token]) -> bool {
     let mut saw_unsigned = false;
-    let mut saw_char = false;
+    let mut saw_narrow = false;
     for token in tokens {
         match token.kind {
             TokenKind::Keyword(Keyword::Unsigned) => saw_unsigned = true,
-            TokenKind::Keyword(Keyword::Char) => saw_char = true,
+            TokenKind::Keyword(Keyword::Char | Keyword::Short) => saw_narrow = true,
             _ => {}
         }
     }
-    saw_unsigned && saw_char
+    saw_unsigned && saw_narrow
 }

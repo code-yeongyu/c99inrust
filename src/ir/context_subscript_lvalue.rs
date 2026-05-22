@@ -223,6 +223,6 @@ impl LoweringContext {
 
     pub(in crate::ir) fn pointer_subscript_element_unsigned(&self, array: &Expr) -> bool {
         self.pointer_referent_for_expr(array)
-            .is_ok_and(|referent| pointer_arithmetic::is_unsigned_byte(&referent))
+            .is_ok_and(|referent| pointer_arithmetic::is_unsigned_integer(&referent))
     }
 }

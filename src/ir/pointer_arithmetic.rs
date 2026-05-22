@@ -8,7 +8,7 @@ pub(in crate::ir) fn byte_size(referent: &str) -> Option<usize> {
         Some(scalar_size(ScalarType::Pointer))
     } else if matches!(referent, "byte" | "char") {
         Some(1)
-    } else if referent == "short" {
+    } else if matches!(referent, "short" | "unsigned short") {
         Some(2)
     } else if referent == "int" {
         Some(scalar_size(ScalarType::Int))
@@ -35,8 +35,8 @@ pub(in crate::ir) fn is_pointer(referent: &str) -> bool {
     referent.starts_with(POINTER_REFERENT)
 }
 
-pub(in crate::ir) fn is_unsigned_byte(referent: &str) -> bool {
-    referent == "byte"
+pub(in crate::ir) fn is_unsigned_integer(referent: &str) -> bool {
+    matches!(referent, "byte" | "unsigned short")
 }
 
 pub(in crate::ir) fn nested_referent(referent: Option<&str>) -> String {
