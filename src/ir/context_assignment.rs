@@ -1,6 +1,6 @@
 use super::{
     GlobalBinding, Instruction, LocalBinding, LoweredExpr, LoweredLValue, LoweringContext,
-    StructAddress, lowered_lvalue_scalar_type, sizeof_expr,
+    StructAddress, lowered_lvalue_scalar_type, narrow_local_scalar_value, sizeof_expr,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Expr, FieldType, LValue, ScalarType};
@@ -55,8 +55,35 @@ impl LoweringContext {
         {
             return self.lower_struct_compound_member_pointer_assignment(target, value);
         }
-        let value = self.lower_expr(value)?;
+        let value = self.lower_assignment_value(&target, value)?;
         self.push_store(target, value)
+    }
+
+    pub(in crate::ir) fn lower_assignment_value(
+        &self,
+        target: &LoweredLValue,
+        value: &Expr,
+    ) -> CompileResult<LoweredExpr> {
+        let value = self.lower_expr(value)?;
+        Ok(Self::store_update_value(target, value))
+    }
+
+    pub(in crate::ir) fn store_update_value(
+        target: &LoweredLValue,
+        value: LoweredExpr,
+    ) -> LoweredExpr {
+        narrow_local_scalar_value(Self::local_lvalue_referent(target), value)
+    }
+
+    pub(in crate::ir) fn local_lvalue_referent(target: &LoweredLValue) -> Option<&str> {
+        match target {
+            LoweredLValue::Local {
+                scalar_type: ScalarType::Int,
+                referent,
+                ..
+            } => referent.as_deref(),
+            _ => None,
+        }
     }
 
     pub(in crate::ir) fn lower_lvalue(&self, target: &LValue) -> CompileResult<LoweredLValue> {
@@ -65,11 +92,14 @@ impl LoweringContext {
                 if let Some(binding) = self.local_binding(name) {
                     return match binding {
                         LocalBinding::Scalar {
-                            slot, scalar_type, ..
+                            slot,
+                            scalar_type,
+                            referent,
                         } => Ok(LoweredLValue::Local {
                             slot,
                             offset: self.local_offset(slot)?,
                             scalar_type,
+                            referent,
                         }),
                         LocalBinding::StaticScalar {
                             global_name,

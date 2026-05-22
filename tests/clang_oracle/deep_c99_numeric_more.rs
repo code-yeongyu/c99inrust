@@ -109,6 +109,78 @@ fn global_unsigned_char_matrix_promotion_matches_host_exit_code() {
 }
 
 #[test]
+fn local_plain_char_assignment_narrows_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "local_plain_char_assignment_narrows",
+        source: "int main(void) { char c; c = 255; return c == -1 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn local_unsigned_char_assignment_narrows_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "local_unsigned_char_assignment_narrows",
+        source: "int main(void) { unsigned char c; c = 300; return c == 44 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn local_short_assignment_narrows_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "local_short_assignment_narrows",
+        source: "int main(void) { short s; s = 65535; return s == -1 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn local_unsigned_char_post_increment_wraps_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "local_unsigned_char_post_increment_wraps",
+        source: "int main(void) { unsigned char c = 255; int old = c++; return old == 255 && c == 0 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn local_short_pre_increment_wraps_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "local_short_pre_increment_wraps",
+        source: "int main(void) { short s = 32767; int saved = ++s; return saved == -32768 && s == -32768 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
+fn local_narrow_scalar_sizeof_matches_host_exit_code() {
+    // given
+    let case = OracleCase {
+        name: "local_narrow_scalar_sizeof",
+        source: "int main(void) { char c; unsigned short s; return sizeof(c) == 1 && sizeof(s) == 2 ? 0 : 1; }\n",
+    };
+
+    // when/then
+    assert_compile_run_matches_host(case);
+}
+
+#[test]
 fn long_long_high_bits_survive_addition_matches_host_exit_code() {
     // given
     let case = OracleCase {

@@ -170,6 +170,22 @@ impl Parser<'_> {
             let referent = if scalar_type == ScalarType::Pointer {
                 pointer_referent_for_depth(pointer_depth, base_referent.as_deref())
             } else {
+                scalar_declaration_referent(
+                    type_includes_char,
+                    type_includes_short,
+                    type_is_unsigned,
+                )
+            };
+            let initializer = if self.check_punctuator("=") {
+                self.advance();
+                Some(local_scalar_initializer(
+                    scalar_type,
+                    type_includes_char,
+                    type_includes_short,
+                    type_is_unsigned,
+                    self.assignment()?,
+                ))
+            } else {
                 None
             };
             let statement = if self.check_punctuator("[") {
@@ -180,29 +196,13 @@ impl Parser<'_> {
                     scalar_type,
                     name,
                 )?
-            } else if self.check_punctuator("=") {
-                self.advance();
-                let initializer = local_scalar_initializer(
-                    scalar_type,
-                    type_includes_char,
-                    type_includes_short,
-                    type_is_unsigned,
-                    self.assignment()?,
-                );
-                Statement::Declaration {
-                    is_static,
-                    scalar_type,
-                    name,
-                    referent,
-                    initializer: Some(initializer),
-                }
             } else {
                 Statement::Declaration {
                     is_static,
                     scalar_type,
                     name,
                     referent,
-                    initializer: None,
+                    initializer,
                 }
             };
             declarations.push(statement);
@@ -219,4 +219,25 @@ impl Parser<'_> {
             Ok(Statement::DeclarationList(declarations))
         }
     }
+}
+
+fn scalar_declaration_referent(
+    type_includes_char: bool,
+    type_includes_short: bool,
+    type_is_unsigned: bool,
+) -> Option<String> {
+    if type_includes_char {
+        return Some(if type_is_unsigned { "byte" } else { "char" }.to_owned());
+    }
+    if type_includes_short {
+        return Some(
+            if type_is_unsigned {
+                "unsigned short"
+            } else {
+                "short"
+            }
+            .to_owned(),
+        );
+    }
+    None
 }

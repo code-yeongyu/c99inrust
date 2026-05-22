@@ -43,6 +43,7 @@ mod global_initializers;
 mod global_lowering;
 mod local_array;
 mod local_initializer_values;
+mod local_scalar_conversion;
 mod local_struct_initializer;
 mod local_struct_initializer_array;
 mod local_struct_initializer_struct_array;
@@ -97,6 +98,9 @@ pub(in crate::ir) use local_initializer_values::{
     local_char_matrix_initializer_values, local_int_array_byte_size, local_int_matrix_byte_size,
     local_pointer_array_byte_size, local_short_array_byte_size, scalar_size, struct_alignment,
     zero_expr_for,
+};
+pub(in crate::ir) use local_scalar_conversion::{
+    local_scalar_referent_size, narrow_local_scalar_value,
 };
 pub(in crate::ir) use local_struct_initializer_array::LocalStructArrayField;
 pub(in crate::ir) use lowered_expr_helpers::{

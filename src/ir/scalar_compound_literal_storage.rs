@@ -16,6 +16,7 @@ impl LoweringContext {
             slot: pointer_slot,
             offset: self.local_offset(pointer_slot)?,
             scalar_type: ScalarType::Pointer,
+            referent: None,
         };
         self.lower_scalar_compound_pointer_assignment(target, initializer)
     }

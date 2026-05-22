@@ -19,6 +19,7 @@ use super::x86_64_temporaries::{
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::LoweredLValue;
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_x86_64_post_increment(
     target: &LoweredLValue,
@@ -32,10 +33,21 @@ pub(in crate::codegen) fn emit_x86_64_post_increment(
     let width = lowered_lvalue_width(target);
     let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
     match target {
-        LoweredLValue::Local { offset, .. } => {
+        LoweredLValue::Local {
+            offset,
+            scalar_type,
+            referent,
+            ..
+        } => {
             emit_x86_64_load_temporary(width, *offset, assembly)?;
             emit_x86_64_store_temporary(width, value_offset, assembly)?;
             emit_x86_64_increment_result(width, increment, assembly)?;
+            let referent = if *scalar_type == ScalarType::Int {
+                referent.as_deref()
+            } else {
+                None
+            };
+            emit_x86_64_narrow_local_scalar(referent, assembly);
             emit_x86_64_store_result(width, *offset, assembly)?;
             emit_x86_64_load_temporary(width, value_offset, assembly)
         }
@@ -178,6 +190,16 @@ pub(in crate::codegen) fn emit_x86_64_post_increment_pointer_field(
     emit_x86_64_load_temporary_to_register(ValueWidth::I64, base_offset, "%rcx", assembly)?;
     emit_x86_64_store_sized_field(field.byte_size, width, "%rcx", field.offset, assembly)?;
     emit_x86_64_load_temporary(width, value_offset, assembly)
+}
+
+fn emit_x86_64_narrow_local_scalar(referent: Option<&str>, assembly: &mut String) {
+    match referent {
+        Some("byte") => assembly.push_str("\tmovzbl %al, %eax\n"),
+        Some("char") => assembly.push_str("\tmovsbl %al, %eax\n"),
+        Some("unsigned short") => assembly.push_str("\tmovzwl %ax, %eax\n"),
+        Some("short") => assembly.push_str("\tmovswl %ax, %eax\n"),
+        _ => {}
+    }
 }
 
 pub(in crate::codegen) fn emit_x86_64_increment_result(

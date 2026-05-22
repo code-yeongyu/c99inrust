@@ -57,13 +57,17 @@ impl LoweringContext {
         let lowered = self.lower_lvalue(target)?;
         ensure_post_increment_scalar(&lowered)?;
         let increment = self.post_increment_amount(target, &lowered, decrement)?;
-        Ok(LoweredExpr::Assign {
-            target: lowered.clone(),
-            value: Box::new(LoweredExpr::Binary {
+        let value = Self::store_update_value(
+            &lowered,
+            LoweredExpr::Binary {
                 op: BinaryOp::Add,
                 left: Box::new(lowered_lvalue_to_expr(&lowered)),
                 right: Box::new(LoweredExpr::Integer(increment)),
-            }),
+            },
+        );
+        Ok(LoweredExpr::Assign {
+            target: lowered,
+            value: Box::new(value),
         })
     }
 

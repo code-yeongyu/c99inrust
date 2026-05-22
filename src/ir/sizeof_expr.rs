@@ -4,7 +4,8 @@ use crate::parser::{Expr, ScalarType};
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, local_char_matrix_byte_size,
     local_int_array_byte_size, local_int_matrix_byte_size, local_pointer_array_byte_size,
-    local_short_array_byte_size, lowered_expr_scalar_type, pointer_arithmetic, scalar_size,
+    local_scalar_referent_size, local_short_array_byte_size, lowered_expr_scalar_type,
+    pointer_arithmetic, scalar_size,
 };
 
 pub(in crate::ir) fn lower(context: &LoweringContext, expr: &Expr) -> CompileResult<LoweredExpr> {
@@ -78,8 +79,21 @@ fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Optio
 
 fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
     match binding {
-        LocalBinding::Scalar { scalar_type, .. }
-        | LocalBinding::StaticScalar { scalar_type, .. } => Ok(scalar_size(*scalar_type)),
+        LocalBinding::Scalar {
+            scalar_type,
+            referent,
+            ..
+        }
+        | LocalBinding::StaticScalar {
+            scalar_type,
+            referent,
+            ..
+        } => Ok(if *scalar_type == ScalarType::Int {
+            local_scalar_referent_size(referent.as_deref())
+                .unwrap_or_else(|| scalar_size(*scalar_type))
+        } else {
+            scalar_size(*scalar_type)
+        }),
         LocalBinding::CharArray { length, .. } => Ok(*length),
         LocalBinding::CharMatrix { rows, columns, .. } => {
             local_char_matrix_byte_size(*rows, *columns)

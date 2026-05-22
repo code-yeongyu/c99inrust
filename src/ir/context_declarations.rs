@@ -23,7 +23,7 @@ impl LoweringContext {
         if is_static {
             return self.lower_static_declaration(scalar_type, name, referent, initializer);
         }
-        let slot = self.declare_local(name, scalar_type, referent)?;
+        let slot = self.declare_local(name, scalar_type, referent.clone())?;
         if scalar_type == ScalarType::Pointer
             && let Some(initializer @ Expr::ArrayCompoundLiteral { .. }) = initializer
         {
@@ -63,6 +63,7 @@ impl LoweringContext {
                 slot,
                 offset: self.local_offset(slot)?,
                 scalar_type,
+                referent,
             },
             value,
         )

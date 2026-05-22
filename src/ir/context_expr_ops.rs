@@ -12,9 +12,10 @@ impl LoweringContext {
             return Ok(expr);
         }
         let target = self.lower_lvalue(target)?;
+        let value = self.lower_assignment_value(&target, value)?;
         Ok(LoweredExpr::Assign {
             target,
-            value: Box::new(self.lower_expr(value)?),
+            value: Box::new(value),
         })
     }
 

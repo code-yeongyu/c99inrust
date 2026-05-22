@@ -223,6 +223,7 @@ pub enum LoweredLValue {
         slot: usize,
         offset: usize,
         scalar_type: ScalarType,
+        referent: Option<String>,
     },
     Global {
         name: String,

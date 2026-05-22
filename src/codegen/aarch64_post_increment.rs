@@ -18,6 +18,7 @@ use super::widths::{
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::LoweredLValue;
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_aarch64_post_increment(
     target: &LoweredLValue,
@@ -30,10 +31,21 @@ pub(in crate::codegen) fn emit_aarch64_post_increment(
     let width = lowered_lvalue_width(target);
     let value_offset = temporary_base + (depth * TEMPORARY_BYTES);
     match target {
-        LoweredLValue::Local { offset, .. } => {
+        LoweredLValue::Local {
+            offset,
+            scalar_type,
+            referent,
+            ..
+        } => {
             emit_aarch64_load_temporary(width, *offset, assembly)?;
             emit_aarch64_store_temporary(width, value_offset, assembly)?;
             emit_aarch64_increment_result(width, increment, assembly)?;
+            let referent = if *scalar_type == ScalarType::Int {
+                referent.as_deref()
+            } else {
+                None
+            };
+            emit_aarch64_narrow_local_scalar(referent, assembly);
             emit_aarch64_store_result(width, *offset, assembly)?;
             emit_aarch64_load_temporary(width, value_offset, assembly)
         }
@@ -89,6 +101,16 @@ pub(in crate::codegen) fn emit_aarch64_post_increment(
         | LoweredLValue::GlobalPointerSubscript { .. } => Err(CompileError::new(
             "post-increment expression supports direct lvalues only",
         )),
+    }
+}
+
+fn emit_aarch64_narrow_local_scalar(referent: Option<&str>, assembly: &mut String) {
+    match referent {
+        Some("byte") => assembly.push_str("\tuxtb w0, w0\n"),
+        Some("char") => assembly.push_str("\tsxtb w0, w0\n"),
+        Some("unsigned short") => assembly.push_str("\tuxth w0, w0\n"),
+        Some("short") => assembly.push_str("\tsxth w0, w0\n"),
+        _ => {}
     }
 }
 

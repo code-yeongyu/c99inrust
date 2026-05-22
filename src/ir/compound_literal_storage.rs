@@ -23,6 +23,7 @@ impl LoweringContext {
             slot: pointer_slot,
             offset: self.local_offset(pointer_slot)?,
             scalar_type: ScalarType::Pointer,
+            referent: None,
         };
         self.lower_array_compound_pointer_assignment(target, initializer)
     }
@@ -45,6 +46,7 @@ impl LoweringContext {
             slot: pointer_slot,
             offset: self.local_offset(pointer_slot)?,
             scalar_type: ScalarType::Pointer,
+            referent: None,
         };
         self.lower_array_compound_element_pointer_assignment(target, initializer)
     }
@@ -73,6 +75,7 @@ impl LoweringContext {
             slot: pointer_slot,
             offset: self.local_offset(pointer_slot)?,
             scalar_type: ScalarType::Pointer,
+            referent: None,
         };
         self.lower_struct_compound_member_pointer_assignment(target, initializer)
     }

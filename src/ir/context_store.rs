@@ -1,6 +1,6 @@
 use super::{
     Instruction, LoweredExpr, LoweredLValue, LoweringContext, StructAddress, is_complex_scalar,
-    scalar_size,
+    narrow_local_scalar_value, scalar_size,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{FieldType, ScalarType};
@@ -16,6 +16,7 @@ impl LoweringContext {
                 slot,
                 offset,
                 scalar_type,
+                referent,
             } => {
                 if is_complex_scalar(scalar_type) {
                     let pointer = LoweredExpr::LocalAddress {
@@ -28,7 +29,7 @@ impl LoweringContext {
                     slot,
                     offset,
                     scalar_type,
-                    value: store_value_for_scalar(scalar_type, value),
+                    value: store_local_scalar_value(scalar_type, referent.as_deref(), value),
                 });
                 Ok(())
             }
@@ -208,6 +209,18 @@ fn store_value_for_lvalue(target: &LoweredLValue, value: LoweredExpr) -> Lowered
         | LoweredLValue::GlobalIntSubscript { .. }
         | LoweredLValue::GlobalPointerSubscript { .. } => value,
     }
+}
+
+fn store_local_scalar_value(
+    scalar_type: ScalarType,
+    referent: Option<&str>,
+    value: LoweredExpr,
+) -> LoweredExpr {
+    let value = store_value_for_scalar(scalar_type, value);
+    if scalar_type == ScalarType::Int {
+        return narrow_local_scalar_value(referent, value);
+    }
+    value
 }
 
 fn store_value_for_scalar(scalar_type: ScalarType, value: LoweredExpr) -> LoweredExpr {
