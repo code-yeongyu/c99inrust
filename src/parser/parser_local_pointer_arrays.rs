@@ -1,6 +1,6 @@
 use super::{
-    CompileError, CompileResult, Expr, Parser, ScalarType, Statement, local_array_length,
-    token_is_punctuator,
+    CompileError, CompileResult, Expr, Parser, Statement, function_referent_for_scalar,
+    local_array_length, token_is_punctuator,
 };
 
 impl Parser<'_> {
@@ -10,11 +10,10 @@ impl Parser<'_> {
         let Some((scalar_type, type_end)) = self.declaration_type_span_at_current() else {
             return Ok(None);
         };
-        if scalar_type != ScalarType::Int
-            || !self
-                .tokens
-                .get(type_end)
-                .is_some_and(|token| token_is_punctuator(token, "("))
+        if !self
+            .tokens
+            .get(type_end)
+            .is_some_and(|token| token_is_punctuator(token, "("))
             || !self
                 .tokens
                 .get(type_end + 1)
@@ -62,6 +61,7 @@ impl Parser<'_> {
         Ok(Some(Statement::LocalPointerArray {
             name,
             length,
+            referent: Some(function_referent_for_scalar(scalar_type).to_owned()),
             initializer,
         }))
     }
@@ -136,6 +136,7 @@ impl Parser<'_> {
         &mut self,
         name: String,
         explicit_length: Option<usize>,
+        referent: Option<String>,
     ) -> CompileResult<Statement> {
         let initializer = if self.check_punctuator("=") {
             self.advance();
@@ -155,6 +156,7 @@ impl Parser<'_> {
         Ok(Statement::LocalPointerArray {
             name,
             length,
+            referent,
             initializer,
         })
     }

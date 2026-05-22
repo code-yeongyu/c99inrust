@@ -33,6 +33,7 @@ fn global_initializer_sizeof_bytes(
         | GlobalInitializer::ScalarZero(scalar_type) => scalar_size_for_layout(*scalar_type),
         GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerName { .. }
         | GlobalInitializer::PointerSubscriptAddress { .. } => {
             scalar_size_for_layout(ScalarType::Pointer)
         }

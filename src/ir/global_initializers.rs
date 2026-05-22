@@ -21,6 +21,9 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     if let Some(lowered) = lower_scalar_global_initializer(global, constants)? {
         return Ok(lowered);
     }
+    if let Some(lowered) = lower_pointer_scalar_global_initializer(&global.initializer)? {
+        return Ok(lowered);
+    }
     match &global.initializer {
         GlobalInitializer::IntArray(values) => Ok((
             LoweredGlobalInitializer::IntArray(values.clone()),
@@ -40,27 +43,16 @@ pub(in crate::ir) fn lower_defined_global_initializer(
                 GlobalBinding::DoubleArray,
             ))
         }
-        GlobalInitializer::PointerNull { referent } => Ok((
-            LoweredGlobalInitializer::PointerNull,
-            GlobalBinding::Pointer {
-                referent: referent.clone(),
-            },
-        )),
-        GlobalInitializer::PointerString { referent, value } => Ok((
-            LoweredGlobalInitializer::PointerString(value.clone()),
-            GlobalBinding::Pointer {
-                referent: referent.clone(),
-            },
-        )),
-        GlobalInitializer::PointerSubscriptAddress {
-            referent,
-            base,
-            index,
-        } => lower_global_pointer_subscript_address(referent.as_deref(), base, *index),
         GlobalInitializer::PointerArray { .. }
         | GlobalInitializer::PointerStringArray { .. }
         | GlobalInitializer::PointerNameArray { .. } => Err(CompileError::new(
             "internal error: pointer array global reached fallback lowering",
+        )),
+        GlobalInitializer::PointerNull { .. }
+        | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerName { .. }
+        | GlobalInitializer::PointerSubscriptAddress { .. } => Err(CompileError::new(
+            "internal error: pointer scalar global reached fallback lowering",
         )),
         GlobalInitializer::StructObject {
             struct_name,
@@ -106,6 +98,44 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
+}
+
+fn lower_pointer_scalar_global_initializer(
+    initializer: &GlobalInitializer,
+) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
+    let lowered = match initializer {
+        GlobalInitializer::PointerNull { referent } => (
+            LoweredGlobalInitializer::PointerNull,
+            GlobalBinding::Pointer {
+                referent: referent.clone(),
+            },
+        ),
+        GlobalInitializer::PointerString { referent, value } => (
+            LoweredGlobalInitializer::PointerString(value.clone()),
+            GlobalBinding::Pointer {
+                referent: referent.clone(),
+            },
+        ),
+        GlobalInitializer::PointerName { referent, value } => (
+            LoweredGlobalInitializer::PointerGlobalOffset {
+                base: value.clone(),
+                byte_offset: 0,
+            },
+            GlobalBinding::Pointer {
+                referent: referent.clone(),
+            },
+        ),
+        GlobalInitializer::PointerSubscriptAddress {
+            referent,
+            base,
+            index,
+        } => {
+            return lower_global_pointer_subscript_address(referent.as_deref(), base, *index)
+                .map(Some);
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(lowered))
 }
 
 fn lower_unsigned_char_global_initializer(

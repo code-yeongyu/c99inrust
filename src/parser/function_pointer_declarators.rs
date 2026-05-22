@@ -3,12 +3,14 @@ use crate::front_end::lexer::Token;
 use super::token_scan::{
     matching_top_level_paren, token_identifier, token_is_punctuator, update_depths,
 };
+use super::{ReturnType, ScalarType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FunctionPointerVariableDeclarator {
     pub(super) name: String,
     pub(super) pointer_depth: usize,
     pub(super) consumed: usize,
+    pub(super) specifier_end: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +38,26 @@ pub(super) fn function_pointer_variable(
         name,
         pointer_depth,
         consumed: return_params_close + 1,
+        specifier_end: open,
     })
+}
+
+pub(super) const fn function_referent_for_return(return_type: ReturnType) -> &'static str {
+    match return_type {
+        ReturnType::Double => "function double",
+        ReturnType::LongDouble => "function long double",
+        ReturnType::Pointer => "function pointer",
+        ReturnType::Int | ReturnType::Void => "function int",
+    }
+}
+
+pub(super) const fn function_referent_for_scalar(return_type: ScalarType) -> &'static str {
+    match return_type {
+        ScalarType::Double => "function double",
+        ScalarType::LongDouble => "function long double",
+        ScalarType::Pointer => "function pointer",
+        _ => "function int",
+    }
 }
 
 pub(super) fn pointer_return_declarator(tokens: &[Token]) -> Option<PointerReturnDeclarator> {

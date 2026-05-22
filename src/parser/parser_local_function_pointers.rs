@@ -1,6 +1,6 @@
 use super::{
     CompileResult, Parser, ScalarType, Statement, function_pointer_variable,
-    local_scalar_initializer, pointer_referent_for_depth,
+    function_referent_for_scalar, local_scalar_initializer, pointer_referent_for_depth,
 };
 
 impl Parser<'_> {
@@ -60,7 +60,10 @@ impl Parser<'_> {
         }
         let name = self.expect_identifier()?;
         if self.check_punctuator("[") {
-            return self.local_array_declaration(false, false, false, scalar_type, name);
+            let referent = (scalar_type == ScalarType::Pointer)
+                .then(|| pointer_referent_for_depth(pointer_depth, None))
+                .flatten();
+            return self.local_array_declaration(false, false, false, scalar_type, referent, name);
         }
         let referent = (scalar_type == ScalarType::Pointer)
             .then(|| pointer_referent_for_depth(pointer_depth, None))
@@ -89,16 +92,7 @@ impl Parser<'_> {
 
 fn function_pointer_referent(pointer_depth: usize, return_type: ScalarType) -> Option<String> {
     if pointer_depth == 1 {
-        return Some(function_return_referent(return_type).to_owned());
+        return Some(function_referent_for_scalar(return_type).to_owned());
     }
     pointer_referent_for_depth(pointer_depth, None)
-}
-
-const fn function_return_referent(return_type: ScalarType) -> &'static str {
-    match return_type {
-        ScalarType::Double => "function double",
-        ScalarType::LongDouble => "function long double",
-        ScalarType::Pointer => "function pointer",
-        _ => "function int",
-    }
 }

@@ -93,7 +93,7 @@ impl LoweringContext {
                 offset: self.local_offset(*slot)?,
                 byte_size: local_short_array_byte_size(*length)?,
             }),
-            LocalBinding::PointerArray { slot, length } => Ok(LoweredExpr::LocalAddress {
+            LocalBinding::PointerArray { slot, length, .. } => Ok(LoweredExpr::LocalAddress {
                 offset: self.local_offset(*slot)?,
                 byte_size: local_pointer_array_byte_size(*length)?,
             }),

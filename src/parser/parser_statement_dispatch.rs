@@ -194,6 +194,7 @@ impl Parser<'_> {
                     type_includes_short,
                     type_is_unsigned,
                     scalar_type,
+                    referent,
                     name,
                 )?
             } else {

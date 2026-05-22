@@ -120,8 +120,14 @@ impl LoweringContext {
             Statement::LocalPointerArray {
                 name,
                 length,
+                referent,
                 initializer,
-            } => Some(self.lower_local_pointer_array(name, *length, initializer.as_deref())),
+            } => Some(self.lower_local_pointer_array(
+                name,
+                *length,
+                referent.clone(),
+                initializer.as_deref(),
+            )),
             Statement::LocalStruct {
                 name,
                 struct_name,

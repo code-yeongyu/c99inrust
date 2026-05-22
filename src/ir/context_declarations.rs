@@ -176,9 +176,10 @@ impl LoweringContext {
         &mut self,
         name: &str,
         length: usize,
+        referent: Option<String>,
         initializer: Option<&[Expr]>,
     ) -> CompileResult<()> {
-        let slot = self.declare_pointer_array(name, length)?;
+        let slot = self.declare_pointer_array(name, length, referent)?;
         if let Some(values) = initializer {
             if values.len() > length {
                 return Err(CompileError::new(

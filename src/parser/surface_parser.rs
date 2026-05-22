@@ -2,7 +2,9 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Token, TokenKind};
 
 use super::SurfaceTranslationUnit;
-use super::external_declarations::{classify_external_item, top_level_function_open_paren};
+use super::external_declarations::{
+    classify_external_item, function_pointer_name, top_level_function_open_paren,
+};
 use super::token_scan::{decrease_depth, last_token_is_punctuator, token_is_punctuator};
 
 pub(super) struct SurfaceParser<'a> {
@@ -123,6 +125,9 @@ impl SurfaceParser<'_> {
     }
 
     fn old_style_parameter_declaration_separator(&self, start: usize) -> bool {
+        if function_pointer_name(&self.tokens[start..self.index]).is_some() {
+            return false;
+        }
         top_level_function_open_paren(&self.tokens[start..self.index]).is_some()
             && !last_token_is_punctuator(&self.tokens[start..self.index], ")")
     }

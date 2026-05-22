@@ -105,3 +105,23 @@ fn extra_double_return_function_pointer_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn extra_double_return_function_pointer_array_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "extra_double_return_function_pointer_array";
+    let source = "int puts(char*); double bump(double x) { return x + 0.25; } double twice(double x) { return x * 2.0; } int main(void) { double (*ops[2])(double) = { bump, twice }; double a = ops[0](1.25); double b = ops[1](2.0); puts(\"extra-double-fnptr-array\"); return a == 1.5 && b == 4.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn extra_global_double_return_function_pointer_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "extra_global_double_return_function_pointer_initializer";
+    let source = "int puts(char*); double bump(double x) { return x + 0.75; } double (*hook)(double) = bump; int main(void) { double y = hook(1.25); puts(\"extra-global-double-fnptr\"); return y == 2.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

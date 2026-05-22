@@ -106,6 +106,7 @@ pub(in crate::ir) fn lower_extern_global_binding(
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerName { .. }
         | GlobalInitializer::PointerSubscriptAddress { .. }
         | GlobalInitializer::PointerArray { .. }
         | GlobalInitializer::PointerStringArray { .. }

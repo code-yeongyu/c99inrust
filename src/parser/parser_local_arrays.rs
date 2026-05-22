@@ -17,6 +17,7 @@ impl Parser<'_> {
         type_includes_short: bool,
         type_is_unsigned: bool,
         scalar_type: ScalarType,
+        referent: Option<String>,
         name: String,
     ) -> CompileResult<Statement> {
         self.advance();
@@ -31,7 +32,7 @@ impl Parser<'_> {
                 .as_ref()
                 .map(|expr| local_array_length(expr, self.known_constants))
                 .transpose()?;
-            return self.local_pointer_array_declaration(name, explicit_length);
+            return self.local_pointer_array_declaration(name, explicit_length, referent);
         }
         if scalar_type != ScalarType::Int {
             return Err(CompileError::new(

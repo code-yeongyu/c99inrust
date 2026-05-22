@@ -1,9 +1,7 @@
 use crate::diagnostics::CompileResult;
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
-use super::external_declarations::{
-    classify_external_item, function_pointer_name, top_level_function_open_paren,
-};
+use super::external_declarations::{classify_external_item, top_level_function_open_paren};
 use super::global_byte_declarations::parse_global_unsigned_char_array;
 use super::global_double_declarations::parse_global_double_array;
 use super::global_floatlike_declarations::parse_global_floatlike_scalar;
@@ -24,7 +22,8 @@ use super::token_scan::{
     token_has_keyword, top_level_punctuator_index,
 };
 use super::{
-    Constant, ExternalItem, Global, GlobalInitializer, StructLayout, global_struct_object,
+    Constant, ExternalItem, Global, GlobalInitializer, StructLayout, function_pointer_variable,
+    function_referent_for_return, global_struct_object, supported_return_type,
 };
 
 pub(super) fn parse_supported_global_declaration(
@@ -115,13 +114,47 @@ fn with_global_linkage(tokens: &[Token], mut globals: Vec<Global>) -> Vec<Global
 
 fn parse_global_function_pointer(tokens: &[Token]) -> Option<Global> {
     let declaration = tokens.get(..tokens.len().checked_sub(1)?)?;
-    let name = function_pointer_name(declaration)?;
+    let declarator = function_pointer_variable(declaration)?;
+    let return_type = supported_return_type(&declaration[..declarator.specifier_end])?;
+    let referent = Some(function_referent_for_return(return_type).to_owned());
     let initializer = if token_has_keyword(declaration, Keyword::Extern) {
-        GlobalInitializer::ExternPointer { referent: None }
+        GlobalInitializer::ExternPointer { referent }
     } else {
-        GlobalInitializer::PointerNull { referent: None }
+        global_function_pointer_initializer(declaration, declarator.consumed, referent)?
     };
-    Some(Global::new(name, initializer))
+    Some(Global::new(declarator.name, initializer))
+}
+
+fn global_function_pointer_initializer(
+    declaration: &[Token],
+    declarator_end: usize,
+    referent: Option<String>,
+) -> Option<GlobalInitializer> {
+    let initializer = if let Some(assign_index) =
+        top_level_punctuator_index(&declaration[declarator_end..], "=")
+    {
+        &declaration[declarator_end + assign_index + 1..]
+    } else {
+        return Some(GlobalInitializer::PointerNull { referent });
+    };
+    match initializer {
+        [
+            Token {
+                kind: TokenKind::Identifier(value),
+                ..
+            },
+        ] => Some(GlobalInitializer::PointerName {
+            referent,
+            value: value.clone(),
+        }),
+        [
+            Token {
+                kind: TokenKind::Integer(0),
+                ..
+            },
+        ] => Some(GlobalInitializer::PointerNull { referent }),
+        _ => None,
+    }
 }
 
 pub(super) fn unsupported_data_declaration_blocks_empty_unit(tokens: &[Token]) -> bool {

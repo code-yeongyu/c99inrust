@@ -86,6 +86,10 @@ pub enum GlobalInitializer {
         referent: Option<String>,
         value: String,
     },
+    PointerName {
+        referent: Option<String>,
+        value: String,
+    },
     PointerSubscriptAddress {
         referent: Option<String>,
         base: String,

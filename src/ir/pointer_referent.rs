@@ -102,6 +102,11 @@ fn array_referent(context: &LoweringContext, array: &Expr) -> Option<String> {
         return Some("int".to_owned());
     }
     if let Expr::Identifier(name) = array
+        && let Some(LocalBinding::PointerArray { referent, .. }) = context.local_binding(name)
+    {
+        return referent;
+    }
+    if let Expr::Identifier(name) = array
         && let Some(GlobalBinding::UnsignedCharMatrix { is_unsigned, .. }) =
             context.global_bindings.get(name)
     {

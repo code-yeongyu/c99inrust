@@ -88,7 +88,10 @@ use external_declarations::{
     function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
     function_prototype, pointer_return_function, top_level_function_open_paren,
 };
-use function_pointer_declarators::{function_pointer_variable, pointer_return_declarator};
+use function_pointer_declarators::{
+    function_pointer_variable, function_referent_for_return, function_referent_for_scalar,
+    pointer_return_declarator,
+};
 use global_declarations::{
     parse_supported_global_declaration, parse_supported_global_declarations,
     unsupported_data_declaration_blocks_empty_unit,

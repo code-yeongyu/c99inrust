@@ -41,6 +41,7 @@ pub(in crate::ir) enum LocalBinding {
     PointerArray {
         slot: usize,
         length: usize,
+        referent: Option<String>,
     },
     StructObject {
         slot: usize,

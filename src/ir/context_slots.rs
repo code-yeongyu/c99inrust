@@ -156,6 +156,7 @@ impl LoweringContext {
         &mut self,
         name: &str,
         length: usize,
+        referent: Option<String>,
     ) -> CompileResult<usize> {
         let byte_size = local_pointer_array_byte_size(length)?;
         self.declare_slot(
@@ -166,6 +167,7 @@ impl LoweringContext {
             LocalBinding::PointerArray {
                 slot: self.local_slots.len(),
                 length,
+                referent,
             },
         )
     }

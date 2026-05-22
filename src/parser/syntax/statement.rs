@@ -49,6 +49,7 @@ pub enum Statement {
     LocalPointerArray {
         name: String,
         length: usize,
+        referent: Option<String>,
         initializer: Option<Vec<Expr>>,
     },
     LocalStruct {

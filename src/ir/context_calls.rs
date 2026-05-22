@@ -98,16 +98,37 @@ impl LoweringContext {
     }
 
     fn indirect_call_return_type(&self, callee: &Expr) -> ScalarType {
-        if let Expr::Identifier(name) = callee {
-            return self.indirect_call_return_type_for_name(name);
+        match callee {
+            Expr::Identifier(name) => self.indirect_call_return_type_for_name(name),
+            Expr::Subscript { array, .. } => self
+                .function_pointer_array_return_type(array)
+                .unwrap_or(ScalarType::Int),
+            _ => ScalarType::Int,
         }
-        ScalarType::Int
     }
 
     fn indirect_call_return_type_for_name(&self, name: &str) -> ScalarType {
         self.local_binding(name)
             .and_then(|binding| function_pointer_return_type(&binding))
+            .or_else(|| {
+                self.global_bindings
+                    .get(name)
+                    .and_then(global_function_pointer_return_type)
+            })
             .unwrap_or(ScalarType::Int)
+    }
+
+    fn function_pointer_array_return_type(&self, array: &Expr) -> Option<ScalarType> {
+        let Expr::Identifier(name) = array else {
+            return None;
+        };
+        self.local_binding(name)
+            .and_then(|binding| function_pointer_return_type(&binding))
+            .or_else(|| {
+                self.global_bindings
+                    .get(name)
+                    .and_then(global_function_pointer_return_type)
+            })
     }
 
     pub(in crate::ir) fn lower_cast_expr(
@@ -168,9 +189,31 @@ fn function_pointer_return_type(binding: &LocalBinding) -> Option<ScalarType> {
         | LocalBinding::StaticScalar {
             referent: Some(referent),
             ..
+        }
+        | LocalBinding::PointerArray {
+            referent: Some(referent),
+            ..
         } => referent.as_str(),
         _ => return None,
     };
+    function_return_type_for_referent(referent)
+}
+
+fn global_function_pointer_return_type(binding: &GlobalBinding) -> Option<ScalarType> {
+    let referent = match binding {
+        GlobalBinding::Pointer {
+            referent: Some(referent),
+        }
+        | GlobalBinding::PointerArray {
+            referent: Some(referent),
+            ..
+        } => referent.as_str(),
+        _ => return None,
+    };
+    function_return_type_for_referent(referent)
+}
+
+fn function_return_type_for_referent(referent: &str) -> Option<ScalarType> {
     match referent {
         "function double" => Some(ScalarType::Double),
         "function long double" => Some(ScalarType::LongDouble),

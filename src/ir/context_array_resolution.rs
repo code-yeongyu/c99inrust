@@ -14,7 +14,7 @@ impl LoweringContext {
         let Expr::Identifier(name) = array else {
             return Ok(None);
         };
-        let Some(LocalBinding::PointerArray { slot, length }) = self.local_binding(name) else {
+        let Some(LocalBinding::PointerArray { slot, length, .. }) = self.local_binding(name) else {
             return Ok(None);
         };
         Ok(Some(LoweredExpr::LocalAddress {

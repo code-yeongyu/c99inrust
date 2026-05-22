@@ -158,7 +158,7 @@ impl LoweringContext {
                 rows,
                 columns,
             } => (*slot, local_char_matrix_byte_size(*rows, *columns)?),
-            LocalBinding::PointerArray { slot, length } => {
+            LocalBinding::PointerArray { slot, length, .. } => {
                 (*slot, local_pointer_array_byte_size(*length)?)
             }
             LocalBinding::StructObject {
