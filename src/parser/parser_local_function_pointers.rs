@@ -1,5 +1,5 @@
 use super::{
-    CompileResult, Parser, ScalarType, Statement, function_pointer_variable,
+    CompileResult, Keyword, Parser, ScalarType, Statement, TokenKind, function_pointer_variable,
     function_referent_for_scalar, local_scalar_initializer, pointer_referent_for_depth,
 };
 
@@ -13,6 +13,9 @@ impl Parser<'_> {
         if function_pointer_variable(&self.tokens[type_end..]).is_none() {
             return Ok(None);
         }
+        let is_static = self.tokens[self.index..type_end]
+            .iter()
+            .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Static)));
         self.index = type_end;
         let mut declarations = Vec::new();
         loop {
@@ -26,14 +29,14 @@ impl Parser<'_> {
                         None
                     };
                     Statement::Declaration {
-                        is_static: false,
+                        is_static,
                         scalar_type: ScalarType::Pointer,
                         name: declarator.name,
                         referent: function_pointer_referent(declarator.pointer_depth, scalar_type),
                         initializer,
                     }
                 } else {
-                    self.local_int_declarator_statement()?
+                    self.local_int_declarator_statement(is_static)?
                 };
             declarations.push(statement);
             if self.check_punctuator(",") {
@@ -50,7 +53,7 @@ impl Parser<'_> {
         }
     }
 
-    fn local_int_declarator_statement(&mut self) -> CompileResult<Statement> {
+    fn local_int_declarator_statement(&mut self, is_static: bool) -> CompileResult<Statement> {
         let mut scalar_type = ScalarType::Int;
         let mut pointer_depth = 0usize;
         while self.check_punctuator("*") {
@@ -81,7 +84,7 @@ impl Parser<'_> {
             None
         };
         Ok(Statement::Declaration {
-            is_static: false,
+            is_static,
             scalar_type,
             name,
             referent,

@@ -125,3 +125,13 @@ fn extra_global_double_return_function_pointer_initializer_matches_host_stdout_a
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn extra_static_local_double_return_function_pointer_persists_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "extra_static_local_double_return_function_pointer_persists";
+    let source = "int puts(char*); double one(double x) { return x + 1.0; } double two(double x) { return x + 2.0; } int flip(void) { static double (*fp)(double); if (fp == 0) fp = one; double y = fp(1.0); fp = two; return y == 2.0 ? 1 : 2; } int main(void) { int first = flip(); int second = flip(); puts(\"extra-static-double-fnptr\"); return first == 1 && second == 2 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
