@@ -33,3 +33,33 @@ fn static_local_complex_imaginary_lane_persists_matches_host_stdout_and_exit_cod
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn static_local_pointer_to_global_initializer_persists_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_pointer_to_global_initializer_persists";
+    let source = "int puts(char*); int global = 4; int step(void) { static int *p = &global; *p = *p + 2; return *p == 6 ? 1 : 2; } int main(void) { int first = step(); int second = step(); puts(\"static-global-pointer\"); return first == 1 && second == 2 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_string_pointer_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_string_pointer_initializer";
+    let source = "int puts(char*); int main(void) { static char *text = \"az\"; puts(\"static-string-pointer\"); return text[1] == 'z' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_function_pointer_initializer_persists_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_function_pointer_initializer_persists";
+    let source = "int puts(char*); int one(int x) { return x + 1; } int two(int x) { return x + 2; } int step(void) { static int (*fp)(int) = one; int y = fp(1); fp = two; return y == 2 ? 1 : 2; } int main(void) { int first = step(); int second = step(); puts(\"static-fnptr-init\"); return first == 1 && second == 2 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

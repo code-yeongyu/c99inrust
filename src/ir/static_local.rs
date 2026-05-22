@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, ScalarType, UnaryOp};
+use crate::parser::{BinaryOp, Expr, LValue, ScalarType, UnaryOp};
 
 use super::{LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary, scalar_size};
 
@@ -46,13 +46,55 @@ fn pointer_initializer(
     initializer: Option<&Expr>,
     constants: &HashMap<String, i64>,
 ) -> CompileResult<LoweredGlobalInitializer> {
-    let value = initializer.map_or(Ok(0), |expr| eval_with_constants(expr, constants))?;
+    let Some(expr) = initializer else {
+        return Ok(LoweredGlobalInitializer::PointerNull);
+    };
+    match expr {
+        Expr::Integer(0) | Expr::LongInteger(0) => {
+            return Ok(LoweredGlobalInitializer::PointerNull);
+        }
+        Expr::Identifier(name) => {
+            return pointer_identifier_initializer(name, constants);
+        }
+        Expr::StringLiteral(value) => {
+            return Ok(LoweredGlobalInitializer::PointerString(value.clone()));
+        }
+        Expr::AddressOf {
+            target: LValue::Identifier(name),
+        } => {
+            return Ok(LoweredGlobalInitializer::PointerGlobalOffset {
+                base: name.clone(),
+                byte_offset: 0,
+            });
+        }
+        Expr::Cast { expr, .. } => return pointer_initializer(Some(expr), constants),
+        _ => {}
+    }
+    let value = eval_with_constants(expr, constants)?;
     if value == 0 {
         return Ok(LoweredGlobalInitializer::PointerNull);
     }
     Err(CompileError::new(
         "static local pointer initializer must be null",
     ))
+}
+
+fn pointer_identifier_initializer(
+    name: &str,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<LoweredGlobalInitializer> {
+    if let Some(value) = constants.get(name) {
+        if *value == 0 {
+            return Ok(LoweredGlobalInitializer::PointerNull);
+        }
+        return Err(CompileError::new(
+            "static local pointer initializer must be null",
+        ));
+    }
+    Ok(LoweredGlobalInitializer::PointerGlobalOffset {
+        base: name.to_owned(),
+        byte_offset: 0,
+    })
 }
 
 fn complex_initializer(
