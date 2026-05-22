@@ -56,6 +56,7 @@ mod scalar_compound_literal_storage;
 mod scalar_global_initializers;
 mod sizeof_expr;
 mod static_local;
+mod static_local_pointer;
 mod struct_compound_assignment;
 mod struct_initializer;
 mod types;

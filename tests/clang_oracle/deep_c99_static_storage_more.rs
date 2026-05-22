@@ -63,3 +63,33 @@ fn static_local_function_pointer_initializer_persists_matches_host_stdout_and_ex
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn static_local_pointer_decay_offset_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_pointer_decay_offset_initializer";
+    let source = "int puts(char*); int values[3] = { 3, 5, 7 }; int step(void) { static int *p = values + 1; int saved = *p; p = values + 2; return saved; } int main(void) { int first = step(); int second = step(); puts(\"static-pointer-offset\"); return first == 5 && second == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_subscript_address_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_subscript_address_initializer";
+    let source = "int puts(char*); int values[4] = { 2, 4, 6, 8 }; int main(void) { static int *p = &values[2]; puts(\"static-subscript-address\"); return p[0] == 6 && p[1] == 8 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_char_pointer_decay_offset_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_char_pointer_decay_offset_initializer";
+    let source = "int puts(char*); char text[] = \"doom\"; int main(void) { static char *p = text + 2; puts(\"static-char-offset\"); return p[0] == 'o' && p[1] == 'm' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

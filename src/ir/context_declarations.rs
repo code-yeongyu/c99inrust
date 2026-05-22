@@ -79,8 +79,12 @@ impl LoweringContext {
         if scalar_type == ScalarType::VaList {
             return Err(CompileError::new("static local does not support va_list"));
         }
-        let initializer =
-            static_local::scalar_initializer(scalar_type, initializer, &self.constants)?;
+        let initializer = static_local::scalar_initializer(
+            scalar_type,
+            referent.as_deref(),
+            initializer,
+            &self.constants,
+        )?;
         let global_name = self.declare_static_scalar(name, scalar_type, referent)?;
         self.static_globals.push(LoweredGlobal {
             name: global_name,

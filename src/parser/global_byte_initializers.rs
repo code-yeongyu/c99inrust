@@ -2,7 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::Constant;
-use super::global_string_initializers::parse_string_array_initializer;
+use super::global_string_initializers::{parse_string_array_initializer, parse_string_initializer};
 use super::integer_initializer::parse_integer_initializer_with_constants;
 use super::token_scan::{
     matching_top_level_brace, token_is_punctuator, top_level_comma_ranges,
@@ -137,9 +137,10 @@ pub(super) fn parse_unsigned_char_initializer(
         return Err(CompileError::new("expected global array initializer"));
     };
     if !token_is_punctuator(first, "{") {
-        return Err(
-            CompileError::new("expected global array initializer").at(first.line, first.column)
-        );
+        let value = parse_string_initializer(tokens)?;
+        let mut bytes = value.into_bytes();
+        bytes.push(0);
+        return Ok(bytes);
     }
     let Some(close_brace) = matching_top_level_brace(tokens, 0) else {
         return Err(

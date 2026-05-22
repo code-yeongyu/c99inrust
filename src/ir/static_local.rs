@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, LValue, ScalarType, UnaryOp};
+use crate::parser::{BinaryOp, Expr, ScalarType, UnaryOp};
 
 use super::{LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary, scalar_size};
 
 pub(in crate::ir) fn scalar_initializer(
     scalar_type: ScalarType,
+    referent: Option<&str>,
     initializer: Option<&Expr>,
     constants: &HashMap<String, i64>,
 ) -> CompileResult<LoweredGlobalInitializer> {
@@ -14,7 +15,9 @@ pub(in crate::ir) fn scalar_initializer(
         ScalarType::Bool | ScalarType::Int | ScalarType::LongLong => {
             integer_scalar_initializer(scalar_type, initializer, constants)
         }
-        ScalarType::Pointer => pointer_initializer(initializer, constants),
+        ScalarType::Pointer => {
+            super::static_local_pointer::initializer(initializer, constants, referent)
+        }
         ScalarType::Double | ScalarType::LongDouble => {
             real_initializer(initializer, constants).map(LoweredGlobalInitializer::Double)
         }
@@ -40,61 +43,6 @@ fn integer_scalar_initializer(
         ScalarType::LongLong => Ok(LoweredGlobalInitializer::LongLong(value)),
         _ => Err(CompileError::new("expected static integer scalar")),
     }
-}
-
-fn pointer_initializer(
-    initializer: Option<&Expr>,
-    constants: &HashMap<String, i64>,
-) -> CompileResult<LoweredGlobalInitializer> {
-    let Some(expr) = initializer else {
-        return Ok(LoweredGlobalInitializer::PointerNull);
-    };
-    match expr {
-        Expr::Integer(0) | Expr::LongInteger(0) => {
-            return Ok(LoweredGlobalInitializer::PointerNull);
-        }
-        Expr::Identifier(name) => {
-            return pointer_identifier_initializer(name, constants);
-        }
-        Expr::StringLiteral(value) => {
-            return Ok(LoweredGlobalInitializer::PointerString(value.clone()));
-        }
-        Expr::AddressOf {
-            target: LValue::Identifier(name),
-        } => {
-            return Ok(LoweredGlobalInitializer::PointerGlobalOffset {
-                base: name.clone(),
-                byte_offset: 0,
-            });
-        }
-        Expr::Cast { expr, .. } => return pointer_initializer(Some(expr), constants),
-        _ => {}
-    }
-    let value = eval_with_constants(expr, constants)?;
-    if value == 0 {
-        return Ok(LoweredGlobalInitializer::PointerNull);
-    }
-    Err(CompileError::new(
-        "static local pointer initializer must be null",
-    ))
-}
-
-fn pointer_identifier_initializer(
-    name: &str,
-    constants: &HashMap<String, i64>,
-) -> CompileResult<LoweredGlobalInitializer> {
-    if let Some(value) = constants.get(name) {
-        if *value == 0 {
-            return Ok(LoweredGlobalInitializer::PointerNull);
-        }
-        return Err(CompileError::new(
-            "static local pointer initializer must be null",
-        ));
-    }
-    Ok(LoweredGlobalInitializer::PointerGlobalOffset {
-        base: name.to_owned(),
-        byte_offset: 0,
-    })
 }
 
 fn complex_initializer(
@@ -151,7 +99,10 @@ fn negated_real(value: &str) -> String {
         .map_or_else(|| format!("-{value}"), ToOwned::to_owned)
 }
 
-fn eval_with_constants(expr: &Expr, constants: &HashMap<String, i64>) -> CompileResult<i64> {
+pub(in crate::ir) fn eval_with_constants(
+    expr: &Expr,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<i64> {
     match expr {
         Expr::Identifier(name) => constants
             .get(name)
