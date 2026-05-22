@@ -2,10 +2,10 @@ use super::{
     CompileError, CompileResult, Constant, Function, Parser, Program, StructLayout, SurfaceParser,
     Token, aggregate_tag_name, builtin_struct_layouts, enum_typedef_name,
     function_definition_has_supported_signature, function_definition_name,
-    function_pointer_typedef_name, function_prototype_name, global_sizeof_symbols,
-    parse_enum_constants, parse_struct_definition, parse_struct_typedef,
-    parse_supported_global_declarations, pointer_return_function, struct_alias_layouts,
-    struct_forward_typedef_alias, unsupported_data_declaration_blocks_empty_unit,
+    function_pointer_typedef_name, function_prototype, global_sizeof_symbols, parse_enum_constants,
+    parse_struct_definition, parse_struct_typedef, parse_supported_global_declarations,
+    pointer_return_function, struct_alias_layouts, struct_forward_typedef_alias,
+    unsupported_data_declaration_blocks_empty_unit,
 };
 
 /// Parses supported executable functions from a full translation unit.
@@ -39,8 +39,8 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
         if let Some(function) = pointer_return_function(item_tokens) {
             pointer_return_functions.push(function);
         }
-        if let Some(name) = function_prototype_name(item_tokens) {
-            function_prototypes.push(name);
+        if let Some(prototype) = function_prototype(item_tokens) {
+            function_prototypes.push(prototype);
             continue;
         }
         if let Some(layouts) =

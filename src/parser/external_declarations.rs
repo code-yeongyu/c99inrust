@@ -8,7 +8,7 @@ use super::token_scan::{
     token_is_keyword, token_is_punctuator, update_depths,
 };
 use super::type_recognition::supported_return_type;
-use super::{ExternalItem, PointerReturnFunction, ReturnType};
+use super::{ExternalItem, FunctionPrototype, PointerReturnFunction, ReturnType};
 
 pub(super) fn classify_external_item(tokens: &[Token]) -> Option<ExternalItem> {
     if token_has_keyword(tokens, Keyword::Typedef) {
@@ -38,14 +38,15 @@ pub(super) fn function_definition_name(tokens: &[Token]) -> Option<String> {
     None
 }
 
-pub(super) fn function_prototype_name(tokens: &[Token]) -> Option<String> {
+pub(super) fn function_prototype(tokens: &[Token]) -> Option<FunctionPrototype> {
     if last_token_is_punctuator(tokens, "}") || function_pointer_name(tokens).is_some() {
         return None;
     }
     let open_index = top_level_function_open_paren(tokens)?;
     let name_index = previous_identifier_index(tokens, open_index)?;
-    supported_return_type(&tokens[..name_index])?;
-    token_identifier(&tokens[name_index]).map(ToOwned::to_owned)
+    let return_type = supported_return_type(&tokens[..name_index])?;
+    let name = token_identifier(&tokens[name_index])?.to_owned();
+    Some(FunctionPrototype { name, return_type })
 }
 
 pub(super) fn pointer_return_function(tokens: &[Token]) -> Option<PointerReturnFunction> {

@@ -8,8 +8,14 @@ pub struct Program {
     pub constants: Vec<Constant>,
     pub globals: Vec<Global>,
     pub pointer_return_functions: Vec<PointerReturnFunction>,
-    pub function_prototypes: Vec<String>,
+    pub function_prototypes: Vec<FunctionPrototype>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunctionPrototype {
+    pub name: String,
+    pub return_type: ReturnType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

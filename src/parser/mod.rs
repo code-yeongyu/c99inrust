@@ -86,7 +86,7 @@ use enum_declarations::{enum_typedef_name, parse_enum_constants};
 use external_declarations::{
     function_definition_has_supported_signature, function_definition_name,
     function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
-    function_prototype_name, pointer_return_function, top_level_function_open_paren,
+    function_prototype, pointer_return_function, top_level_function_open_paren,
 };
 use function_pointer_declarators::{function_pointer_variable, pointer_return_declarator};
 use global_declarations::{
@@ -111,7 +111,7 @@ pub use model::{
 use parser_designated_initializers::{struct_field_designator, struct_field_index, zero_expr};
 use parser_expression_helpers::{lvalue_from_expr, prefix_update_expr, statement_from_expression};
 use parser_local_vlas::LocalVlaElement;
-pub use program::{Function, Parameter, Program};
+pub use program::{Function, FunctionPrototype, Parameter, Program};
 use surface_parser::SurfaceParser;
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{

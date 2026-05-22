@@ -75,3 +75,13 @@ fn extra_restrict_three_way_accumulate_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn extra_double_return_libc_prototype_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "extra_double_return_libc_prototype";
+    let source = "int puts(char*); double fabs(double); int main(void) { double x = fabs(-3.5); puts(\"extra-proto-double\"); return x == 3.5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

@@ -1,5 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Constant, Function, PointerReturnFunction, ReturnType, ScalarType};
+use crate::parser::{
+    Constant, Function, FunctionPrototype, PointerReturnFunction, ReturnType, ScalarType,
+};
 use std::collections::{HashMap, HashSet};
 
 pub(in crate::ir) fn lower_constants(
@@ -31,24 +33,33 @@ pub(in crate::ir) fn lower_pointer_return_functions(
 
 pub(in crate::ir) fn lower_function_names(
     functions: &[Function],
-    function_prototypes: &[String],
+    function_prototypes: &[FunctionPrototype],
 ) -> HashSet<String> {
     functions
         .iter()
         .map(|function| function.name.clone())
-        .chain(function_prototypes.iter().cloned())
+        .chain(
+            function_prototypes
+                .iter()
+                .map(|prototype| prototype.name.clone()),
+        )
         .collect()
 }
 
 pub(in crate::ir) fn lower_function_return_types(
     functions: &[Function],
+    function_prototypes: &[FunctionPrototype],
 ) -> HashMap<String, ScalarType> {
-    functions
+    function_prototypes
         .iter()
-        .filter_map(|function| {
+        .filter_map(|prototype| {
+            function_return_type(prototype.return_type)
+                .map(|return_type| (prototype.name.clone(), return_type))
+        })
+        .chain(functions.iter().filter_map(|function| {
             function_return_type(function.return_type)
                 .map(|return_type| (function.name.clone(), return_type))
-        })
+        }))
         .collect()
 }
 
