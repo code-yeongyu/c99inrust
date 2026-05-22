@@ -45,6 +45,8 @@ impl LoweringContext {
             || builtin_calls::returns_pointer(callee)
         {
             ScalarType::Pointer
+        } else if let Some(return_type) = self.function_return_types.get(callee) {
+            *return_type
         } else {
             ScalarType::Int
         }

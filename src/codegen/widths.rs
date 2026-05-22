@@ -12,8 +12,15 @@ pub(in crate::codegen) enum ValueWidth {
 pub(in crate::codegen) const TEMPORARY_BYTES: usize = 8;
 pub(in crate::codegen) const X86_64_VARIADIC_GP_SAVE_BYTES: usize = 48;
 pub(in crate::codegen) const X86_64_VARIADIC_FP_OFFSET: usize = 48;
+pub(in crate::codegen) const X86_64_VARIADIC_FP_REGISTER_BYTES: usize = 16;
+pub(in crate::codegen) const X86_64_VARIADIC_FP_SAVE_BYTES: usize = 128;
+pub(in crate::codegen) const X86_64_VARIADIC_REGISTER_SAVE_BYTES: usize =
+    X86_64_VARIADIC_GP_SAVE_BYTES + X86_64_VARIADIC_FP_SAVE_BYTES;
 pub(in crate::codegen) const X86_64_VARIADIC_GP_REGISTERS: [&str; 6] =
     ["%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"];
+pub(in crate::codegen) const X86_64_VARIADIC_FP_REGISTERS: [&str; 8] = [
+    "%xmm0", "%xmm1", "%xmm2", "%xmm3", "%xmm4", "%xmm5", "%xmm6", "%xmm7",
+];
 
 #[derive(Clone, Copy)]
 pub(in crate::codegen) struct BinaryExpr<'a> {

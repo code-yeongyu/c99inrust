@@ -1,5 +1,5 @@
 const POINTER_REFERENT: &str = "*";
-const VARIADIC_GP_SAVE_BYTES: usize = 64;
+const VARIADIC_REGISTER_SAVE_BYTES: usize = 176;
 
 mod bindings;
 mod builtin_calls;
@@ -86,9 +86,10 @@ pub(in crate::ir) use complex_scalar_real::{real_scalar_expr_type, real_scalar_l
 pub(in crate::ir) use const_eval::{cast_const_value, eval_binary};
 pub(in crate::ir) use constant_inlining::{constant_return_functions, inline_constant_calls};
 pub(in crate::ir) use constant_tables::{
-    lower_constants, lower_function_names, lower_pointer_return_functions,
+    lower_constants, lower_function_names, lower_function_return_types,
+    lower_pointer_return_functions,
 };
-pub(in crate::ir) use context::LoweringContext;
+pub(in crate::ir) use context::{LoweringContext, LoweringContextInputs};
 pub(in crate::ir) use function_lowering::lower_function_with_globals;
 pub(in crate::ir) use global_bindings::{insert_builtin_libc_bindings, insert_global_binding};
 pub(in crate::ir) use global_initializers::lower_defined_global_initializer;

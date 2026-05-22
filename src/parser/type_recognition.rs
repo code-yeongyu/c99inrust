@@ -7,6 +7,8 @@ use super::{ReturnType, ScalarType};
 pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
     let mut saw_void = false;
     let mut saw_non_void_type = false;
+    let mut saw_double = false;
+    let mut long_count = 0usize;
     let mut saw_pointer = false;
     for token in tokens {
         match &token.kind {
@@ -20,14 +22,21 @@ pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
                 | Keyword::Static
                 | Keyword::Volatile => {}
                 Keyword::Void => saw_void = true,
+                Keyword::Double => {
+                    saw_double = true;
+                    saw_non_void_type = true;
+                }
                 Keyword::Bool
                 | Keyword::Char
                 | Keyword::Enum
                 | Keyword::Int
-                | Keyword::Long
                 | Keyword::Short
                 | Keyword::Signed
                 | Keyword::Unsigned => saw_non_void_type = true,
+                Keyword::Long => {
+                    long_count += 1;
+                    saw_non_void_type = true;
+                }
                 _ => return None,
             },
             TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
@@ -42,6 +51,7 @@ pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
     match (saw_void, saw_non_void_type, saw_pointer) {
         (true, false, false) => Some(ReturnType::Void),
         (_, _, true) if saw_void || saw_non_void_type => Some(ReturnType::Pointer),
+        (false, true, false) if saw_double && long_count == 0 => Some(ReturnType::Double),
         (false, true, false) => Some(ReturnType::Int),
         _ => None,
     }

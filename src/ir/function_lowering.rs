@@ -1,6 +1,6 @@
 use super::{
     GlobalBinding, Instruction, LoweredFunction, LoweredGlobal, LoweringContext,
-    VARIADIC_GP_SAVE_BYTES, scalar_size,
+    LoweringContextInputs, VARIADIC_REGISTER_SAVE_BYTES, scalar_size,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Function, ReturnType, ScalarType, StructLayout};
@@ -17,6 +17,7 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
     let global_bindings = HashMap::new();
     let constants = HashMap::new();
     let pointer_return_functions = HashMap::new();
+    let function_return_types = HashMap::new();
     let function_names = HashSet::new();
     lower_function_with_globals(
         function,
@@ -24,6 +25,7 @@ pub fn lower_function(function: &Function) -> CompileResult<LoweredFunction> {
         &global_bindings,
         &constants,
         &pointer_return_functions,
+        &function_return_types,
         &function_names,
     )
     .map(|lowered| lowered.function)
@@ -40,16 +42,20 @@ pub(in crate::ir) fn lower_function_with_globals(
     global_bindings: &HashMap<String, GlobalBinding>,
     constants: &HashMap<String, i64>,
     pointer_return_functions: &HashMap<String, Option<String>>,
+    function_return_types: &HashMap<String, ScalarType>,
     function_names: &HashSet<String>,
 ) -> CompileResult<LoweredFunctionWithStatics> {
     let mut context = LoweringContext::new(
         &function.name,
         function.return_type,
-        structs,
-        global_bindings,
-        constants,
-        pointer_return_functions,
-        function_names,
+        LoweringContextInputs {
+            structs,
+            global_bindings,
+            constants,
+            pointer_return_functions,
+            function_return_types,
+            function_names,
+        },
     );
     for parameter in &function.parameters {
         context.declare_local(
@@ -61,7 +67,7 @@ pub(in crate::ir) fn lower_function_with_globals(
     let variadic_save_slot = if function.is_variadic {
         Some(context.declare_anonymous_slot(
             ScalarType::Pointer,
-            VARIADIC_GP_SAVE_BYTES,
+            VARIADIC_REGISTER_SAVE_BYTES,
             scalar_size(ScalarType::Pointer),
         )?)
     } else {
@@ -70,7 +76,10 @@ pub(in crate::ir) fn lower_function_with_globals(
     for statement in &function.statements {
         context.lower_statement(statement)?;
     }
-    if matches!(function.return_type, ReturnType::Int | ReturnType::Pointer) && !context.has_return
+    if matches!(
+        function.return_type,
+        ReturnType::Int | ReturnType::Pointer | ReturnType::Double
+    ) && !context.has_return
     {
         return Err(CompileError::new(format!(
             "function {} has no return statement",

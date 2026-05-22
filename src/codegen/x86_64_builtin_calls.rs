@@ -6,7 +6,8 @@ use super::frames::LabelAllocator;
 use super::stack_helpers::x86_stack_object_offset;
 use super::target::Target;
 use super::widths::{
-    ValueWidth, X86_64_VARIADIC_FP_OFFSET, X86_64_VARIADIC_GP_SAVE_BYTES, expr_width, scalar_width,
+    ValueWidth, X86_64_VARIADIC_FP_REGISTER_BYTES, X86_64_VARIADIC_GP_SAVE_BYTES,
+    X86_64_VARIADIC_REGISTER_SAVE_BYTES, expr_width, scalar_width,
 };
 use super::x86_64_binary::emit_x86_64_width_adjustment;
 use super::x86_64_expr::emit_x86_64_expr_with_width;
@@ -36,7 +37,7 @@ pub(in crate::codegen) fn emit_x86_64_va_start(
     )?;
     assembly.push_str("\tmovq %rax, %r10\n");
     write_assembly!(assembly, "\tmovl ${}, 0(%r10)\n", frame.gp_offset)?;
-    write_assembly!(assembly, "\tmovl ${X86_64_VARIADIC_FP_OFFSET}, 4(%r10)\n")?;
+    write_assembly!(assembly, "\tmovl ${}, 4(%r10)\n", frame.fp_offset)?;
     write_assembly!(
         assembly,
         "\tleaq {}(%rbp), %rax\n",
@@ -84,9 +85,6 @@ pub(in crate::codegen) fn emit_x86_64_va_arg(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let width = scalar_width(scalar_type);
-    if width == ValueWidth::F64 {
-        return Err(CompileError::new("va_arg double is not supported yet"));
-    }
     emit_x86_64_expr_with_width(
         list,
         ValueWidth::I64,
@@ -99,6 +97,9 @@ pub(in crate::codegen) fn emit_x86_64_va_arg(
     let overflow_label = labels.fresh();
     let load_label = labels.fresh();
     assembly.push_str("\tmovq %rax, %r10\n");
+    if width == ValueWidth::F64 {
+        return emit_x86_64_va_arg_f64(&overflow_label, &load_label, assembly);
+    }
     assembly.push_str("\tmovl 0(%r10), %r11d\n");
     write_assembly!(
         assembly,
@@ -118,8 +119,35 @@ pub(in crate::codegen) fn emit_x86_64_va_arg(
     match width {
         ValueWidth::I32 => assembly.push_str("\tmovl (%rcx), %eax\n"),
         ValueWidth::I64 => assembly.push_str("\tmovq (%rcx), %rax\n"),
-        ValueWidth::F64 => return Err(CompileError::new("va_arg double is not supported yet")),
+        ValueWidth::F64 => assembly.push_str("\tmovsd (%rcx), %xmm0\n"),
     }
+    Ok(())
+}
+
+fn emit_x86_64_va_arg_f64(
+    overflow_label: &str,
+    load_label: &str,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    assembly.push_str("\tmovl 4(%r10), %r11d\n");
+    write_assembly!(
+        assembly,
+        "\tcmpl ${X86_64_VARIADIC_REGISTER_SAVE_BYTES}, %r11d\n\tjge {overflow_label}\n",
+    )?;
+    assembly.push_str("\tmovq 16(%r10), %rcx\n");
+    assembly.push_str("\taddq %r11, %rcx\n");
+    write_assembly!(
+        assembly,
+        "\taddl ${X86_64_VARIADIC_FP_REGISTER_BYTES}, %r11d\n"
+    )?;
+    assembly.push_str("\tmovl %r11d, 4(%r10)\n");
+    write_assembly!(assembly, "\tjmp {load_label}\n")?;
+    write_assembly!(assembly, "{overflow_label}:\n")?;
+    assembly.push_str("\tmovq 8(%r10), %rcx\n");
+    assembly.push_str("\tleaq 8(%rcx), %r11\n");
+    assembly.push_str("\tmovq %r11, 8(%r10)\n");
+    write_assembly!(assembly, "{load_label}:\n")?;
+    assembly.push_str("\tmovsd (%rcx), %xmm0\n");
     Ok(())
 }
 

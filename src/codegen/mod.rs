@@ -53,6 +53,7 @@ mod x86_64_pointer_stores;
 mod x86_64_post_increment;
 mod x86_64_temporaries;
 mod x86_64_unary;
+mod x86_64_variadic;
 
 pub use emit_program::emit_assembly;
 pub use target::Target;

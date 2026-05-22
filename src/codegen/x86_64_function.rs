@@ -1,14 +1,9 @@
 use super::aarch64_analysis::instruction_depth;
 use super::data_literals::{branch_label, label_name};
-use super::frames::{LabelAllocator, X86_64VariadicFrame};
-use super::stack_helpers::{
-    align_to, local_offset, local_stack_bytes, x86_stack_byte_offset, x86_stack_offset,
-};
+use super::frames::LabelAllocator;
+use super::stack_helpers::{align_to, local_offset, local_stack_bytes, x86_stack_offset};
 use super::target::Target;
-use super::widths::{
-    TEMPORARY_BYTES, ValueWidth, X86_64_VARIADIC_GP_REGISTERS, X86_64_VARIADIC_GP_SAVE_BYTES,
-    scalar_width,
-};
+use super::widths::{TEMPORARY_BYTES, ValueWidth, scalar_width};
 use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
 };
@@ -17,6 +12,7 @@ use super::x86_64_loads::emit_x86_64_store_global;
 use super::x86_64_temporaries::{
     emit_x86_64_init_local_bytes, emit_x86_64_init_local_ints, emit_x86_64_store_result,
 };
+use super::x86_64_variadic::{emit_x86_64_variadic_register_saves, x86_64_variadic_frame};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::{Instruction, LoweredFunction};
 
@@ -157,54 +153,6 @@ pub(in crate::codegen) fn emit_x86_64_parameter_stores(
             x86_64_instruction_suffix(width),
             x86_stack_offset(local_offset(function, slot)?, width)
         )?;
-    }
-    Ok(())
-}
-
-pub(in crate::codegen) fn x86_64_variadic_frame(
-    function: &LoweredFunction,
-) -> CompileResult<Option<X86_64VariadicFrame>> {
-    let Some(slot) = function.variadic_save_slot else {
-        return Ok(None);
-    };
-    let register_save_offset = local_offset(function, slot)?;
-    let named_gp_args = function
-        .parameter_count
-        .min(X86_64_VARIADIC_GP_REGISTERS.len());
-    let stack_named_args = function
-        .parameter_count
-        .saturating_sub(X86_64_VARIADIC_GP_REGISTERS.len());
-    Ok(Some(X86_64VariadicFrame {
-        gp_offset: named_gp_args
-            .checked_mul(TEMPORARY_BYTES)
-            .ok_or_else(|| CompileError::new("variadic gp offset overflow"))?,
-        overflow_arg_offset: 16usize
-            .checked_add(
-                stack_named_args
-                    .checked_mul(TEMPORARY_BYTES)
-                    .ok_or_else(|| CompileError::new("variadic overflow offset overflow"))?,
-            )
-            .ok_or_else(|| CompileError::new("variadic overflow offset overflow"))?,
-        register_save_offset,
-        register_save_size: X86_64_VARIADIC_GP_SAVE_BYTES,
-    }))
-}
-
-pub(in crate::codegen) fn emit_x86_64_variadic_register_saves(
-    function: &LoweredFunction,
-    assembly: &mut String,
-) -> CompileResult<()> {
-    let Some(frame) = x86_64_variadic_frame(function)? else {
-        return Ok(());
-    };
-    for (index, register) in X86_64_VARIADIC_GP_REGISTERS.iter().enumerate() {
-        let offset = frame
-            .register_save_offset
-            .checked_add(index * TEMPORARY_BYTES)
-            .ok_or_else(|| CompileError::new("variadic register save offset overflow"))?;
-        let destination =
-            x86_stack_byte_offset(frame.register_save_offset, frame.register_save_size, offset);
-        write_assembly!(assembly, "\tmovq {register}, {destination}(%rbp)\n")?;
     }
     Ok(())
 }

@@ -17,6 +17,7 @@ pub(in crate::codegen) struct LabelAllocator<'a> {
 #[derive(Clone, Copy)]
 pub(in crate::codegen) struct X86_64VariadicFrame {
     pub(in crate::codegen) gp_offset: usize,
+    pub(in crate::codegen) fp_offset: usize,
     pub(in crate::codegen) overflow_arg_offset: usize,
     pub(in crate::codegen) register_save_offset: usize,
     pub(in crate::codegen) register_save_size: usize,
@@ -49,6 +50,7 @@ pub(in crate::codegen) struct Aarch64Frame {
 #[derive(Clone, Copy)]
 pub(in crate::codegen) struct Aarch64VariadicFrame {
     pub(in crate::codegen) gp_offset: usize,
+    pub(in crate::codegen) fp_offset: usize,
     pub(in crate::codegen) overflow_arg_offset: usize,
     pub(in crate::codegen) register_save_offset: usize,
     pub(in crate::codegen) register_save_size: usize,

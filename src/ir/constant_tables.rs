@@ -1,5 +1,5 @@
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Constant, Function, PointerReturnFunction};
+use crate::parser::{Constant, Function, PointerReturnFunction, ReturnType, ScalarType};
 use std::collections::{HashMap, HashSet};
 
 pub(in crate::ir) fn lower_constants(
@@ -38,4 +38,25 @@ pub(in crate::ir) fn lower_function_names(
         .map(|function| function.name.clone())
         .chain(function_prototypes.iter().cloned())
         .collect()
+}
+
+pub(in crate::ir) fn lower_function_return_types(
+    functions: &[Function],
+) -> HashMap<String, ScalarType> {
+    functions
+        .iter()
+        .filter_map(|function| {
+            function_return_type(function.return_type)
+                .map(|return_type| (function.name.clone(), return_type))
+        })
+        .collect()
+}
+
+const fn function_return_type(return_type: ReturnType) -> Option<ScalarType> {
+    match return_type {
+        ReturnType::Int => Some(ScalarType::Int),
+        ReturnType::Pointer => Some(ScalarType::Pointer),
+        ReturnType::Double => Some(ScalarType::Double),
+        ReturnType::Void => None,
+    }
 }

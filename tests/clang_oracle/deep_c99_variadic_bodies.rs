@@ -43,3 +43,13 @@ fn variadic_body_reads_long_long_va_args_matches_host_stdout_and_exit_code() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn variadic_body_reads_double_va_args_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "variadic_body_reads_double_va_args";
+    let source = "#include <stdarg.h>\nint puts(char*); double sumd(int count, ...) { va_list ap; va_start(ap, count); double total = 0.0; for (int i = 0; i < count; i++) { total = total + va_arg(ap, double); } va_end(ap); return total; } int main(void) { double value = sumd(3, 1.5, 2.25, 3.25); puts(\"va-double\"); return value == 7.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
