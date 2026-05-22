@@ -98,6 +98,10 @@ pub(in crate::codegen) fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             return_type: scalar_type,
             ..
         }
+        | LoweredExpr::IndirectCall {
+            return_type: scalar_type,
+            ..
+        }
         | LoweredExpr::PointerField { scalar_type, .. } => scalar_width(*scalar_type),
         LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::GlobalIntSubscript { .. }
@@ -105,7 +109,6 @@ pub(in crate::codegen) fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             element_type: ScalarType::Int,
             ..
         }
-        | LoweredExpr::IndirectCall { .. }
         | LoweredExpr::Integer(_) => ValueWidth::I32,
         LoweredExpr::PointerSubscript { element_type, .. } => scalar_width(*element_type),
         LoweredExpr::Assign { target, .. } | LoweredExpr::PostIncrement { target, .. } => {

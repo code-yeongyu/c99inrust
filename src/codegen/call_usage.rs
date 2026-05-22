@@ -71,7 +71,7 @@ pub(in crate::codegen) fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool 
         }
         LoweredExpr::PostIncrement { target, .. } => lvalue_needs_preserved_temp(target),
         LoweredExpr::Call { args, .. } => args.iter().any(expr_needs_preserved_temp),
-        LoweredExpr::IndirectCall { callee, args } => {
+        LoweredExpr::IndirectCall { callee, args, .. } => {
             expr_needs_preserved_temp(callee) || args.iter().any(expr_needs_preserved_temp)
         }
         LoweredExpr::Integer(_)

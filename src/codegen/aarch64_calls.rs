@@ -56,7 +56,7 @@ pub(in crate::codegen) fn emit_aarch64_call_expr(
         LoweredExpr::Call { callee, args, .. } => {
             emit_aarch64_call(callee, args, temporary_base, depth, labels, assembly)
         }
-        LoweredExpr::IndirectCall { callee, args } => {
+        LoweredExpr::IndirectCall { callee, args, .. } => {
             emit_aarch64_indirect_call(callee, args, temporary_base, depth, labels, assembly)
         }
         _ => Err(CompileError::new(

@@ -95,3 +95,13 @@ fn extra_double_parameter_function_definition_matches_host_stdout_and_exit_code(
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn extra_double_return_function_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "extra_double_return_function_pointer";
+    let source = "int puts(char*); double bump(double x) { return x + 0.25; } int main(void) { double (*fp)(double) = bump; double y = fp(1.25); puts(\"extra-double-fnptr\"); return y == 1.5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

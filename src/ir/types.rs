@@ -125,6 +125,7 @@ pub enum LoweredExpr {
     IndirectCall {
         callee: Box<Self>,
         args: Vec<Self>,
+        return_type: ScalarType,
     },
     Integer(i64),
     LongInteger(i64),

@@ -18,6 +18,7 @@ impl LoweringContext {
                     .iter()
                     .map(|arg| self.lower_expr(arg))
                     .collect::<CompileResult<Vec<_>>>()?,
+                return_type: self.indirect_call_return_type_for_name(callee),
             });
         }
         Ok(LoweredExpr::Call {
@@ -76,6 +77,7 @@ impl LoweringContext {
         callee: &Expr,
         args: &[Expr],
     ) -> CompileResult<LoweredExpr> {
+        let return_type = self.indirect_call_return_type(callee);
         let callee = if let Expr::Dereference { pointer } = callee {
             pointer.as_ref()
         } else {
@@ -91,7 +93,21 @@ impl LoweringContext {
                 .iter()
                 .map(|arg| self.lower_expr(arg))
                 .collect::<CompileResult<Vec<_>>>()?,
+            return_type,
         })
+    }
+
+    fn indirect_call_return_type(&self, callee: &Expr) -> ScalarType {
+        if let Expr::Identifier(name) = callee {
+            return self.indirect_call_return_type_for_name(name);
+        }
+        ScalarType::Int
+    }
+
+    fn indirect_call_return_type_for_name(&self, name: &str) -> ScalarType {
+        self.local_binding(name)
+            .and_then(|binding| function_pointer_return_type(&binding))
+            .unwrap_or(ScalarType::Int)
     }
 
     pub(in crate::ir) fn lower_cast_expr(
@@ -140,5 +156,26 @@ impl LoweringContext {
 
     pub(in crate::ir) fn complex_truth_for_lowered(value: &LoweredExpr) -> Option<LoweredExpr> {
         complex_truth_expr(value)
+    }
+}
+
+fn function_pointer_return_type(binding: &LocalBinding) -> Option<ScalarType> {
+    let referent = match binding {
+        LocalBinding::Scalar {
+            referent: Some(referent),
+            ..
+        }
+        | LocalBinding::StaticScalar {
+            referent: Some(referent),
+            ..
+        } => referent.as_str(),
+        _ => return None,
+    };
+    match referent {
+        "function double" => Some(ScalarType::Double),
+        "function long double" => Some(ScalarType::LongDouble),
+        "function pointer" => Some(ScalarType::Pointer),
+        "function int" => Some(ScalarType::Int),
+        _ => None,
     }
 }

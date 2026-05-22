@@ -65,7 +65,7 @@ pub(in crate::ir) fn inline_constant_calls_in_expr(
                 }
             }
         }
-        LoweredExpr::IndirectCall { callee, args } => {
+        LoweredExpr::IndirectCall { callee, args, .. } => {
             inline_constant_calls_in_expr(callee, constants);
             for arg in args {
                 inline_constant_calls_in_expr(arg, constants);

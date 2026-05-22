@@ -66,7 +66,7 @@ pub(in crate::codegen) fn expr_depth(expr: &LoweredExpr) -> usize {
         | LoweredExpr::LocalAddress { .. } => 0,
         LoweredExpr::VaArg { list, .. } => expr_depth(list),
         LoweredExpr::Call { args, .. } => call_arg_depth(args),
-        LoweredExpr::IndirectCall { callee, args } => {
+        LoweredExpr::IndirectCall { callee, args, .. } => {
             call_arg_depth(args).max(args.len() + 1 + expr_depth(callee))
         }
         LoweredExpr::Cast { expr, .. } | LoweredExpr::Unary { expr, .. } => expr_depth(expr),

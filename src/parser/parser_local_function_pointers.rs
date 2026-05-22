@@ -10,9 +10,6 @@ impl Parser<'_> {
         let Some((scalar_type, type_end)) = self.declaration_type_span_at_current() else {
             return Ok(None);
         };
-        if scalar_type != ScalarType::Int {
-            return Ok(None);
-        }
         if function_pointer_variable(&self.tokens[type_end..]).is_none() {
             return Ok(None);
         }
@@ -32,7 +29,7 @@ impl Parser<'_> {
                         is_static: false,
                         scalar_type: ScalarType::Pointer,
                         name: declarator.name,
-                        referent: pointer_referent_for_depth(declarator.pointer_depth, None),
+                        referent: function_pointer_referent(declarator.pointer_depth, scalar_type),
                         initializer,
                     }
                 } else {
@@ -87,5 +84,21 @@ impl Parser<'_> {
             referent,
             initializer,
         })
+    }
+}
+
+fn function_pointer_referent(pointer_depth: usize, return_type: ScalarType) -> Option<String> {
+    if pointer_depth == 1 {
+        return Some(function_return_referent(return_type).to_owned());
+    }
+    pointer_referent_for_depth(pointer_depth, None)
+}
+
+const fn function_return_referent(return_type: ScalarType) -> &'static str {
+    match return_type {
+        ScalarType::Double => "function double",
+        ScalarType::LongDouble => "function long double",
+        ScalarType::Pointer => "function pointer",
+        _ => "function int",
     }
 }

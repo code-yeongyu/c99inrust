@@ -9,6 +9,7 @@ pub(in crate::codegen) fn width(target: ScalarType, expr: &LoweredExpr) -> Optio
 fn expr_is_pointer(expr: &LoweredExpr) -> bool {
     match expr {
         LoweredExpr::Call { return_type, .. }
+        | LoweredExpr::IndirectCall { return_type, .. }
         | LoweredExpr::Global {
             scalar_type: return_type,
             ..
@@ -42,8 +43,7 @@ fn expr_is_pointer(expr: &LoweredExpr) -> bool {
             ..
         } => expr_is_pointer(then_expr) && expr_is_pointer(else_expr),
         LoweredExpr::Comma { right, .. } => expr_is_pointer(right),
-        LoweredExpr::IndirectCall { .. }
-        | LoweredExpr::Integer(_)
+        LoweredExpr::Integer(_)
         | LoweredExpr::LongInteger(_)
         | LoweredExpr::DoubleLiteral(_)
         | LoweredExpr::GlobalByteSubscript { .. }

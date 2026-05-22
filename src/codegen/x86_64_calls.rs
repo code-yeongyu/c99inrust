@@ -87,7 +87,7 @@ pub(in crate::codegen) fn emit_x86_64_call_expr(
             labels,
             assembly,
         ),
-        LoweredExpr::IndirectCall { callee, args } => emit_x86_64_indirect_call(
+        LoweredExpr::IndirectCall { callee, args, .. } => emit_x86_64_indirect_call(
             callee,
             args,
             temporary_base,
