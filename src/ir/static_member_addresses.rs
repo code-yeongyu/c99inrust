@@ -7,15 +7,17 @@ pub(in crate::ir) fn from_lvalue(
     target: &LValue,
     constants: &HashMap<String, i64>,
 ) -> CompileResult<Option<GlobalPointerAddress>> {
-    let LValue::Member {
-        base,
-        field,
-        dereference: false,
-    } = target
-    else {
-        return Ok(None);
-    };
-    member_expr_address(base, field, constants)
+    match target {
+        LValue::Member {
+            base,
+            field,
+            dereference: false,
+        } => member_expr_address(base, field, constants),
+        LValue::Subscript { array, index } => member_subscript_address(array, index, constants),
+        LValue::Identifier(_) | LValue::ScalarCompoundLiteral { .. } | LValue::Member { .. } => {
+            Ok(None)
+        }
+    }
 }
 
 fn member_expr_address(
@@ -39,6 +41,7 @@ fn base_expr_address(
             base: base.clone(),
             index: 0,
             fields: Vec::new(),
+            element_index: None,
         })),
         Expr::Subscript { array, index } => {
             let Expr::Identifier(base) = array.as_ref() else {
@@ -53,6 +56,7 @@ fn base_expr_address(
                 base: base.clone(),
                 index,
                 fields: Vec::new(),
+                element_index: None,
             }))
         }
         Expr::Member {
@@ -62,4 +66,28 @@ fn base_expr_address(
         } => member_expr_address(base, field, constants),
         _ => Ok(None),
     }
+}
+
+fn member_subscript_address(
+    array: &Expr,
+    index: &Expr,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<Option<GlobalPointerAddress>> {
+    let Expr::Member {
+        base,
+        field,
+        dereference: false,
+    } = array
+    else {
+        return Ok(None);
+    };
+    let Some(mut address) = member_expr_address(base, field, constants)? else {
+        return Ok(None);
+    };
+    let element_index = super::static_local::eval_with_constants(index, constants)?;
+    address.element_index = Some(
+        usize::try_from(element_index)
+            .map_err(|_| CompileError::new("static local member pointer index is negative"))?,
+    );
+    Ok(Some(address))
 }

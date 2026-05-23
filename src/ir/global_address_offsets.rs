@@ -61,7 +61,13 @@ fn member_offset(
         byte_offset = byte_offset
             .checked_add(field.offset)
             .ok_or_else(|| CompileError::new("global member pointer offset overflow"))?;
-        if position + 1 < address.fields.len() {
+        if position + 1 == address.fields.len() {
+            if let Some(element_index) = address.element_index {
+                byte_offset = byte_offset
+                    .checked_add(array_element_offset(&field.field_type, element_index)?)
+                    .ok_or_else(|| CompileError::new("global member pointer offset overflow"))?;
+            }
+        } else {
             let FieldType::Struct(next_struct) = &field.field_type else {
                 return Err(CompileError::new(
                     "global member pointer path crosses non-struct field",
@@ -71,6 +77,27 @@ fn member_offset(
         }
     }
     Ok(byte_offset)
+}
+
+fn array_element_offset(field_type: &FieldType, index: usize) -> CompileResult<usize> {
+    let FieldType::Array {
+        element_size,
+        length,
+        ..
+    } = field_type
+    else {
+        return Err(CompileError::new(
+            "global member pointer subscript requires an array field",
+        ));
+    };
+    if index >= *length {
+        return Err(CompileError::new(
+            "global member pointer array index is out of bounds",
+        ));
+    }
+    index
+        .checked_mul(*element_size)
+        .ok_or_else(|| CompileError::new("global member pointer offset overflow"))
 }
 
 fn base_struct(

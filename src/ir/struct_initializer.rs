@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+mod array_field;
 mod nested_initializer;
 
 use crate::diagnostics::{CompileError, CompileResult};
@@ -123,7 +124,7 @@ fn lower_value(
             element_size,
             length,
             ..
-        } => lower_array_field(value, *element_size, *length),
+        } => array_field::lower(value, *element_size, *length),
         FieldType::Struct(struct_name) => {
             nested_initializer::lower(value, struct_name, structs, global_bindings)
         }
@@ -152,6 +153,12 @@ fn lower_int(
         GlobalStructInitializerValue::Address(_) => Err(CompileError::new(
             "unsupported global struct int initializer address",
         )),
+        GlobalStructInitializerValue::Nested(values) if values.len() == 1 => {
+            lower_int(&values[0], byte_size)
+        }
+        GlobalStructInitializerValue::Nested(_) => Err(CompileError::new(
+            "unsupported global struct int initializer",
+        )),
     }
 }
 
@@ -162,36 +169,15 @@ fn lower_long_long(
         GlobalStructInitializerValue::Integer(value) => {
             Ok(LoweredStructInitializerScalar::LongLong(*value))
         }
-        GlobalStructInitializerValue::String(_) | GlobalStructInitializerValue::Address(_) => Err(
-            CompileError::new("unsupported global struct long long initializer"),
-        ),
+        GlobalStructInitializerValue::Nested(values) if values.len() == 1 => {
+            lower_long_long(&values[0])
+        }
+        GlobalStructInitializerValue::String(_)
+        | GlobalStructInitializerValue::Address(_)
+        | GlobalStructInitializerValue::Nested(_) => Err(CompileError::new(
+            "unsupported global struct long long initializer",
+        )),
     }
-}
-
-fn lower_array_field(
-    value: &GlobalStructInitializerValue,
-    element_size: usize,
-    length: usize,
-) -> CompileResult<LoweredStructInitializerScalar> {
-    let GlobalStructInitializerValue::String(value) = value else {
-        return Err(CompileError::new(
-            "unsupported global struct array field initializer",
-        ));
-    };
-    let byte_len = length
-        .checked_mul(element_size)
-        .ok_or_else(|| CompileError::new("global struct array field size overflow"))?;
-    let mut values = value.as_bytes().to_vec();
-    if values.len() < byte_len {
-        values.push(0);
-    }
-    if values.len() > byte_len {
-        return Err(CompileError::new(
-            "global struct string initializer exceeds field size",
-        ));
-    }
-    values.resize(byte_len, 0);
-    Ok(LoweredStructInitializerScalar::Bytes { values, byte_len })
 }
 
 fn lower_pointer(
@@ -209,6 +195,12 @@ fn lower_pointer(
         GlobalStructInitializerValue::Address(address) => {
             lower_pointer_address(address, global_bindings)
         }
+        GlobalStructInitializerValue::Nested(values) if values.len() == 1 => {
+            lower_pointer(&values[0], global_bindings)
+        }
+        GlobalStructInitializerValue::Nested(_) => Err(CompileError::new(
+            "unsupported global struct pointer initializer",
+        )),
     }
 }
 

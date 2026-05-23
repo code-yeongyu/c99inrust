@@ -33,6 +33,7 @@ mod global_string_initializers;
 mod global_string_pointer_arrays;
 mod global_struct_arrays;
 mod global_struct_initializer;
+mod global_struct_initializer_addresses;
 mod global_struct_object;
 mod initializer_number;
 mod integer_initializer;

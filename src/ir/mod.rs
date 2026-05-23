@@ -62,6 +62,7 @@ mod sizeof_expr;
 mod static_local;
 mod static_local_pointer;
 mod static_member_addresses;
+mod static_pointer_address_values;
 mod struct_compound_assignment;
 mod struct_initializer;
 mod types;

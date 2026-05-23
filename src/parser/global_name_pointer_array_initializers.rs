@@ -184,6 +184,7 @@ fn pointer_address(base: &str, index: i64) -> CompileResult<GlobalPointerAddress
         index: usize::try_from(index)
             .map_err(|_| CompileError::new("global pointer-array offset must be nonnegative"))?,
         fields: Vec::new(),
+        element_index: None,
     })
 }
 

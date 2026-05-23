@@ -34,6 +34,7 @@ pub struct GlobalPointerAddress {
     pub base: String,
     pub index: usize,
     pub fields: Vec<String>,
+    pub element_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +149,7 @@ pub enum GlobalStructInitializerValue {
     Integer(i64),
     String(String),
     Address(GlobalStructInitializerAddress),
+    Nested(Vec<Self>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

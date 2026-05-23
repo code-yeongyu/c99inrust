@@ -35,15 +35,17 @@ fn member_lvalue_address(
     target: &LValue,
     constants: &[Constant],
 ) -> CompileResult<Option<GlobalPointerAddress>> {
-    let LValue::Member {
-        base,
-        field,
-        dereference: false,
-    } = target
-    else {
-        return Ok(None);
-    };
-    member_expr_address(base, field, constants)
+    match target {
+        LValue::Member {
+            base,
+            field,
+            dereference: false,
+        } => member_expr_address(base, field, constants),
+        LValue::Subscript { array, index } => member_subscript_address(array, index, constants),
+        LValue::Identifier(_) | LValue::ScalarCompoundLiteral { .. } | LValue::Member { .. } => {
+            Ok(None)
+        }
+    }
 }
 
 fn member_expr_address(
@@ -67,6 +69,7 @@ fn base_expr_address(
             base: base.clone(),
             index: 0,
             fields: Vec::new(),
+            element_index: None,
         })),
         Expr::Subscript { array, index } => {
             let Expr::Identifier(base) = array.as_ref() else {
@@ -76,6 +79,7 @@ fn base_expr_address(
                 base: base.clone(),
                 index: member_index(index, constants)?,
                 fields: Vec::new(),
+                element_index: None,
             }))
         }
         Expr::Member {
@@ -85,6 +89,26 @@ fn base_expr_address(
         } => member_expr_address(base, field, constants),
         _ => Ok(None),
     }
+}
+
+fn member_subscript_address(
+    array: &Expr,
+    index: &Expr,
+    constants: &[Constant],
+) -> CompileResult<Option<GlobalPointerAddress>> {
+    let Expr::Member {
+        base,
+        field,
+        dereference: false,
+    } = array
+    else {
+        return Ok(None);
+    };
+    let Some(mut address) = member_expr_address(base, field, constants)? else {
+        return Ok(None);
+    };
+    address.element_index = Some(member_index(index, constants)?);
+    Ok(Some(address))
 }
 
 fn member_index(index: &Expr, constants: &[Constant]) -> CompileResult<usize> {
