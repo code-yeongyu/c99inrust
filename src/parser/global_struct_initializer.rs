@@ -1,14 +1,11 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
-use super::global_struct_initializer_addresses::{
-    address_from_lvalue, address_from_subscript, constant_value,
-};
+use super::global_struct_initializer_addresses::address_from_expr;
 use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
-    Constant, Expr, GlobalStructInitializerAddress, GlobalStructInitializerValue, Parser,
-    StructLayout, eval_integer_initializer_expr_with_constants, struct_field_designator,
-    struct_field_index,
+    Constant, Expr, GlobalStructInitializerValue, Parser, StructLayout,
+    eval_integer_initializer_expr_with_constants, struct_field_designator, struct_field_index,
 };
 
 pub(super) fn parse(
@@ -194,26 +191,14 @@ fn value_from_expr(
     constants: &[Constant],
 ) -> CompileResult<GlobalStructInitializerValue> {
     match expr {
-        Expr::Cast { expr, .. } => value_from_expr(expr, constants),
         Expr::StringLiteral(value) => Ok(GlobalStructInitializerValue::String(value.clone())),
-        Expr::AddressOf { target } => {
-            address_from_lvalue(target, constants).map(GlobalStructInitializerValue::Address)
-        }
-        Expr::Identifier(name) => constant_value(name, constants).map_or_else(
+        _ => address_from_expr(expr, constants)?.map_or_else(
             || {
-                Ok(GlobalStructInitializerValue::Address(
-                    GlobalStructInitializerAddress {
-                        base: name.clone(),
-                        index: None,
-                    },
-                ))
+                eval_integer_initializer_expr_with_constants(expr, constants)
+                    .and_then(super::InitializerNumber::to_i64_trunc)
+                    .map(GlobalStructInitializerValue::Integer)
             },
-            |value| Ok(GlobalStructInitializerValue::Integer(value)),
+            |address| Ok(GlobalStructInitializerValue::Address(address)),
         ),
-        Expr::Subscript { array, index } => address_from_subscript(array, index, constants)
-            .map(GlobalStructInitializerValue::Address),
-        _ => eval_integer_initializer_expr_with_constants(expr, constants)
-            .and_then(super::InitializerNumber::to_i64_trunc)
-            .map(GlobalStructInitializerValue::Integer),
     }
 }

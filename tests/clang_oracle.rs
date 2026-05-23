@@ -82,6 +82,8 @@ mod deep_c99_static_member_array_pointers;
 mod deep_c99_static_member_pointers;
 #[path = "clang_oracle/deep_c99_static_storage_more.rs"]
 mod deep_c99_static_storage_more;
+#[path = "clang_oracle/deep_c99_struct_pointer_field_offsets.rs"]
+mod deep_c99_struct_pointer_field_offsets;
 #[path = "clang_oracle/deep_c99_variadic_bodies.rs"]
 mod deep_c99_variadic_bodies;
 #[path = "clang_oracle/deep_c99_vla.rs"]
