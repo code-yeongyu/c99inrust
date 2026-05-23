@@ -5,6 +5,12 @@ use crate::parser::{BinaryOp, Expr, LValue, ScalarType};
 
 use super::{LoweredGlobalInitializer, pointer_arithmetic, scalar_size, static_local};
 
+#[derive(Clone, Copy)]
+struct AddressConstant<'a> {
+    base: &'a str,
+    index: i64,
+}
+
 pub(in crate::ir) fn initializer(
     initializer_expr: Option<&Expr>,
     constants: &HashMap<String, i64>,
@@ -17,31 +23,11 @@ pub(in crate::ir) fn initializer(
         Expr::Integer(0) | Expr::LongInteger(0) => Ok(LoweredGlobalInitializer::PointerNull),
         Expr::Identifier(name) => identifier_initializer(name, constants),
         Expr::StringLiteral(value) => Ok(LoweredGlobalInitializer::PointerString(value.clone())),
-        Expr::AddressOf {
-            target: LValue::Identifier(name),
-        } => Ok(global_offset(name, 0, None)?),
-        Expr::AddressOf {
-            target: LValue::Subscript { array, index },
-        } => {
-            if let Some(initializer) = subscript_initializer(array, index, constants, referent)? {
-                return Ok(initializer);
-            }
-            Err(pointer_error())
-        }
         Expr::Cast { expr, .. } => initializer(Some(expr), constants, referent),
-        Expr::Binary {
-            op: BinaryOp::Add,
-            left,
-            right,
-        } => decay_initializer(left, right, constants, referent)
-            .and_then(|value| {
-                value.map_or_else(
-                    || decay_initializer(right, left, constants, referent),
-                    |initializer| Ok(Some(initializer)),
-                )
-            })?
-            .ok_or_else(pointer_error),
         _ => {
+            if let Some(address) = address_constant(expr, constants)? {
+                return global_offset(address.base, address.index, referent);
+            }
             let value = static_local::eval_with_constants(expr, constants)?;
             if value == 0 {
                 return Ok(LoweredGlobalInitializer::PointerNull);
@@ -64,44 +50,97 @@ fn identifier_initializer(
     global_offset(name, 0, None)
 }
 
-fn subscript_initializer(
-    array: &Expr,
+fn address_constant<'a>(
+    expr: &'a Expr,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<Option<AddressConstant<'a>>> {
+    match expr {
+        Expr::Identifier(name) if !constants.contains_key(name) => Ok(Some(AddressConstant {
+            base: name,
+            index: 0,
+        })),
+        Expr::AddressOf {
+            target: LValue::Identifier(name),
+        } => Ok(Some(AddressConstant {
+            base: name,
+            index: 0,
+        })),
+        Expr::AddressOf {
+            target: LValue::Subscript { array, index },
+        } => subscript_address_constant(array, index, constants),
+        Expr::Cast { expr, .. } => address_constant(expr, constants),
+        Expr::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+        } => add_address_constant(left, right, constants).and_then(|address| {
+            address.map_or_else(
+                || add_address_constant(right, left, constants),
+                |address| Ok(Some(address)),
+            )
+        }),
+        Expr::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+        } => subtract_address_constant(left, right, constants),
+        _ => Ok(None),
+    }
+}
+
+fn subscript_address_constant<'a>(
+    array: &'a Expr,
     index: &Expr,
     constants: &HashMap<String, i64>,
-    referent: Option<&str>,
-) -> CompileResult<Option<LoweredGlobalInitializer>> {
+) -> CompileResult<Option<AddressConstant<'a>>> {
     let Expr::Identifier(base) = array else {
         return Ok(None);
     };
     if constants.contains_key(base) {
         return Ok(None);
     }
-    global_offset(
+    Ok(Some(AddressConstant {
         base,
-        static_local::eval_with_constants(index, constants)?,
-        referent,
-    )
-    .map(Some)
+        index: static_local::eval_with_constants(index, constants)?,
+    }))
 }
 
-fn decay_initializer(
-    base: &Expr,
+fn add_address_constant<'a>(
+    base: &'a Expr,
     index: &Expr,
     constants: &HashMap<String, i64>,
-    referent: Option<&str>,
-) -> CompileResult<Option<LoweredGlobalInitializer>> {
-    let Expr::Identifier(base) = base else {
-        return Ok(None);
-    };
-    if constants.contains_key(base) {
-        return Ok(None);
-    }
-    global_offset(
-        base,
-        static_local::eval_with_constants(index, constants)?,
-        referent,
-    )
-    .map(Some)
+) -> CompileResult<Option<AddressConstant<'a>>> {
+    address_constant(base, constants)?
+        .map(|address| {
+            offset_address(
+                address,
+                static_local::eval_with_constants(index, constants)?,
+            )
+        })
+        .transpose()
+}
+
+fn subtract_address_constant<'a>(
+    base: &'a Expr,
+    index: &Expr,
+    constants: &HashMap<String, i64>,
+) -> CompileResult<Option<AddressConstant<'a>>> {
+    let offset = static_local::eval_with_constants(index, constants)?
+        .checked_neg()
+        .ok_or_else(|| CompileError::new("static local pointer offset overflow"))?;
+    address_constant(base, constants)?
+        .map(|address| offset_address(address, offset))
+        .transpose()
+}
+
+fn offset_address(address: AddressConstant<'_>, offset: i64) -> CompileResult<AddressConstant<'_>> {
+    Ok(AddressConstant {
+        base: address.base,
+        index: address
+            .index
+            .checked_add(offset)
+            .ok_or_else(|| CompileError::new("static local pointer offset overflow"))?,
+    })
 }
 
 fn global_offset(

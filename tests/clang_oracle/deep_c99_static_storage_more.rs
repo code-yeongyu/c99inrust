@@ -93,3 +93,33 @@ fn static_local_char_pointer_decay_offset_initializer_matches_host_stdout_and_ex
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn static_local_pointer_decay_subtract_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_pointer_decay_subtract_initializer";
+    let source = "int puts(char*); int values[4] = { 2, 4, 6, 8 }; int main(void) { static int *p = values + 2 - 1; puts(\"static-pointer-subtract\"); return p[0] == 4 && p[1] == 6 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_pointer_commuted_decay_subtract_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_pointer_commuted_decay_subtract_initializer";
+    let source = "int puts(char*); int values[4] = { 2, 4, 6, 8 }; int main(void) { static int *p = 3 + values - 1; puts(\"static-pointer-commuted-subtract\"); return p[0] == 6 && p[-1] == 4 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_subscript_address_subtract_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_subscript_address_subtract_initializer";
+    let source = "int puts(char*); int values[4] = { 2, 4, 6, 8 }; int main(void) { static int *p = &values[3] - 1; puts(\"static-subscript-subtract\"); return p[0] == 6 && p[1] == 8 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
