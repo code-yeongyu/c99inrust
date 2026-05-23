@@ -22,7 +22,7 @@ pub(super) fn parse_global_pointer_array(
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
-    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+    let Some(open_bracket) = declarator_open_bracket(declaration) else {
         return Ok(None);
     };
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
@@ -89,7 +89,7 @@ pub(super) fn parse_global_pointer_string_array(tokens: &[Token]) -> CompileResu
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
-    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+    let Some(open_bracket) = declarator_open_bracket(declaration) else {
         return Ok(None);
     };
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
@@ -131,7 +131,7 @@ pub(super) fn parse_global_pointer_name_array(
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
-    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+    let Some(open_bracket) = declarator_open_bracket(declaration) else {
         return Ok(None);
     };
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
@@ -191,7 +191,7 @@ pub(super) fn parse_global_extern_pointer_array(
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
     };
-    let Some(open_bracket) = top_level_punctuator_index(declaration, "[") else {
+    let Some(open_bracket) = declarator_open_bracket(declaration) else {
         return Ok(None);
     };
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
@@ -240,4 +240,9 @@ pub(super) fn parse_global_extern_pointer_array(
         name,
         GlobalInitializer::ExternPointerArray { referent, columns },
     )))
+}
+
+fn declarator_open_bracket(declaration: &[Token]) -> Option<usize> {
+    let end = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
+    top_level_punctuator_index(&declaration[..end], "[")
 }

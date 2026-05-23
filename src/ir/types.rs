@@ -25,7 +25,7 @@ pub enum LoweredGlobalInitializer {
     IntArray(Vec<i32>),
     ShortArray(Vec<i32>),
     PointerNull,
-    PointerString(String),
+    PointerString(String, usize),
     PointerGlobalOffset {
         base: String,
         byte_offset: usize,

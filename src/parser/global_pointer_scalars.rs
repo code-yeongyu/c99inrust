@@ -2,7 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::global_specifiers::global_specifiers_are_pointer;
-use super::global_string_initializers::parse_string_initializer;
+use super::global_string_initializers::parse_string_pointer_initializer;
 use super::integer_initializer::{
     parse_integer_initializer, parse_integer_initializer_with_constants,
 };
@@ -36,10 +36,16 @@ pub(super) fn parse_global_pointer(
     let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
     if end_index != declaration.len() {
         let initializer = &declaration[end_index + 1..];
-        if let Ok(value) = parse_string_initializer(initializer) {
+        if let Some((value, byte_offset)) =
+            parse_string_pointer_initializer(initializer, constants)?
+        {
             return Ok(Some(Global::new(
                 name,
-                GlobalInitializer::PointerString { referent, value },
+                GlobalInitializer::PointerString {
+                    referent,
+                    value,
+                    byte_offset,
+                },
             )));
         }
         if let Some((base, index)) =

@@ -1,6 +1,6 @@
 use super::{
-    GlobalBinding, LoweredGlobalInitializer, lower_scalar_global_initializer, pointer_arithmetic,
-    scalar_size, struct_initializer,
+    GlobalBinding, LoweredGlobalInitializer, global_pointer_initializers,
+    lower_scalar_global_initializer, scalar_size, struct_initializer,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Global, GlobalInitializer, ScalarType, StructLayout};
@@ -21,7 +21,9 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     if let Some(lowered) = lower_scalar_global_initializer(global, constants)? {
         return Ok(lowered);
     }
-    if let Some(lowered) = lower_pointer_scalar_global_initializer(&global.initializer)? {
+    if let Some(lowered) =
+        global_pointer_initializers::lower_pointer_scalar_global_initializer(&global.initializer)?
+    {
         return Ok(lowered);
     }
     match &global.initializer {
@@ -98,44 +100,6 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
-}
-
-fn lower_pointer_scalar_global_initializer(
-    initializer: &GlobalInitializer,
-) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
-    let lowered = match initializer {
-        GlobalInitializer::PointerNull { referent } => (
-            LoweredGlobalInitializer::PointerNull,
-            GlobalBinding::Pointer {
-                referent: referent.clone(),
-            },
-        ),
-        GlobalInitializer::PointerString { referent, value } => (
-            LoweredGlobalInitializer::PointerString(value.clone()),
-            GlobalBinding::Pointer {
-                referent: referent.clone(),
-            },
-        ),
-        GlobalInitializer::PointerName { referent, value } => (
-            LoweredGlobalInitializer::PointerGlobalOffset {
-                base: value.clone(),
-                byte_offset: 0,
-            },
-            GlobalBinding::Pointer {
-                referent: referent.clone(),
-            },
-        ),
-        GlobalInitializer::PointerSubscriptAddress {
-            referent,
-            base,
-            index,
-        } => {
-            return lower_global_pointer_subscript_address(referent.as_deref(), base, *index)
-                .map(Some);
-        }
-        _ => return Ok(None),
-    };
-    Ok(Some(lowered))
 }
 
 fn lower_unsigned_char_global_initializer(
@@ -227,26 +191,4 @@ pub(in crate::ir) fn lower_pointer_array_initializer(
         ))),
         _ => None,
     }
-}
-
-pub(in crate::ir) fn lower_global_pointer_subscript_address(
-    referent: Option<&str>,
-    base: &str,
-    index: usize,
-) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
-    let stride = referent
-        .and_then(pointer_arithmetic::byte_size)
-        .unwrap_or_else(|| scalar_size(ScalarType::Int));
-    let byte_offset = index
-        .checked_mul(stride)
-        .ok_or_else(|| CompileError::new("global pointer offset overflow"))?;
-    Ok((
-        LoweredGlobalInitializer::PointerGlobalOffset {
-            base: base.to_owned(),
-            byte_offset,
-        },
-        GlobalBinding::Pointer {
-            referent: referent.map(ToOwned::to_owned),
-        },
-    ))
 }

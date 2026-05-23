@@ -41,6 +41,7 @@ mod function_lowering;
 mod global_bindings;
 mod global_initializers;
 mod global_lowering;
+mod global_pointer_initializers;
 mod local_array;
 mod local_initializer_values;
 mod local_scalar_conversion;

@@ -73,8 +73,8 @@ pub(in crate::codegen) fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 assembly.push_str("\t.quad 0\n");
             }
-            LoweredGlobalInitializer::PointerString(value) => {
-                emit_pointer_string_global(&global.name, value, target, assembly)?;
+            LoweredGlobalInitializer::PointerString(value, byte_offset) => {
+                emit_pointer_string_global(&global.name, value, *byte_offset, target, assembly)?;
             }
             LoweredGlobalInitializer::PointerGlobalOffset { base, byte_offset } => {
                 emit_pointer_global_offset(&global.name, base, *byte_offset, target, assembly)?;
@@ -113,6 +113,7 @@ pub(in crate::codegen) fn emit_globals(
 pub(in crate::codegen) fn emit_pointer_string_global(
     name: &str,
     value: &str,
+    byte_offset: usize,
     target: Target,
     assembly: &mut String,
 ) -> CompileResult<()> {
@@ -120,7 +121,11 @@ pub(in crate::codegen) fn emit_pointer_string_global(
     let label = label_name(name, target);
     assembly.push_str(".p2align 3\n");
     write_assembly!(assembly, "{label}:\n")?;
-    write_assembly!(assembly, "\t.quad {string_label}\n")?;
+    if byte_offset == 0 {
+        write_assembly!(assembly, "\t.quad {string_label}\n")?;
+    } else {
+        write_assembly!(assembly, "\t.quad {string_label}+{byte_offset}\n")?;
+    }
     emit_string_literal_data_returning_to(&string_label, value, target, ".data\n", assembly)
 }
 

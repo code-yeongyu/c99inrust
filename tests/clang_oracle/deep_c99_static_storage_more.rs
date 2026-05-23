@@ -55,6 +55,46 @@ fn static_local_string_pointer_initializer_matches_host_stdout_and_exit_code() {
 }
 
 #[test]
+fn static_local_string_pointer_offset_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_string_pointer_offset_initializer";
+    let source = "int puts(char*); int main(void) { static char *text = \"doom\" + 2; puts(\"static-string-offset\"); return text[0] == 'o' && text[1] == 'm' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn static_local_string_subscript_address_subtract_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "static_local_string_subscript_address_subtract_initializer";
+    let source = "int puts(char*); int main(void) { static char *text = &\"doom\"[3] - 1; puts(\"static-string-subscript-subtract\"); return text[0] == 'o' && text[1] == 'm' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn global_string_pointer_offset_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "global_string_pointer_offset_initializer";
+    let source = "int puts(char*); char *text = \"doom\" + 1; int main(void) { puts(\"global-string-offset\"); return text[0] == 'o' && text[2] == 'm' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn global_string_subscript_address_subtract_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let name = "global_string_subscript_address_subtract_initializer";
+    let source = "int puts(char*); char *text = &\"doom\"[3] - 1; int main(void) { puts(\"global-string-subscript-subtract\"); return text[0] == 'o' && text[1] == 'm' ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
 fn static_local_function_pointer_initializer_persists_matches_host_stdout_and_exit_code() {
     // given
     let name = "static_local_function_pointer_initializer_persists";

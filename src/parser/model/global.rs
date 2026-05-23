@@ -85,6 +85,7 @@ pub enum GlobalInitializer {
     PointerString {
         referent: Option<String>,
         value: String,
+        byte_offset: usize,
     },
     PointerName {
         referent: Option<String>,
