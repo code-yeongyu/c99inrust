@@ -49,6 +49,7 @@ mod local_struct_initializer;
 mod local_struct_initializer_array;
 mod local_struct_initializer_struct_array;
 mod lowered_expr_helpers;
+mod lowered_globals;
 mod pointer_arithmetic;
 mod pointer_referent;
 mod program_lowering;
@@ -64,10 +65,13 @@ mod types;
 
 pub use const_eval::const_eval;
 pub use function_lowering::lower_function;
+pub use lowered_globals::{
+    LoweredGlobal, LoweredGlobalInitializer, LoweredStructInitializerScalar,
+    LoweredStructInitializerValue,
+};
 pub use program_lowering::lower;
 pub use types::{
-    Instruction, LocalSlot, LoweredExpr, LoweredFunction, LoweredGlobal, LoweredGlobalInitializer,
-    LoweredLValue, LoweredProgram, LoweredStructInitializerScalar, LoweredStructInitializerValue,
+    Instruction, LocalSlot, LoweredExpr, LoweredFunction, LoweredLValue, LoweredProgram,
 };
 
 pub(in crate::ir) use bindings::{

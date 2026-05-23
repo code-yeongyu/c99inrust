@@ -6,9 +6,8 @@ use super::global_byte_declarations::parse_global_unsigned_char_array;
 use super::global_double_declarations::parse_global_double_array;
 use super::global_floatlike_declarations::parse_global_floatlike_scalar;
 use super::global_int_arrays::parse_global_int_array;
-use super::global_pointer_arrays::{
-    parse_global_extern_pointer_array, parse_global_pointer_array, parse_global_pointer_name_array,
-};
+use super::global_pointer_arrays::{parse_global_extern_pointer_array, parse_global_pointer_array};
+use super::global_pointer_name_arrays::parse_global_pointer_name_array;
 use super::global_pointer_scalars::parse_global_pointer;
 use super::global_pointer_string_arrays::parse_global_pointer_string_array;
 use super::global_scalar_declarations::{

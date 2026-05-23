@@ -5,7 +5,6 @@ use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::global_specifiers::{
     global_specifiers_are_extern_pointer, global_specifiers_are_pointer,
 };
-use super::global_string_initializers::parse_identifier_array_initializer;
 use super::pointer_referent_from_specifiers;
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
@@ -79,66 +78,6 @@ pub(super) fn parse_global_pointer_array(
             referent,
             length,
             columns,
-        },
-    )))
-}
-
-pub(super) fn parse_global_pointer_name_array(
-    tokens: &[Token],
-    constants: &[Constant],
-) -> CompileResult<Option<Global>> {
-    let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
-        return Ok(None);
-    };
-    let Some(open_bracket) = declarator_open_bracket(declaration) else {
-        return Ok(None);
-    };
-    let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
-        return Ok(None);
-    };
-    if !global_specifiers_are_pointer(&declaration[..name_index]) {
-        return Ok(None);
-    }
-    let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
-        return Err(
-            CompileError::new("unterminated global pointer-array declarator").at(
-                declaration[open_bracket].line,
-                declaration[open_bracket].column,
-            ),
-        );
-    };
-    let Some(assign_index) = top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
-    else {
-        return Ok(None);
-    };
-    let assign_index = close_bracket + 1 + assign_index;
-    let Ok(values) = parse_identifier_array_initializer(&declaration[assign_index + 1..]) else {
-        return Ok(None);
-    };
-    let explicit_length = if open_bracket + 1 == close_bracket {
-        None
-    } else {
-        Some(parse_unsigned_char_array_length(
-            &declaration[open_bracket + 1..close_bracket],
-            constants,
-        )?)
-    };
-    let length = explicit_length.unwrap_or(values.len());
-    if values.len() > length {
-        return Err(CompileError::new(
-            "too many global pointer-array name initializers",
-        ));
-    }
-    let name = token_identifier(&declaration[name_index])
-        .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
-        .to_owned();
-    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
-    Ok(Some(Global::new(
-        name,
-        GlobalInitializer::PointerNameArray {
-            referent,
-            values,
-            length,
         },
     )))
 }

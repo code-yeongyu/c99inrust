@@ -33,3 +33,23 @@ fn global_string_pointer_array_explicit_length_zero_fills_tail() {
     // when/then
     assert_case(name, source);
 }
+
+#[test]
+fn global_name_pointer_array_offsets_match_host_stdout_and_exit_code() {
+    // given
+    let name = "global_name_pointer_array_offsets";
+    let source = "int puts(char*); int values[5] = { 1, 2, 3, 4, 5 }; int *items[] = { values + 2, &values[4] - 1, 0 }; int main(void) { puts(\"global-name-array-offsets\"); return *items[0] == 3 && items[1][0] == 4 && items[2] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}
+
+#[test]
+fn global_name_pointer_array_commuted_offsets_zero_fill_tail() {
+    // given
+    let name = "global_name_pointer_array_commuted_offsets_zero_fill_tail";
+    let source = "int puts(char*); int values[5] = { 1, 2, 3, 4, 5 }; int *items[4] = { 3 + values, &values[2], 0 }; int main(void) { puts(\"global-name-array-fill\"); return sizeof(items) == 32 && *items[0] == 4 && *items[1] == 3 && items[2] == 0 && items[3] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(name, source);
+}

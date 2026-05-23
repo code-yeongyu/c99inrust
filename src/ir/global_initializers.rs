@@ -1,6 +1,6 @@
 use super::{
     GlobalBinding, LoweredGlobalInitializer, global_pointer_initializers,
-    lower_scalar_global_initializer, scalar_size, struct_initializer,
+    lower_scalar_global_initializer, pointer_arithmetic, scalar_size, struct_initializer,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Global, GlobalInitializer, ScalarType, StructLayout};
@@ -185,17 +185,44 @@ pub(in crate::ir) fn lower_pointer_array_initializer(
             referent,
             values,
             length,
-        } => Some(Ok((
-            LoweredGlobalInitializer::PointerNameArray {
-                values: values.clone(),
-                length: *length,
-            },
-            GlobalBinding::PointerArray {
-                referent: referent.clone(),
-                length: Some(*length),
-                columns: None,
-            },
-        ))),
+        } => Some(
+            lower_pointer_name_array_values(referent.as_deref(), values).map(|values| {
+                (
+                    LoweredGlobalInitializer::PointerNameArray {
+                        values,
+                        length: *length,
+                    },
+                    GlobalBinding::PointerArray {
+                        referent: referent.clone(),
+                        length: Some(*length),
+                        columns: None,
+                    },
+                )
+            }),
+        ),
         _ => None,
     }
+}
+
+fn lower_pointer_name_array_values(
+    referent: Option<&str>,
+    values: &[Option<(String, usize)>],
+) -> CompileResult<Vec<Option<(String, usize)>>> {
+    let stride = referent
+        .and_then(pointer_arithmetic::byte_size)
+        .unwrap_or_else(|| scalar_size(ScalarType::Int));
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_ref()
+                .map(|(base, index)| {
+                    index
+                        .checked_mul(stride)
+                        .map(|byte_offset| (base.clone(), byte_offset))
+                        .ok_or_else(|| CompileError::new("global pointer-array offset overflow"))
+                })
+                .transpose()
+        })
+        .collect()
 }

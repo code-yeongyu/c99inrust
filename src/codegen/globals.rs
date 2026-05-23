@@ -1,7 +1,9 @@
 use super::data_literals::{
     emit_string_literal_data_returning_to, global_string_label, label_name,
 };
-use super::global_pointer_arrays::emit_pointer_string_array_global;
+use super::global_pointer_arrays::{
+    emit_pointer_name_array_global, emit_pointer_string_array_global,
+};
 use super::global_real_scalars::{emit_double_global, emit_real_then_zero_global};
 use super::struct_globals;
 use super::target::Target;
@@ -146,26 +148,6 @@ pub(in crate::codegen) fn emit_pointer_global_offset(
     } else {
         write_assembly!(assembly, "\t.quad {base_label}+{byte_offset}\n")
     }
-}
-
-pub(in crate::codegen) fn emit_pointer_name_array_global(
-    name: &str,
-    values: &[String],
-    length: usize,
-    target: Target,
-    assembly: &mut String,
-) -> CompileResult<()> {
-    let label = label_name(name, target);
-    assembly.push_str(".p2align 3\n");
-    write_assembly!(assembly, "{label}:\n")?;
-    for value in values {
-        let value_label = label_name(value, target);
-        write_assembly!(assembly, "\t.quad {value_label}\n")?;
-    }
-    for _index in values.len()..length {
-        assembly.push_str("\t.quad 0\n");
-    }
-    Ok(())
 }
 
 pub(in crate::codegen) fn emit_int_values(
