@@ -103,7 +103,8 @@ pub enum GlobalInitializer {
     },
     PointerStringArray {
         referent: Option<String>,
-        values: Vec<String>,
+        values: Vec<Option<(String, usize)>>,
+        length: usize,
     },
     PointerNameArray {
         referent: Option<String>,

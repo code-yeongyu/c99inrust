@@ -166,11 +166,18 @@ pub(in crate::ir) fn lower_pointer_array_initializer(
                 columns: *columns,
             },
         ))),
-        GlobalInitializer::PointerStringArray { referent, values } => Some(Ok((
-            LoweredGlobalInitializer::PointerStringArray(values.clone()),
+        GlobalInitializer::PointerStringArray {
+            referent,
+            values,
+            length,
+        } => Some(Ok((
+            LoweredGlobalInitializer::PointerStringArray {
+                values: values.clone(),
+                length: *length,
+            },
             GlobalBinding::PointerArray {
                 referent: referent.clone(),
-                length: Some(values.len()),
+                length: Some(*length),
                 columns: None,
             },
         ))),

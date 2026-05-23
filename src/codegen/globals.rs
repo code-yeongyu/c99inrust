@@ -1,6 +1,7 @@
 use super::data_literals::{
     emit_string_literal_data_returning_to, global_string_label, label_name,
 };
+use super::global_pointer_arrays::emit_pointer_string_array_global;
 use super::global_real_scalars::{emit_double_global, emit_real_then_zero_global};
 use super::struct_globals;
 use super::target::Target;
@@ -87,8 +88,8 @@ pub(in crate::codegen) fn emit_globals(
                 write_assembly!(assembly, "{label}:\n")?;
                 write_assembly!(assembly, "\t.zero {byte_len}\n")?;
             }
-            LoweredGlobalInitializer::PointerStringArray(values) => {
-                emit_pointer_string_array_global(&global.name, values, target, assembly)?;
+            LoweredGlobalInitializer::PointerStringArray { values, length } => {
+                emit_pointer_string_array_global(&global.name, values, *length, target, assembly)?;
             }
             LoweredGlobalInitializer::PointerNameArray { values, length } => {
                 emit_pointer_name_array_global(&global.name, values, *length, target, assembly)?;
@@ -145,26 +146,6 @@ pub(in crate::codegen) fn emit_pointer_global_offset(
     } else {
         write_assembly!(assembly, "\t.quad {base_label}+{byte_offset}\n")
     }
-}
-
-pub(in crate::codegen) fn emit_pointer_string_array_global(
-    name: &str,
-    values: &[String],
-    target: Target,
-    assembly: &mut String,
-) -> CompileResult<()> {
-    let label = label_name(name, target);
-    assembly.push_str(".p2align 3\n");
-    write_assembly!(assembly, "{label}:\n")?;
-    for (index, _) in values.iter().enumerate() {
-        let string_label = global_string_label(name, index, target);
-        write_assembly!(assembly, "\t.quad {string_label}\n")?;
-    }
-    for (index, value) in values.iter().enumerate() {
-        let string_label = global_string_label(name, index, target);
-        emit_string_literal_data_returning_to(&string_label, value, target, ".data\n", assembly)?;
-    }
-    Ok(())
 }
 
 pub(in crate::codegen) fn emit_pointer_name_array_global(

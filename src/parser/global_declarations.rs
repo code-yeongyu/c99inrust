@@ -8,9 +8,9 @@ use super::global_floatlike_declarations::parse_global_floatlike_scalar;
 use super::global_int_arrays::parse_global_int_array;
 use super::global_pointer_arrays::{
     parse_global_extern_pointer_array, parse_global_pointer_array, parse_global_pointer_name_array,
-    parse_global_pointer_string_array,
 };
 use super::global_pointer_scalars::parse_global_pointer;
+use super::global_pointer_string_arrays::parse_global_pointer_string_array;
 use super::global_scalar_declarations::{
     parse_global_extern_scalar, parse_global_int, parse_global_int_declarator_list,
 };
@@ -44,7 +44,7 @@ pub(super) fn parse_supported_global_declaration(
     if let Some(global) = parse_global_unsigned_char_array(tokens, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer_string_array(tokens)? {
+    if let Some(global) = parse_global_pointer_string_array(tokens, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer_name_array(tokens, constants)? {

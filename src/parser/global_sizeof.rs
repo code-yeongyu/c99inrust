@@ -55,8 +55,7 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::PointerArray { length, .. } => length
             .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
             .ok_or_else(|| CompileError::new("global pointer array sizeof overflow"))?,
-        GlobalInitializer::PointerStringArray { values, .. } => values
-            .len()
+        GlobalInitializer::PointerStringArray { length, .. } => length
             .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
             .ok_or_else(|| CompileError::new("global pointer string array sizeof overflow"))?,
         GlobalInitializer::PointerNameArray { length, .. } => length

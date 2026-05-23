@@ -31,7 +31,10 @@ pub enum LoweredGlobalInitializer {
         byte_offset: usize,
     },
     PointerArray(usize),
-    PointerStringArray(Vec<String>),
+    PointerStringArray {
+        values: Vec<Option<(String, usize)>>,
+        length: usize,
+    },
     PointerNameArray {
         values: Vec<String>,
         length: usize,

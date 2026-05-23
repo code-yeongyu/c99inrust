@@ -46,6 +46,8 @@ mod deep_c99_local_struct_init;
 mod deep_c99_long_double;
 #[path = "clang_oracle/deep_c99_numeric_more.rs"]
 mod deep_c99_numeric_more;
+#[path = "clang_oracle/deep_c99_pointer_array_offsets.rs"]
+mod deep_c99_pointer_array_offsets;
 #[path = "clang_oracle/deep_c99_preprocessor_more.rs"]
 mod deep_c99_preprocessor_more;
 #[path = "clang_oracle/deep_c99_requested.rs"]
