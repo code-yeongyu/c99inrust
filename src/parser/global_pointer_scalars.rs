@@ -1,6 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::global_member_addresses::parse_global_member_address;
 use super::global_specifiers::global_specifiers_are_pointer;
 use super::global_string_initializers::parse_string_pointer_initializer;
 use super::integer_initializer::{
@@ -11,10 +12,11 @@ use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_punctuator_index,
 };
-use super::{Constant, Global, GlobalInitializer};
+use super::{Constant, Global, GlobalInitializer, StructLayout};
 
 pub(super) fn parse_global_pointer(
     tokens: &[Token],
+    known_structs: &[StructLayout],
     constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
@@ -69,6 +71,12 @@ pub(super) fn parse_global_pointer(
                     base,
                     index,
                 },
+            )));
+        }
+        if let Some(address) = parse_global_member_address(initializer, known_structs, constants)? {
+            return Ok(Some(Global::new(
+                name,
+                GlobalInitializer::PointerMemberAddress { referent, address },
             )));
         }
         let Ok(value) = parse_integer_initializer(initializer) else {

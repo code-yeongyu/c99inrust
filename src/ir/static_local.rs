@@ -1,23 +1,31 @@
 use std::collections::HashMap;
 
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{BinaryOp, Expr, ScalarType, UnaryOp};
+use crate::parser::{BinaryOp, Expr, ScalarType, StructLayout, UnaryOp};
 
-use super::{LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary, scalar_size};
+use super::{
+    GlobalBinding, LoweredGlobalInitializer, cast_const_value, const_eval, eval_binary, scalar_size,
+};
 
 pub(in crate::ir) fn scalar_initializer(
     scalar_type: ScalarType,
     referent: Option<&str>,
     initializer: Option<&Expr>,
     constants: &HashMap<String, i64>,
+    structs: &HashMap<String, StructLayout>,
+    global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<LoweredGlobalInitializer> {
     match scalar_type {
         ScalarType::Bool | ScalarType::Int | ScalarType::LongLong => {
             integer_scalar_initializer(scalar_type, initializer, constants)
         }
-        ScalarType::Pointer => {
-            super::static_local_pointer::initializer(initializer, constants, referent)
-        }
+        ScalarType::Pointer => super::static_local_pointer::initializer(
+            initializer,
+            constants,
+            referent,
+            structs,
+            global_bindings,
+        ),
         ScalarType::Double | ScalarType::LongDouble => {
             real_initializer(initializer, constants).map(LoweredGlobalInitializer::Double)
         }

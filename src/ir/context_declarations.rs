@@ -84,6 +84,8 @@ impl LoweringContext {
             referent.as_deref(),
             initializer,
             &self.constants,
+            &self.structs,
+            &self.global_bindings,
         )?;
         let global_name = self.declare_static_scalar(name, scalar_type, referent)?;
         self.static_globals.push(LoweredGlobal {

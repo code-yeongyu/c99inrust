@@ -3,7 +3,7 @@ mod scalar;
 mod structs;
 
 pub use global::{
-    Constant, Global, GlobalInitializer, GlobalStructInitializerAddress,
+    Constant, Global, GlobalInitializer, GlobalPointerAddress, GlobalStructInitializerAddress,
     GlobalStructInitializerValue, PointerReturnFunction,
 };
 pub use scalar::{ReturnType, ScalarFieldType, ScalarType};

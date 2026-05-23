@@ -2,16 +2,19 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Token, TokenKind};
 
 use super::Constant;
+use super::global_member_addresses::parse_global_member_address;
 use super::integer_initializer::parse_integer_initializer_with_constants;
 use super::token_scan::{
     matching_top_level_brace, matching_top_level_bracket, token_identifier, token_is_punctuator,
     top_level_punctuator_index,
 };
+use super::{GlobalPointerAddress, StructLayout};
 
 pub(super) fn parse_name_pointer_array_initializer(
     tokens: &[Token],
+    known_structs: &[StructLayout],
     constants: &[Constant],
-) -> CompileResult<Vec<Option<(String, usize)>>> {
+) -> CompileResult<Vec<Option<GlobalPointerAddress>>> {
     let Some(first) = tokens.first() else {
         return Err(CompileError::new(
             "expected global pointer-array initializer",
@@ -49,6 +52,7 @@ pub(super) fn parse_name_pointer_array_initializer(
         }
         values.push(parse_name_pointer_array_value(
             &item[..item_len],
+            known_structs,
             constants,
         )?);
         start += item_len;
@@ -61,25 +65,27 @@ pub(super) fn parse_name_pointer_array_initializer(
 
 fn parse_name_pointer_array_value(
     tokens: &[Token],
+    known_structs: &[StructLayout],
     constants: &[Constant],
-) -> CompileResult<Option<(String, usize)>> {
+) -> CompileResult<Option<GlobalPointerAddress>> {
     if is_null_pointer_initializer(tokens) {
         return Ok(None);
     }
-    let Some((base, index)) = parse_name_pointer_initializer(tokens, constants)? else {
+    if let Some(address) = parse_global_member_address(tokens, known_structs, constants)? {
+        return Ok(Some(address));
+    }
+    let Some(address) = parse_name_pointer_initializer(tokens, constants)? else {
         return Err(CompileError::new(
             "expected global pointer-array name initializer",
         ));
     };
-    usize::try_from(index)
-        .map(|index| Some((base, index)))
-        .map_err(|_| CompileError::new("global pointer-array offset must be nonnegative"))
+    Ok(Some(address))
 }
 
 fn parse_name_pointer_initializer(
     tokens: &[Token],
     constants: &[Constant],
-) -> CompileResult<Option<(String, i64)>> {
+) -> CompileResult<Option<GlobalPointerAddress>> {
     if let Some(value) = parse_subscript_address_initializer(tokens, constants)? {
         return Ok(Some(value));
     }
@@ -89,25 +95,25 @@ fn parse_name_pointer_initializer(
 fn parse_decay_initializer(
     tokens: &[Token],
     constants: &[Constant],
-) -> CompileResult<Option<(String, i64)>> {
+) -> CompileResult<Option<GlobalPointerAddress>> {
     if let Some(name) = single_identifier(tokens) {
-        return Ok(Some((name.to_owned(), 0)));
+        return Ok(Some(pointer_address(name, 0)?));
     }
     if let Some(index) = top_level_punctuator_index(tokens, "+") {
         if let Some(base) = single_identifier(&tokens[..index]) {
             let offset = parse_integer_initializer_with_constants(&tokens[index + 1..], constants)?;
-            return Ok(Some((base.to_owned(), offset)));
+            return Ok(Some(pointer_address(base, offset)?));
         }
         if let Some(base) = single_identifier(&tokens[index + 1..]) {
             let offset = parse_integer_initializer_with_constants(&tokens[..index], constants)?;
-            return Ok(Some((base.to_owned(), offset)));
+            return Ok(Some(pointer_address(base, offset)?));
         }
     }
     if let Some(index) = top_level_punctuator_index(tokens, "-")
         && let Some(base) = single_identifier(&tokens[..index])
     {
         let offset = parse_integer_initializer_with_constants(&tokens[index + 1..], constants)?;
-        return Ok(Some((base.to_owned(), -offset)));
+        return Ok(Some(pointer_address(base, -offset)?));
     }
     Ok(None)
 }
@@ -115,7 +121,7 @@ fn parse_decay_initializer(
 fn parse_subscript_address_initializer(
     tokens: &[Token],
     constants: &[Constant],
-) -> CompileResult<Option<(String, i64)>> {
+) -> CompileResult<Option<GlobalPointerAddress>> {
     if !tokens
         .first()
         .is_some_and(|token| token_is_punctuator(token, "&"))
@@ -139,7 +145,7 @@ fn parse_subscript_address_initializer(
     };
     let index = parse_integer_initializer_with_constants(&tokens[3..close_bracket], constants)?;
     let index = offset_subscript_index(index, &tokens[close_bracket + 1..], constants)?;
-    Ok(Some((base.to_owned(), index)))
+    Ok(Some(pointer_address(base, index)?))
 }
 
 fn offset_subscript_index(
@@ -170,6 +176,15 @@ fn single_identifier(tokens: &[Token]) -> Option<&str> {
         return None;
     };
     token_identifier(token)
+}
+
+fn pointer_address(base: &str, index: i64) -> CompileResult<GlobalPointerAddress> {
+    Ok(GlobalPointerAddress {
+        base: base.to_owned(),
+        index: usize::try_from(index)
+            .map_err(|_| CompileError::new("global pointer-array offset must be nonnegative"))?,
+        fields: Vec::new(),
+    })
 }
 
 fn is_null_pointer_initializer(tokens: &[Token]) -> bool {

@@ -34,7 +34,8 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
         | GlobalInitializer::PointerName { .. }
-        | GlobalInitializer::PointerSubscriptAddress { .. } => {
+        | GlobalInitializer::PointerSubscriptAddress { .. }
+        | GlobalInitializer::PointerMemberAddress { .. } => {
             scalar_size_for_layout(ScalarType::Pointer)
         }
         GlobalInitializer::IntArray(values) => values

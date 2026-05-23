@@ -9,10 +9,11 @@ use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier,
     top_level_punctuator_index,
 };
-use super::{Constant, Global, GlobalInitializer};
+use super::{Constant, Global, GlobalInitializer, StructLayout};
 
 pub(super) fn parse_global_pointer_name_array(
     tokens: &[Token],
+    known_structs: &[StructLayout],
     constants: &[Constant],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
@@ -40,9 +41,11 @@ pub(super) fn parse_global_pointer_name_array(
         return Ok(None);
     };
     let assign_index = close_bracket + 1 + assign_index;
-    let Ok(values) =
-        parse_name_pointer_array_initializer(&declaration[assign_index + 1..], constants)
-    else {
+    let Ok(values) = parse_name_pointer_array_initializer(
+        &declaration[assign_index + 1..],
+        known_structs,
+        constants,
+    ) else {
         return Ok(None);
     };
     let length = pointer_array_length(

@@ -1,9 +1,13 @@
-use super::{GlobalBinding, LoweredGlobalInitializer, pointer_arithmetic, scalar_size};
+use std::collections::HashMap;
+
+use super::{GlobalBinding, LoweredGlobalInitializer, global_address_offsets};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{GlobalInitializer, ScalarType};
+use crate::parser::{GlobalInitializer, StructLayout};
 
 pub(in crate::ir) fn lower_pointer_scalar_global_initializer(
     initializer: &GlobalInitializer,
+    structs: &HashMap<String, StructLayout>,
+    global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
     let lowered = match initializer {
         GlobalInitializer::PointerNull { referent } => (
@@ -35,7 +39,28 @@ pub(in crate::ir) fn lower_pointer_scalar_global_initializer(
             referent,
             base,
             index,
-        } => return lower_global_pointer_subscript_address(referent.as_deref(), base, *index),
+        } => {
+            return lower_global_pointer_subscript_address(
+                referent.as_deref(),
+                base,
+                *index,
+                structs,
+            );
+        }
+        GlobalInitializer::PointerMemberAddress { referent, address } => {
+            let (base, byte_offset) = global_address_offsets::resolve(
+                referent.as_deref(),
+                address,
+                structs,
+                global_bindings,
+            )?;
+            return Ok(Some((
+                LoweredGlobalInitializer::PointerGlobalOffset { base, byte_offset },
+                GlobalBinding::Pointer {
+                    referent: referent.clone(),
+                },
+            )));
+        }
         _ => return Ok(None),
     };
     Ok(Some(lowered))
@@ -45,10 +70,9 @@ fn lower_global_pointer_subscript_address(
     referent: Option<&str>,
     base: &str,
     index: usize,
+    structs: &HashMap<String, StructLayout>,
 ) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
-    let stride = referent
-        .and_then(pointer_arithmetic::byte_size)
-        .unwrap_or_else(|| scalar_size(ScalarType::Int));
+    let stride = global_address_offsets::pointer_referent_size(referent, structs);
     let byte_offset = index
         .checked_mul(stride)
         .ok_or_else(|| CompileError::new("global pointer offset overflow"))?;

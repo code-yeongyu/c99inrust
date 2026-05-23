@@ -1,6 +1,6 @@
 use super::{
-    GlobalBinding, LoweredGlobalInitializer, global_pointer_initializers,
-    lower_scalar_global_initializer, pointer_arithmetic, scalar_size, struct_initializer,
+    GlobalBinding, LoweredGlobalInitializer, global_pointer_arrays, global_pointer_initializers,
+    lower_scalar_global_initializer, scalar_size, struct_initializer,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Global, GlobalInitializer, ScalarType, StructLayout};
@@ -12,7 +12,11 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     structs: &HashMap<String, StructLayout>,
     global_bindings: &HashMap<String, GlobalBinding>,
 ) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
-    if let Some(lowered) = lower_pointer_array_initializer(&global.initializer) {
+    if let Some(lowered) = global_pointer_arrays::lower_pointer_array_initializer(
+        &global.initializer,
+        structs,
+        global_bindings,
+    ) {
         return lowered;
     }
     if let Some(lowered) = lower_unsigned_char_global_initializer(&global.initializer) {
@@ -21,9 +25,11 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     if let Some(lowered) = lower_scalar_global_initializer(global, constants)? {
         return Ok(lowered);
     }
-    if let Some(lowered) =
-        global_pointer_initializers::lower_pointer_scalar_global_initializer(&global.initializer)?
-    {
+    if let Some(lowered) = global_pointer_initializers::lower_pointer_scalar_global_initializer(
+        &global.initializer,
+        structs,
+        global_bindings,
+    )? {
         return Ok(lowered);
     }
     match &global.initializer {
@@ -53,7 +59,8 @@ pub(in crate::ir) fn lower_defined_global_initializer(
         GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }
         | GlobalInitializer::PointerName { .. }
-        | GlobalInitializer::PointerSubscriptAddress { .. } => Err(CompileError::new(
+        | GlobalInitializer::PointerSubscriptAddress { .. }
+        | GlobalInitializer::PointerMemberAddress { .. } => Err(CompileError::new(
             "internal error: pointer scalar global reached fallback lowering",
         )),
         GlobalInitializer::StructObject {
@@ -148,81 +155,4 @@ pub(in crate::ir) fn lower_short_array_global_initializer(
             columns: *columns,
         },
     ))
-}
-
-pub(in crate::ir) fn lower_pointer_array_initializer(
-    initializer: &GlobalInitializer,
-) -> Option<CompileResult<(LoweredGlobalInitializer, GlobalBinding)>> {
-    match initializer {
-        GlobalInitializer::PointerArray {
-            referent,
-            length,
-            columns,
-        } => Some(Ok((
-            LoweredGlobalInitializer::PointerArray(*length),
-            GlobalBinding::PointerArray {
-                referent: referent.clone(),
-                length: Some(*length),
-                columns: *columns,
-            },
-        ))),
-        GlobalInitializer::PointerStringArray {
-            referent,
-            values,
-            length,
-        } => Some(Ok((
-            LoweredGlobalInitializer::PointerStringArray {
-                values: values.clone(),
-                length: *length,
-            },
-            GlobalBinding::PointerArray {
-                referent: referent.clone(),
-                length: Some(*length),
-                columns: None,
-            },
-        ))),
-        GlobalInitializer::PointerNameArray {
-            referent,
-            values,
-            length,
-        } => Some(
-            lower_pointer_name_array_values(referent.as_deref(), values).map(|values| {
-                (
-                    LoweredGlobalInitializer::PointerNameArray {
-                        values,
-                        length: *length,
-                    },
-                    GlobalBinding::PointerArray {
-                        referent: referent.clone(),
-                        length: Some(*length),
-                        columns: None,
-                    },
-                )
-            }),
-        ),
-        _ => None,
-    }
-}
-
-fn lower_pointer_name_array_values(
-    referent: Option<&str>,
-    values: &[Option<(String, usize)>],
-) -> CompileResult<Vec<Option<(String, usize)>>> {
-    let stride = referent
-        .and_then(pointer_arithmetic::byte_size)
-        .unwrap_or_else(|| scalar_size(ScalarType::Int));
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_ref()
-                .map(|(base, index)| {
-                    index
-                        .checked_mul(stride)
-                        .map(|byte_offset| (base.clone(), byte_offset))
-                        .ok_or_else(|| CompileError::new("global pointer-array offset overflow"))
-                })
-                .transpose()
-        })
-        .collect()
 }

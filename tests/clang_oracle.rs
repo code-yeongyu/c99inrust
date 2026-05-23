@@ -74,6 +74,8 @@ mod deep_c99_requested_stress;
 mod deep_c99_requested_ultra;
 #[path = "clang_oracle/deep_c99_scalar_compound_more.rs"]
 mod deep_c99_scalar_compound_more;
+#[path = "clang_oracle/deep_c99_static_member_pointers.rs"]
+mod deep_c99_static_member_pointers;
 #[path = "clang_oracle/deep_c99_static_storage_more.rs"]
 mod deep_c99_static_storage_more;
 #[path = "clang_oracle/deep_c99_variadic_bodies.rs"]

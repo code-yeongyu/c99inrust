@@ -30,6 +30,13 @@ pub struct PointerReturnFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalPointerAddress {
+    pub base: String,
+    pub index: usize,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalInitializer {
     Extern(ScalarType),
     ExternPointer {
@@ -96,6 +103,10 @@ pub enum GlobalInitializer {
         base: String,
         index: usize,
     },
+    PointerMemberAddress {
+        referent: Option<String>,
+        address: GlobalPointerAddress,
+    },
     PointerArray {
         referent: Option<String>,
         length: usize,
@@ -108,7 +119,7 @@ pub enum GlobalInitializer {
     },
     PointerNameArray {
         referent: Option<String>,
-        values: Vec<Option<(String, usize)>>,
+        values: Vec<Option<GlobalPointerAddress>>,
         length: usize,
     },
     StructObject {

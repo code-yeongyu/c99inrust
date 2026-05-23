@@ -46,7 +46,7 @@ pub(super) fn parse_supported_global_declaration(
     if let Some(global) = parse_global_pointer_string_array(tokens, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer_name_array(tokens, constants)? {
+    if let Some(global) = parse_global_pointer_name_array(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer_array(tokens, constants)? {
@@ -77,7 +77,7 @@ pub(super) fn parse_supported_global_declaration(
     if let Some(global) = parse_global_extern_scalar(tokens, known_structs)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer(tokens, constants)? {
+    if let Some(global) = parse_global_pointer(tokens, known_structs, constants)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_floatlike_scalar(tokens, constants, sizeof_symbols)? {

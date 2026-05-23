@@ -19,6 +19,7 @@ mod global_double_declarations;
 mod global_floatlike_declarations;
 mod global_int_arrays;
 mod global_int_initializers;
+mod global_member_addresses;
 mod global_name_pointer_array_initializers;
 mod global_pointer_arrays;
 mod global_pointer_name_arrays;
@@ -111,9 +112,9 @@ use local_arrays::{
 };
 use local_scalar_initializer::local_scalar_initializer;
 pub use model::{
-    Constant, FieldType, Global, GlobalInitializer, GlobalStructInitializerAddress,
-    GlobalStructInitializerValue, PointerReturnFunction, ReturnType, ScalarFieldType, ScalarType,
-    StructField, StructLayout,
+    Constant, FieldType, Global, GlobalInitializer, GlobalPointerAddress,
+    GlobalStructInitializerAddress, GlobalStructInitializerValue, PointerReturnFunction,
+    ReturnType, ScalarFieldType, ScalarType, StructField, StructLayout,
 };
 use parser_designated_initializers::{struct_field_designator, struct_field_index, zero_expr};
 use parser_expression_helpers::{lvalue_from_expr, prefix_update_expr, statement_from_expression};
