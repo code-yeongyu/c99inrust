@@ -2,7 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::{
-    Constant, Expr, GlobalPointerAddress, LValue, Parser, StructLayout,
+    BinaryOp, Constant, Expr, GlobalPointerAddress, LValue, Parser, StructLayout,
     eval_integer_initializer_expr_with_constants,
 };
 
@@ -25,10 +25,32 @@ pub(super) fn parse_global_member_address(
     if parser.peek().is_some() {
         return Ok(None);
     }
-    let Expr::AddressOf { target } = expr else {
-        return Ok(None);
-    };
-    member_lvalue_address(&target, constants)
+    member_expr_address_constant(&expr, constants)
+}
+
+fn member_expr_address_constant(
+    expr: &Expr,
+    constants: &[Constant],
+) -> CompileResult<Option<GlobalPointerAddress>> {
+    match expr {
+        Expr::AddressOf { target } => member_lvalue_address(target, constants),
+        Expr::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+        } => offset_member_expr_address(left, right, constants, 1).and_then(|address| {
+            address.map_or_else(
+                || offset_member_expr_address(right, left, constants, 1),
+                |address| Ok(Some(address)),
+            )
+        }),
+        Expr::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+        } => offset_member_expr_address(left, right, constants, -1),
+        _ => Ok(None),
+    }
 }
 
 fn member_lvalue_address(
@@ -109,6 +131,44 @@ fn member_subscript_address(
     };
     address.element_index = Some(member_index(index, constants)?);
     Ok(Some(address))
+}
+
+fn offset_member_expr_address(
+    address_expr: &Expr,
+    offset_expr: &Expr,
+    constants: &[Constant],
+    direction: i64,
+) -> CompileResult<Option<GlobalPointerAddress>> {
+    let Some(mut address) = member_expr_address_constant(address_expr, constants)? else {
+        return Ok(None);
+    };
+    let offset = eval_integer_initializer_expr_with_constants(offset_expr, constants)?
+        .to_i64_trunc()?
+        .checked_mul(direction)
+        .ok_or_else(|| CompileError::new("global member pointer offset overflow"))?;
+    if !add_member_element_offset(&mut address, offset)? {
+        return Ok(None);
+    }
+    Ok(Some(address))
+}
+
+fn add_member_element_offset(
+    address: &mut GlobalPointerAddress,
+    offset: i64,
+) -> CompileResult<bool> {
+    let Some(element_index) = address.element_index else {
+        return Ok(false);
+    };
+    let element_index = i64::try_from(element_index)
+        .map_err(|_| CompileError::new("global member pointer offset is too large"))?;
+    let element_index = element_index
+        .checked_add(offset)
+        .ok_or_else(|| CompileError::new("global member pointer offset overflow"))?;
+    address.element_index = Some(
+        usize::try_from(element_index)
+            .map_err(|_| CompileError::new("global member pointer address index is negative"))?,
+    );
+    Ok(true)
 }
 
 fn member_index(index: &Expr, constants: &[Constant]) -> CompileResult<usize> {
