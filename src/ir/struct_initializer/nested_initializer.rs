@@ -119,7 +119,7 @@ fn write_scalar(
         }
         LoweredStructInitializerScalar::PointerNull => write_bytes(bytes, offset, &[0; 8]),
         LoweredStructInitializerScalar::IntString { .. }
-        | LoweredStructInitializerScalar::PointerString(_)
+        | LoweredStructInitializerScalar::PointerString(_, _)
         | LoweredStructInitializerScalar::PointerGlobalOffset { .. } => {
             Err(CompileError::new(format!(
                 "unsupported relocatable nested global struct initializer: {struct_name}.{field_name}"

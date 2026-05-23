@@ -1,7 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
-use super::global_struct_initializer_addresses::address_from_expr;
+use super::global_struct_initializer_addresses::{address_from_expr, string_pointer_from_expr};
 use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
     Constant, Expr, GlobalStructInitializerValue, Parser, StructLayout,
@@ -192,13 +192,24 @@ fn value_from_expr(
 ) -> CompileResult<GlobalStructInitializerValue> {
     match expr {
         Expr::StringLiteral(value) => Ok(GlobalStructInitializerValue::String(value.clone())),
-        _ => address_from_expr(expr, constants)?.map_or_else(
+        _ => string_pointer_from_expr(expr, constants)?.map_or_else(
             || {
-                eval_integer_initializer_expr_with_constants(expr, constants)
-                    .and_then(super::InitializerNumber::to_i64_trunc)
-                    .map(GlobalStructInitializerValue::Integer)
+                address_from_expr(expr, constants)?.map_or_else(
+                    || {
+                        eval_integer_initializer_expr_with_constants(expr, constants)
+                            .and_then(super::InitializerNumber::to_i64_trunc)
+                            .map(GlobalStructInitializerValue::Integer)
+                    },
+                    |address| Ok(GlobalStructInitializerValue::Address(address)),
+                )
             },
-            |address| Ok(GlobalStructInitializerValue::Address(address)),
+            |(value, byte_offset, cast_target)| {
+                Ok(GlobalStructInitializerValue::StringPointer {
+                    value,
+                    byte_offset,
+                    cast_target,
+                })
+            },
         ),
     }
 }

@@ -1,7 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 
 use super::{
-    BinaryOp, Constant, Expr, GlobalStructInitializerAddress, LValue,
+    BinaryOp, Constant, Expr, GlobalStructInitializerAddress, LValue, ScalarType,
     eval_integer_initializer_expr_with_constants,
 };
 
@@ -50,6 +50,37 @@ pub(super) fn address_from_expr(
     }
 }
 
+pub(super) fn string_pointer_from_expr(
+    expr: &Expr,
+    constants: &[Constant],
+) -> CompileResult<Option<(String, usize, Option<ScalarType>)>> {
+    match expr {
+        Expr::Cast { target, expr, .. } => string_pointer_from_expr(expr, constants).map(|value| {
+            value.map(|(value, byte_offset, _cast_target)| (value, byte_offset, Some(*target)))
+        }),
+        Expr::StringLiteral(value) => Ok(Some((value.clone(), 0, None))),
+        Expr::AddressOf {
+            target: LValue::Subscript { array, index },
+        } => string_subscript_address(array, index, constants),
+        Expr::Binary {
+            op: BinaryOp::Add,
+            left,
+            right,
+        } => offset_string_expr(left, right, constants, 1).and_then(|value| {
+            value.map_or_else(
+                || offset_string_expr(right, left, constants, 1),
+                |value| Ok(Some(value)),
+            )
+        }),
+        Expr::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+        } => offset_string_expr(left, right, constants, -1),
+        _ => Ok(None),
+    }
+}
+
 pub(super) fn address_from_lvalue(
     target: &LValue,
     constants: &[Constant],
@@ -85,6 +116,23 @@ pub(super) fn address_from_subscript(
     })
 }
 
+fn string_subscript_address(
+    array: &Expr,
+    index: &Expr,
+    constants: &[Constant],
+) -> CompileResult<Option<(String, usize, Option<ScalarType>)>> {
+    let Expr::StringLiteral(value) = array else {
+        return Ok(None);
+    };
+    let index = eval_integer_initializer_expr_with_constants(index, constants)?.to_i64_trunc()?;
+    Ok(Some((
+        value.clone(),
+        usize::try_from(index)
+            .map_err(|_| CompileError::new("global struct string pointer offset is negative"))?,
+        None,
+    )))
+}
+
 fn offset_address_expr(
     address_expr: &Expr,
     offset_expr: &Expr,
@@ -102,6 +150,24 @@ fn offset_address_expr(
     Ok(Some(address))
 }
 
+fn offset_string_expr(
+    string_expr: &Expr,
+    offset_expr: &Expr,
+    constants: &[Constant],
+    direction: i64,
+) -> CompileResult<Option<(String, usize, Option<ScalarType>)>> {
+    let Some((value, byte_offset, cast_target)) = string_pointer_from_expr(string_expr, constants)?
+    else {
+        return Ok(None);
+    };
+    let offset = eval_integer_initializer_expr_with_constants(offset_expr, constants)?
+        .to_i64_trunc()?
+        .checked_mul(direction)
+        .ok_or_else(|| CompileError::new("global struct string pointer offset overflow"))?;
+    add_string_offset(byte_offset, offset)
+        .map(|byte_offset| Some((value, byte_offset, cast_target)))
+}
+
 fn add_address_offset(
     address: &mut GlobalStructInitializerAddress,
     offset: i64,
@@ -116,4 +182,14 @@ fn add_address_offset(
             CompileError::new("global struct initializer address index is negative")
         })?);
     Ok(())
+}
+
+fn add_string_offset(byte_offset: usize, offset: i64) -> CompileResult<usize> {
+    let byte_offset = i64::try_from(byte_offset)
+        .map_err(|_| CompileError::new("global struct string pointer offset is too large"))?;
+    let byte_offset = byte_offset
+        .checked_add(offset)
+        .ok_or_else(|| CompileError::new("global struct string pointer offset overflow"))?;
+    usize::try_from(byte_offset)
+        .map_err(|_| CompileError::new("global struct string pointer offset is negative"))
 }

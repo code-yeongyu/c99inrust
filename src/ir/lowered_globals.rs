@@ -47,12 +47,25 @@ pub struct LoweredStructInitializerValue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredStructInitializerScalar {
-    Int { value: i32, byte_size: usize },
-    IntString { value: String, byte_size: usize },
+    Int {
+        value: i32,
+        byte_size: usize,
+    },
+    IntString {
+        value: String,
+        byte_size: usize,
+        byte_offset: usize,
+    },
     LongLong(i64),
-    Bytes { values: Vec<u8>, byte_len: usize },
+    Bytes {
+        values: Vec<u8>,
+        byte_len: usize,
+    },
     PointerNull,
     PointerInteger(i64),
-    PointerString(String),
-    PointerGlobalOffset { base: String, byte_offset: usize },
+    PointerString(String, usize),
+    PointerGlobalOffset {
+        base: String,
+        byte_offset: usize,
+    },
 }

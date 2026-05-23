@@ -148,6 +148,11 @@ pub enum GlobalInitializer {
 pub enum GlobalStructInitializerValue {
     Integer(i64),
     String(String),
+    StringPointer {
+        value: String,
+        byte_offset: usize,
+        cast_target: Option<ScalarType>,
+    },
     Address(GlobalStructInitializerAddress),
     Nested(Vec<Self>),
 }

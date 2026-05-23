@@ -75,6 +75,72 @@ fn cli_compile_writes_target_assembly() {
 }
 
 #[test]
+fn cli_compile_rejects_int_cast_string_for_struct_pointer_field() {
+    // given
+    let root = fresh_temp_dir("struct-pointer-int-cast");
+    let source = root.join("main.c");
+    let assembly = root.join("main.s");
+    fs::write(
+        &source,
+        "typedef struct { char *text; } holder_t; holder_t holder = { (int)(\"doom\" + 1) }; int main(void) { return holder.text[0]; }\n",
+    )
+    .expect("source should be written");
+
+    // when
+    let output = Command::new(compiler())
+        .arg("compile")
+        .arg("-S")
+        .arg("--target")
+        .arg("x86_64-unknown-linux-gnu")
+        .arg(&source)
+        .arg("-o")
+        .arg(&assembly)
+        .output()
+        .expect("compile command should run");
+
+    // then
+    assert!(
+        !output.status.success(),
+        "compile unexpectedly succeeded with stdout={}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr(&output)
+            .contains("unsupported global struct pointer initializer string pointer cast")
+    );
+}
+
+#[test]
+fn cli_compile_emits_int_string_relocation_offset_for_struct_field() {
+    // given
+    let root = fresh_temp_dir("struct-int-string-offset");
+    let source = root.join("main.c");
+    let assembly = root.join("main.s");
+    fs::write(
+        &source,
+        "typedef struct { int defaultvalue; } default_t; default_t defaults[] = { { (int)(\"microsoft\" + 5) } }; int main(void) { return defaults[0].defaultvalue != 0 ? 0 : 1; }\n",
+    )
+    .expect("source should be written");
+
+    // when
+    let output = Command::new(compiler())
+        .arg("compile")
+        .arg("-S")
+        .arg("--target")
+        .arg("x86_64-unknown-linux-gnu")
+        .arg(&source)
+        .arg("-o")
+        .arg(&assembly)
+        .output()
+        .expect("compile command should run");
+
+    // then
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let generated = fs::read_to_string(&assembly).expect("assembly should be written");
+    assert!(generated.contains("\t.long .Ldefaults_str0+5\n"));
+}
+
+#[test]
 fn cli_doom_audit_reports_current_doom_gate_status() {
     // given
     let root = fresh_temp_dir("doom-audit");

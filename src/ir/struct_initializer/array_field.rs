@@ -86,7 +86,9 @@ fn flatten_values(
         match value {
             GlobalStructInitializerValue::Integer(value) => flattened.push(*value),
             GlobalStructInitializerValue::Nested(values) => flatten_values(values, flattened)?,
-            GlobalStructInitializerValue::String(_) | GlobalStructInitializerValue::Address(_) => {
+            GlobalStructInitializerValue::String(_)
+            | GlobalStructInitializerValue::StringPointer { .. }
+            | GlobalStructInitializerValue::Address(_) => {
                 return Err(CompileError::new(
                     "unsupported global struct array field initializer",
                 ));

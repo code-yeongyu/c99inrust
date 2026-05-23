@@ -57,14 +57,25 @@ fn emit_scalar(
             emit_integer(*value, *byte_size, assembly)?;
             Ok(*byte_size)
         }
-        LoweredStructInitializerScalar::IntString { byte_size, .. } => {
+        LoweredStructInitializerScalar::IntString {
+            byte_size,
+            byte_offset,
+            ..
+        } => {
             if *byte_size != 4 {
                 return Err(CompileError::new(
                     "global struct string address requires int-sized field",
                 ));
             }
             let string_label = global_string_label(name, string_index, target);
-            write_assembly(assembly, format_args!("\t.long {string_label}\n"))?;
+            if *byte_offset == 0 {
+                write_assembly(assembly, format_args!("\t.long {string_label}\n"))?;
+            } else {
+                write_assembly(
+                    assembly,
+                    format_args!("\t.long {string_label}+{byte_offset}\n"),
+                )?;
+            }
             Ok(4)
         }
         LoweredStructInitializerScalar::LongLong(value)
@@ -80,9 +91,16 @@ fn emit_scalar(
             assembly.push_str("\t.quad 0\n");
             Ok(8)
         }
-        LoweredStructInitializerScalar::PointerString(_) => {
+        LoweredStructInitializerScalar::PointerString(_, byte_offset) => {
             let string_label = global_string_label(name, string_index, target);
-            write_assembly(assembly, format_args!("\t.quad {string_label}\n"))?;
+            if *byte_offset == 0 {
+                write_assembly(assembly, format_args!("\t.quad {string_label}\n"))?;
+            } else {
+                write_assembly(
+                    assembly,
+                    format_args!("\t.quad {string_label}+{byte_offset}\n"),
+                )?;
+            }
             Ok(8)
         }
         LoweredStructInitializerScalar::PointerGlobalOffset { base, byte_offset } => {
@@ -114,7 +132,7 @@ fn emit_integer(value: i32, byte_size: usize, assembly: &mut String) -> CompileR
 fn struct_initializer_string(value: &LoweredStructInitializerScalar) -> Option<&str> {
     match value {
         LoweredStructInitializerScalar::IntString { value, .. }
-        | LoweredStructInitializerScalar::PointerString(value) => Some(value),
+        | LoweredStructInitializerScalar::PointerString(value, _) => Some(value),
         LoweredStructInitializerScalar::Int { .. }
         | LoweredStructInitializerScalar::LongLong(_)
         | LoweredStructInitializerScalar::Bytes { .. }
