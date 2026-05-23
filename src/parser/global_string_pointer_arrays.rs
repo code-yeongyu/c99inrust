@@ -4,7 +4,8 @@ use crate::front_end::lexer::{Token, TokenKind};
 use super::Constant;
 use super::global_string_initializers::parse_string_pointer_initializer;
 use super::token_scan::{
-    matching_top_level_brace, token_is_punctuator, top_level_punctuator_index,
+    matching_top_level_brace, matching_top_level_bracket, token_is_punctuator,
+    top_level_punctuator_index,
 };
 
 pub(super) fn parse_string_pointer_array_initializer(
@@ -36,6 +37,7 @@ pub(super) fn parse_string_pointer_array_initializer(
     }
 
     let mut values = Vec::new();
+    let mut next_index = 0usize;
     let mut start = 1usize;
     while start < close_brace {
         let item = &tokens[start..close_brace];
@@ -46,10 +48,20 @@ pub(super) fn parse_string_pointer_array_initializer(
                     .at(tokens[start].line, tokens[start].column),
             );
         }
-        values.push(parse_string_pointer_array_value(
-            &item[..item_len],
-            constants,
-        )?);
+        let (index, value_tokens) = if let Some((index, value_tokens)) =
+            string_pointer_array_designator(&item[..item_len], constants)?
+        {
+            next_index = index + 1;
+            (index, value_tokens)
+        } else {
+            let index = next_index;
+            next_index += 1;
+            (index, &item[..item_len])
+        };
+        if values.len() <= index {
+            values.resize(index + 1, None);
+        }
+        values[index] = parse_string_pointer_array_value(value_tokens, constants)?;
         start += item_len;
         if start < close_brace {
             start += 1;
@@ -68,6 +80,35 @@ fn parse_string_pointer_array_value(
     parse_string_pointer_initializer(tokens, constants)?
         .map(Some)
         .ok_or_else(|| CompileError::new("expected global string pointer-array initializer value"))
+}
+
+fn string_pointer_array_designator<'a>(
+    tokens: &'a [Token],
+    constants: &[Constant],
+) -> CompileResult<Option<(usize, &'a [Token])>> {
+    if !tokens
+        .first()
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        return Ok(None);
+    }
+    let close_bracket = matching_top_level_bracket(tokens, 0)
+        .ok_or_else(|| CompileError::new("unterminated global pointer-array designator"))?;
+    if !tokens
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "="))
+    {
+        return Err(CompileError::new(
+            "expected global pointer-array designator assignment",
+        ));
+    }
+    let index = super::integer_initializer::parse_integer_initializer_with_constants(
+        &tokens[1..close_bracket],
+        constants,
+    )?;
+    let index = usize::try_from(index)
+        .map_err(|_| CompileError::new("global pointer-array designator is negative"))?;
+    Ok(Some((index, &tokens[close_bracket + 2..])))
 }
 
 fn is_null_pointer_initializer(tokens: &[Token]) -> bool {

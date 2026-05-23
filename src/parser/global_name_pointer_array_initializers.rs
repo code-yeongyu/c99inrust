@@ -40,6 +40,7 @@ pub(super) fn parse_name_pointer_array_initializer(
     }
 
     let mut values = Vec::new();
+    let mut next_index = 0usize;
     let mut start = 1usize;
     while start < close_brace {
         let item = &tokens[start..close_brace];
@@ -50,17 +51,52 @@ pub(super) fn parse_name_pointer_array_initializer(
                     .at(tokens[start].line, tokens[start].column),
             );
         }
-        values.push(parse_name_pointer_array_value(
-            &item[..item_len],
-            known_structs,
-            constants,
-        )?);
+        let (index, value_tokens) = if let Some((index, value_tokens)) =
+            name_pointer_array_designator(&item[..item_len], constants)?
+        {
+            next_index = index + 1;
+            (index, value_tokens)
+        } else {
+            let index = next_index;
+            next_index += 1;
+            (index, &item[..item_len])
+        };
+        if values.len() <= index {
+            values.resize(index + 1, None);
+        }
+        values[index] = parse_name_pointer_array_value(value_tokens, known_structs, constants)?;
         start += item_len;
         if start < close_brace {
             start += 1;
         }
     }
     Ok(values)
+}
+
+fn name_pointer_array_designator<'a>(
+    tokens: &'a [Token],
+    constants: &[Constant],
+) -> CompileResult<Option<(usize, &'a [Token])>> {
+    if !tokens
+        .first()
+        .is_some_and(|token| token_is_punctuator(token, "["))
+    {
+        return Ok(None);
+    }
+    let close_bracket = matching_top_level_bracket(tokens, 0)
+        .ok_or_else(|| CompileError::new("unterminated global pointer-array designator"))?;
+    if !tokens
+        .get(close_bracket + 1)
+        .is_some_and(|token| token_is_punctuator(token, "="))
+    {
+        return Err(CompileError::new(
+            "expected global pointer-array designator assignment",
+        ));
+    }
+    let index = parse_integer_initializer_with_constants(&tokens[1..close_bracket], constants)?;
+    let index = usize::try_from(index)
+        .map_err(|_| CompileError::new("global pointer-array designator is negative"))?;
+    Ok(Some((index, &tokens[close_bracket + 2..])))
 }
 
 fn parse_name_pointer_array_value(
