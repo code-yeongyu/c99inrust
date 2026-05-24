@@ -6,6 +6,8 @@ use super::{
     token_is_punctuator,
 };
 
+type StructArrayFieldPathDesignator<'a> = (Vec<&'a str>, usize, &'a [Token]);
+
 impl Parser<'_> {
     pub(super) fn local_array_designator_index(&mut self) -> CompileResult<Option<usize>> {
         if !self.check_punctuator("[") {
@@ -55,6 +57,60 @@ impl Parser<'_> {
         }
         let index = self.designator_index_from_tokens(&tokens[3..close_bracket])?;
         Ok(Some((field, index, &tokens[close_bracket + 2..])))
+    }
+
+    pub(super) fn struct_array_field_path_designator<'a>(
+        &self,
+        tokens: &'a [Token],
+    ) -> CompileResult<Option<StructArrayFieldPathDesignator<'a>>> {
+        if !tokens
+            .first()
+            .is_some_and(|token| token_is_punctuator(token, "."))
+        {
+            return Ok(None);
+        }
+        let mut fields = Vec::new();
+        let mut index = 0usize;
+        loop {
+            let Some(field) = tokens.get(index + 1).and_then(token_identifier) else {
+                return Err(CompileError::new("expected struct initializer field name"));
+            };
+            fields.push(field);
+            index += 2;
+            let Some(token) = tokens.get(index) else {
+                return Err(CompileError::new(
+                    "expected nested struct array designator assignment",
+                ));
+            };
+            if token_is_punctuator(token, ".") {
+                continue;
+            }
+            if token_is_punctuator(token, "=") {
+                return Ok(None);
+            }
+            if token_is_punctuator(token, "[") {
+                if fields.len() == 1 {
+                    return Ok(None);
+                }
+                let close_bracket = matching_top_level_bracket(tokens, index).ok_or_else(|| {
+                    CompileError::new("unterminated nested struct array field designator")
+                })?;
+                if !tokens
+                    .get(close_bracket + 1)
+                    .is_some_and(|token| token_is_punctuator(token, "="))
+                {
+                    return Err(CompileError::new(
+                        "expected nested struct array field designator assignment",
+                    ));
+                }
+                let element_index =
+                    self.designator_index_from_tokens(&tokens[index + 1..close_bracket])?;
+                return Ok(Some((fields, element_index, &tokens[close_bracket + 2..])));
+            }
+            return Err(CompileError::new(
+                "expected nested struct array designator assignment",
+            ));
+        }
     }
 }
 

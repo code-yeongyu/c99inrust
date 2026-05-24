@@ -41,6 +41,66 @@ pub(super) fn write_array_field_designator(
     Ok(())
 }
 
+pub(super) fn write_array_index_path_value(
+    values: &mut Vec<GlobalStructInitializerValue>,
+    known_structs: &[StructLayout],
+    struct_name: &str,
+    index_path: &[usize],
+    element_index: usize,
+    value_tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<()> {
+    let Some((field_index, nested_path)) = index_path.split_first() else {
+        return Err(CompileError::new(
+            "expected nested global struct array field designator",
+        ));
+    };
+    let layout = global_struct_layout(known_structs, struct_name)?;
+    if values.len() <= *field_index {
+        values.resize(*field_index + 1, GlobalStructInitializerValue::Integer(0));
+    }
+    if nested_path.is_empty() {
+        return write_array_field_designator(
+            values,
+            known_structs,
+            struct_name,
+            *field_index,
+            element_index,
+            value_tokens,
+            constants,
+        );
+    }
+    let Some(FieldType::Struct(nested_struct_name)) = layout
+        .fields
+        .get(*field_index)
+        .map(|field| &field.field_type)
+    else {
+        return Err(CompileError::new(
+            "nested global struct array field designator requires struct field",
+        ));
+    };
+    if !matches!(
+        values[*field_index],
+        GlobalStructInitializerValue::Nested(_)
+    ) {
+        values[*field_index] = GlobalStructInitializerValue::Nested(Vec::new());
+    }
+    let GlobalStructInitializerValue::Nested(nested_values) = &mut values[*field_index] else {
+        return Err(CompileError::new(
+            "nested global struct array field designator requires nested field value",
+        ));
+    };
+    write_array_index_path_value(
+        nested_values,
+        known_structs,
+        nested_struct_name,
+        nested_path,
+        element_index,
+        value_tokens,
+        constants,
+    )
+}
+
 pub(super) fn write_index_path_value(
     values: &mut Vec<GlobalStructInitializerValue>,
     known_structs: &[StructLayout],

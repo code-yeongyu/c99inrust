@@ -15,6 +15,10 @@ pub(super) enum LocalStructDesignatorCursor {
         field_index: usize,
         element_index: usize,
     },
+    ArrayPath {
+        index_path: Vec<usize>,
+        element_index: usize,
+    },
     FieldPath(Vec<usize>),
 }
 
@@ -39,6 +43,22 @@ impl Parser<'_> {
                 value_tokens,
             )?;
             return Self::next_local_array_field_cursor(layout, index, element_index).map(Some);
+        }
+        if let Some((field_path, element_index, value_tokens)) =
+            self.struct_array_field_path_designator(item)?
+        {
+            let index = struct_field_index(self.known_structs, struct_name, field_path[0])?;
+            let index_path = self.local_struct_field_index_path(layout, index, &field_path[1..])?;
+            self.write_local_struct_array_index_path_value(
+                struct_name,
+                values,
+                &index_path,
+                element_index,
+                value_tokens,
+            )?;
+            return self
+                .next_local_struct_array_path_cursor(struct_name, &index_path, element_index)
+                .map(Some);
         }
         if let Some((field_path, value_tokens)) = struct_field_path_designator(item)? {
             let index = struct_field_index(self.known_structs, struct_name, field_path[0])?;
@@ -79,6 +99,19 @@ impl Parser<'_> {
                 )?;
                 Self::next_local_array_field_cursor(layout, field_index, element_index)
             }
+            LocalStructDesignatorCursor::ArrayPath {
+                index_path,
+                element_index,
+            } => {
+                self.write_local_struct_array_index_path_value(
+                    struct_name,
+                    values,
+                    &index_path,
+                    element_index,
+                    value_tokens,
+                )?;
+                self.next_local_struct_array_path_cursor(struct_name, &index_path, element_index)
+            }
             LocalStructDesignatorCursor::FieldPath(index_path) => {
                 self.write_local_struct_index_path_value(
                     struct_name,
@@ -101,7 +134,9 @@ impl Parser<'_> {
                 "struct array field designator requires array field",
             ));
         };
-        let next_element = element_index + 1;
+        let next_element = element_index
+            .checked_add(1)
+            .ok_or_else(|| CompileError::new("array field designator index overflow"))?;
         let cursor = if next_element < *length {
             Some(LocalStructDesignatorCursor::ArrayField {
                 field_index,
@@ -114,6 +149,40 @@ impl Parser<'_> {
             next_index: field_index + 1,
             cursor,
         })
+    }
+
+    fn next_local_struct_array_path_cursor(
+        &self,
+        struct_name: &str,
+        index_path: &[usize],
+        element_index: usize,
+    ) -> CompileResult<LocalStructDesignatorWrite> {
+        let Some(field_index) = index_path.last().copied() else {
+            return Err(CompileError::new(
+                "expected nested struct array field designator",
+            ));
+        };
+        let parent_struct_name = self.local_parent_struct_name(struct_name, index_path)?;
+        let parent_layout = self.local_struct_layout(&parent_struct_name)?;
+        let Some(FieldType::Array { length, .. }) = field_type_at(parent_layout, field_index)
+        else {
+            return Err(CompileError::new(
+                "nested struct array field designator requires array field",
+            ));
+        };
+        let next_element = element_index
+            .checked_add(1)
+            .ok_or_else(|| CompileError::new("nested array field designator index overflow"))?;
+        if next_element < *length {
+            return Ok(LocalStructDesignatorWrite {
+                next_index: index_path[0] + 1,
+                cursor: Some(LocalStructDesignatorCursor::ArrayPath {
+                    index_path: index_path.to_vec(),
+                    element_index: next_element,
+                }),
+            });
+        }
+        self.next_local_struct_field_cursor(struct_name, index_path)
     }
 
     fn next_local_struct_field_cursor(
@@ -157,92 +226,5 @@ impl Parser<'_> {
             path.pop();
         }
         Ok(None)
-    }
-
-    fn local_parent_struct_name(
-        &self,
-        struct_name: &str,
-        index_path: &[usize],
-    ) -> CompileResult<String> {
-        let mut current = struct_name.to_owned();
-        for index in &index_path[..index_path.len().saturating_sub(1)] {
-            let layout = self.local_struct_layout(&current)?;
-            let Some(FieldType::Struct(next)) = field_type_at(layout, *index) else {
-                return Err(CompileError::new(
-                    "nested struct field designator requires struct field",
-                ));
-            };
-            current = next.clone();
-        }
-        Ok(current)
-    }
-
-    fn local_struct_field_index_path(
-        &self,
-        layout: &StructLayout,
-        field_index: usize,
-        field_path: &[&str],
-    ) -> CompileResult<Vec<usize>> {
-        let mut index_path = vec![field_index];
-        let mut current_struct = match field_type_at(layout, field_index) {
-            Some(FieldType::Struct(struct_name)) => struct_name.clone(),
-            Some(_) if field_path.is_empty() => return Ok(index_path),
-            _ => {
-                return Err(CompileError::new(
-                    "nested struct field designator requires struct field",
-                ));
-            }
-        };
-        for (position, field_name) in field_path.iter().enumerate() {
-            let index = struct_field_index(self.known_structs, &current_struct, field_name)?;
-            index_path.push(index);
-            if position + 1 < field_path.len() {
-                let layout = self.local_struct_layout(&current_struct)?;
-                let Some(FieldType::Struct(next_struct)) = field_type_at(layout, index) else {
-                    return Err(CompileError::new(
-                        "nested struct field designator requires struct field",
-                    ));
-                };
-                current_struct = next_struct.clone();
-            }
-        }
-        Ok(index_path)
-    }
-
-    fn write_local_struct_index_path_value(
-        &self,
-        struct_name: &str,
-        values: &mut Vec<LocalStructInitializerValue>,
-        index_path: &[usize],
-        value_tokens: &[Token],
-    ) -> CompileResult<()> {
-        let Some((field_index, nested_path)) = index_path.split_first() else {
-            return Err(CompileError::new("expected nested struct field designator"));
-        };
-        let layout = self.local_struct_layout(struct_name)?;
-        resize_values_for_index(values, layout, *field_index);
-        let Some(field_type) = field_type_at(layout, *field_index) else {
-            return Err(CompileError::new("unknown nested struct field designator"));
-        };
-        if nested_path.is_empty() {
-            values[*field_index] = self.parse_local_struct_field_value(field_type, value_tokens)?;
-            return Ok(());
-        }
-        let FieldType::Struct(nested_struct_name) = field_type else {
-            return Err(CompileError::new(
-                "nested struct field designator requires struct field",
-            ));
-        };
-        let LocalStructInitializerValue::Nested(nested_values) = &mut values[*field_index] else {
-            return Err(CompileError::new(
-                "nested struct field designator requires nested field value",
-            ));
-        };
-        self.write_local_struct_index_path_value(
-            nested_struct_name,
-            nested_values,
-            nested_path,
-            value_tokens,
-        )
     }
 }

@@ -75,3 +75,39 @@ fn global_struct_array_field_designator_continues_inside_array_field() {
     // when/then
     assert_case("global_struct_array_field_designator_continuation", source);
 }
+
+#[test]
+fn local_nested_struct_array_field_path_designator_continues_inside_array_field() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int done; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; int main(void) { box_t b = { .inner.values[2] = 9, 10, .tail = 7 }; puts(\"local-nested-array-path-continuation\"); return b.tag == 0 && b.inner.values[0] == 0 && b.inner.values[1] == 0 && b.inner.values[2] == 9 && b.inner.values[3] == 10 && b.inner.done == 0 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("local_nested_struct_array_field_path_continuation", source);
+}
+
+#[test]
+fn global_nested_struct_array_field_path_designator_continues_inside_array_field() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int done; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; box_t b = { .inner.values[2] = 9, 10, .tail = 7 }; int main(void) { puts(\"global-nested-array-path-continuation\"); return b.tag == 0 && b.inner.values[0] == 0 && b.inner.values[1] == 0 && b.inner.values[2] == 9 && b.inner.values[3] == 10 && b.inner.done == 0 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_nested_struct_array_field_path_continuation", source);
+}
+
+#[test]
+fn local_nested_struct_array_field_path_designator_continues_to_next_nested_field() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int done; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; int main(void) { box_t b = { .inner.values[3] = 9, 10, .tail = 7 }; puts(\"local-nested-array-path-next-field\"); return b.tag == 0 && b.inner.values[0] == 0 && b.inner.values[1] == 0 && b.inner.values[2] == 0 && b.inner.values[3] == 9 && b.inner.done == 10 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("local_nested_struct_array_field_path_next_field", source);
+}
+
+#[test]
+fn global_nested_struct_array_field_path_designator_continues_to_next_nested_field() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int done; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; box_t b = { .inner.values[3] = 9, 10, .tail = 7 }; int main(void) { puts(\"global-nested-array-path-next-field\"); return b.tag == 0 && b.inner.values[0] == 0 && b.inner.values[1] == 0 && b.inner.values[2] == 0 && b.inner.values[3] == 9 && b.inner.done == 10 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_nested_struct_array_field_path_next_field", source);
+}
