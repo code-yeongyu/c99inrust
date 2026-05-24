@@ -94,6 +94,15 @@ pub(in crate::codegen) fn expr_depth(expr: &LoweredExpr) -> usize {
         } => expr_depth(condition)
             .max(expr_depth(then_expr))
             .max(expr_depth(else_expr)),
+        LoweredExpr::IndexSelect {
+            index,
+            cases,
+            default,
+        } => {
+            1 + expr_depth(index).max(cases.iter().fold(expr_depth(default), |depth, case| {
+                depth.max(expr_depth(case))
+            }))
+        }
         LoweredExpr::Binary { left, right, .. } => 1 + expr_depth(left).max(expr_depth(right)),
     }
 }

@@ -2,14 +2,12 @@ use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::stack_helpers::x86_stack_object_offset;
 use super::target::Target;
-use super::widths::{
-    BinaryExpr, ConditionalExpr, ValueWidth, cast_width, expr_width, scalar_width,
-};
+use super::widths::{BinaryExpr, ValueWidth, cast_width, expr_width, scalar_width};
 use super::x86_64_addressing::emit_x86_64_address_expr;
 use super::x86_64_binary::{emit_x86_64_binary_expr, emit_x86_64_width_adjustment};
 use super::x86_64_builtin_calls::emit_x86_64_va_arg_expr;
 use super::x86_64_calls::emit_x86_64_call_expr;
-use super::x86_64_conditionals::emit_x86_64_conditional;
+use super::x86_64_conditionals::{emit_x86_64_conditional_expr, emit_x86_64_index_select_expr};
 use super::x86_64_expr_special::emit_x86_64_global_or_assignment_expr;
 use super::x86_64_loads::{emit_x86_64_load_double_literal, emit_x86_64_load_string_address};
 use super::x86_64_temporaries::{
@@ -131,23 +129,12 @@ pub(in crate::codegen) fn emit_x86_64_expr_natural(
             labels,
             assembly,
         ),
-        LoweredExpr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => emit_x86_64_conditional(
-            ConditionalExpr {
-                condition,
-                then_expr,
-                else_expr,
-            },
-            expr_width(expr),
-            temporary_base,
-            depth,
-            target,
-            labels,
-            assembly,
-        ),
+        LoweredExpr::Conditional { .. } => {
+            emit_x86_64_conditional_expr(expr, temporary_base, depth, target, labels, assembly)
+        }
+        LoweredExpr::IndexSelect { .. } => {
+            emit_x86_64_index_select_expr(expr, temporary_base, depth, target, labels, assembly)
+        }
         LoweredExpr::Comma { left, right } => {
             emit_x86_64_expr(left, temporary_base, depth, target, labels, assembly)?;
             emit_x86_64_expr_natural(right, temporary_base, depth, target, labels, assembly)

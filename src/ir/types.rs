@@ -153,6 +153,11 @@ pub enum LoweredExpr {
         then_expr: Box<Self>,
         else_expr: Box<Self>,
     },
+    IndexSelect {
+        index: Box<Self>,
+        cases: Vec<Self>,
+        default: Box<Self>,
+    },
     Comma {
         left: Box<Self>,
         right: Box<Self>,

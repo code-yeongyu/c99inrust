@@ -42,6 +42,9 @@ fn expr_is_pointer(expr: &LoweredExpr) -> bool {
             else_expr,
             ..
         } => expr_is_pointer(then_expr) && expr_is_pointer(else_expr),
+        LoweredExpr::IndexSelect { cases, default, .. } => {
+            cases.iter().all(expr_is_pointer) && expr_is_pointer(default)
+        }
         LoweredExpr::Comma { right, .. } => expr_is_pointer(right),
         LoweredExpr::Integer(_)
         | LoweredExpr::LongInteger(_)

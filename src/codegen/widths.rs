@@ -37,6 +37,13 @@ pub(in crate::codegen) struct ConditionalExpr<'a> {
 }
 
 #[derive(Clone, Copy)]
+pub(in crate::codegen) struct IndexSelectExpr<'a> {
+    pub(in crate::codegen) index: &'a LoweredExpr,
+    pub(in crate::codegen) cases: &'a [LoweredExpr],
+    pub(in crate::codegen) default: &'a LoweredExpr,
+}
+
+#[derive(Clone, Copy)]
 pub(in crate::codegen) struct PointerSubscriptExpr<'a> {
     pub(in crate::codegen) pointer: &'a LoweredExpr,
     pub(in crate::codegen) index: &'a LoweredExpr,
@@ -123,6 +130,11 @@ pub(in crate::codegen) fn expr_width(expr: &LoweredExpr) -> ValueWidth {
             else_expr,
             ..
         } => expr_width(then_expr).max(expr_width(else_expr)),
+        LoweredExpr::IndexSelect { cases, default, .. } => {
+            cases.iter().fold(expr_width(default), |width, case| {
+                width.max(expr_width(case))
+            })
+        }
         LoweredExpr::Comma { right, .. } => expr_width(right),
         LoweredExpr::Binary { op, left, right } => binary_result_width(*op, left, right),
     }

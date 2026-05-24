@@ -45,6 +45,15 @@ pub(in crate::codegen) fn expr_needs_preserved_temp(expr: &LoweredExpr) -> bool 
                 || expr_needs_preserved_temp(then_expr)
                 || expr_needs_preserved_temp(else_expr)
         }
+        LoweredExpr::IndexSelect {
+            index,
+            cases,
+            default,
+        } => {
+            expr_needs_preserved_temp(index)
+                || cases.iter().any(expr_needs_preserved_temp)
+                || expr_needs_preserved_temp(default)
+        }
         LoweredExpr::Binary { left, right, .. } => {
             expr_is_direct_call(right)
                 || expr_needs_preserved_temp(left)
@@ -151,6 +160,11 @@ pub(in crate::codegen) fn expr_uses_call(expr: &LoweredExpr) -> bool {
             then_expr,
             else_expr,
         } => expr_uses_call(condition) || expr_uses_call(then_expr) || expr_uses_call(else_expr),
+        LoweredExpr::IndexSelect {
+            index,
+            cases,
+            default,
+        } => expr_uses_call(index) || cases.iter().any(expr_uses_call) || expr_uses_call(default),
         LoweredExpr::Comma { left, right } | LoweredExpr::Binary { left, right, .. } => {
             expr_uses_call(left) || expr_uses_call(right)
         }

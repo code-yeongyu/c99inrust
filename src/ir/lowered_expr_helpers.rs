@@ -46,6 +46,7 @@ pub(in crate::ir) const fn lowered_expr_scalar_type(expr: &LoweredExpr) -> Optio
         | LoweredExpr::GlobalByteSubscript { .. }
         | LoweredExpr::Unary { .. }
         | LoweredExpr::Conditional { .. }
+        | LoweredExpr::IndexSelect { .. }
         | LoweredExpr::Comma { .. }
         | LoweredExpr::Binary { .. } => None,
     }

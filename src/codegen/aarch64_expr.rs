@@ -4,7 +4,7 @@ use super::aarch64_binary::{
     emit_aarch64_width_adjustment,
 };
 use super::aarch64_calls::emit_aarch64_call_expr;
-use super::aarch64_conditionals::emit_aarch64_conditional;
+use super::aarch64_conditionals::{emit_aarch64_conditional_expr, emit_aarch64_index_select_expr};
 use super::aarch64_loads::{emit_aarch64_load_double_literal, emit_aarch64_load_string_address};
 use super::aarch64_memory_expr::emit_aarch64_memory_expr;
 use super::aarch64_temporaries::{emit_aarch64_load_f32_local, emit_aarch64_load_temporary};
@@ -13,8 +13,7 @@ use super::aarch64_variadic::emit_aarch64_va_arg;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::widths::{
-    BinaryExpr, ConditionalExpr, PointerOffsetExpr, ValueWidth, cast_width, expr_width,
-    scalar_width,
+    BinaryExpr, PointerOffsetExpr, ValueWidth, cast_width, expr_width, scalar_width,
 };
 use crate::diagnostics::CompileResult;
 use crate::ir::LoweredExpr;
@@ -133,22 +132,12 @@ pub(in crate::codegen) fn emit_aarch64_expr_natural(
             labels,
             assembly,
         ),
-        LoweredExpr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-        } => emit_aarch64_conditional(
-            ConditionalExpr {
-                condition,
-                then_expr,
-                else_expr,
-            },
-            expr_width(expr),
-            temporary_base,
-            depth,
-            labels,
-            assembly,
-        ),
+        LoweredExpr::Conditional { .. } => {
+            emit_aarch64_conditional_expr(expr, temporary_base, depth, labels, assembly)
+        }
+        LoweredExpr::IndexSelect { .. } => {
+            emit_aarch64_index_select_expr(expr, temporary_base, depth, labels, assembly)
+        }
         LoweredExpr::Comma { left, right } => {
             emit_aarch64_expr(left, temporary_base, depth, labels, assembly)?;
             emit_aarch64_expr_natural(right, temporary_base, depth, labels, assembly)

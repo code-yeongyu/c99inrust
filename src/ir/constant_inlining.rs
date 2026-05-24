@@ -103,6 +103,17 @@ pub(in crate::ir) fn inline_constant_calls_in_expr(
             inline_constant_calls_in_expr(then_expr, constants);
             inline_constant_calls_in_expr(else_expr, constants);
         }
+        LoweredExpr::IndexSelect {
+            index,
+            cases,
+            default,
+        } => {
+            inline_constant_calls_in_expr(index, constants);
+            for case in cases {
+                inline_constant_calls_in_expr(case, constants);
+            }
+            inline_constant_calls_in_expr(default, constants);
+        }
         LoweredExpr::Comma { left, right } | LoweredExpr::Binary { left, right, .. } => {
             inline_constant_calls_in_expr(left, constants);
             inline_constant_calls_in_expr(right, constants);
