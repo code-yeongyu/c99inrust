@@ -83,27 +83,6 @@ impl Parser<'_> {
         self.local_int_array_declaration(name, explicit_length)
     }
 
-    pub(super) fn local_scalar_array_declaration(
-        &self,
-        name: String,
-        scalar_type: ScalarType,
-        explicit_length: Option<usize>,
-    ) -> CompileResult<Statement> {
-        if self.check_punctuator("=") {
-            return Err(CompileError::new(
-                "local scalar array initializers are not supported",
-            ));
-        }
-        let Some(length) = explicit_length else {
-            return Err(CompileError::new("local scalar arrays require a size"));
-        };
-        Ok(Statement::LocalScalarArray {
-            name,
-            scalar_type,
-            length,
-        })
-    }
-
     pub(super) fn local_char_array_declaration(
         &mut self,
         name: String,

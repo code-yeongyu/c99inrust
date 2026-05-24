@@ -122,7 +122,13 @@ impl LoweringContext {
                 name,
                 scalar_type,
                 length,
-            } => Some(self.lower_local_scalar_array(name, *scalar_type, *length)),
+                initializer,
+            } => Some(self.lower_local_scalar_array(
+                name,
+                *scalar_type,
+                *length,
+                initializer.as_deref(),
+            )),
             Statement::LocalPointerArray {
                 name,
                 length,

@@ -66,6 +66,7 @@ mod parser_local_declarations;
 mod parser_local_function_pointers;
 mod parser_local_int_matrices;
 mod parser_local_pointer_arrays;
+mod parser_local_scalar_arrays;
 mod parser_local_struct_array_element_array_designators;
 mod parser_local_struct_array_element_designators;
 mod parser_local_struct_array_element_dispatch;

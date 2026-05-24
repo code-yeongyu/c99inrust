@@ -50,6 +50,7 @@ pub enum Statement {
         name: String,
         scalar_type: ScalarType,
         length: usize,
+        initializer: Option<Vec<Expr>>,
     },
     LocalPointerArray {
         name: String,

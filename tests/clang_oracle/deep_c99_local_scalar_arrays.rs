@@ -47,3 +47,15 @@ fn local_long_long_array_store_and_load_matches_host_stdout_and_exit_code() {
         source,
     });
 }
+
+#[test]
+fn local_double_array_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { double values[3] = { 1.5, 2.5 }; puts(\"local-double-array-init\"); return values[0] + values[1] == 4.0 && values[2] == 0.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "local_double_array_initializer",
+        source,
+    });
+}
