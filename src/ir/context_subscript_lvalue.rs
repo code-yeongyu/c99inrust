@@ -56,6 +56,18 @@ impl LoweringContext {
                 element_unsigned,
             )));
         }
+        if let Expr::Identifier(name) = array
+            && let Some(GlobalBinding::ScalarArray { scalar_type, .. }) =
+                self.global_bindings.get(name)
+        {
+            return Ok(Some(Self::pointer_subscript_lvalue(
+                LoweredExpr::GlobalAddress { name: name.clone() },
+                self.lower_expr(index)?,
+                *scalar_type,
+                scalar_size(*scalar_type),
+                false,
+            )));
+        }
         if let Some(pointer) = self.resolve_global_pointer_matrix_row(array, index)? {
             return Ok(Some(Self::pointer_subscript_lvalue(
                 pointer,

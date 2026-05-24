@@ -73,6 +73,10 @@ pub(in crate::ir) enum GlobalBinding {
         columns: usize,
     },
     DoubleArray,
+    ScalarArray {
+        scalar_type: ScalarType,
+        length: Option<usize>,
+    },
     Pointer {
         referent: Option<String>,
     },
@@ -125,6 +129,7 @@ impl GlobalBinding {
             | Self::ShortArray { .. }
             | Self::IntMatrix { .. }
             | Self::DoubleArray
+            | Self::ScalarArray { .. }
             | Self::PointerArray { .. }
             | Self::StructObject { .. }
             | Self::StructArray { .. }
@@ -140,6 +145,7 @@ impl GlobalBinding {
                 | Self::ShortArray { .. }
                 | Self::IntMatrix { .. }
                 | Self::DoubleArray
+                | Self::ScalarArray { .. }
                 | Self::PointerArray { .. }
                 | Self::StructArray { .. }
                 | Self::UnsignedCharArray { .. }

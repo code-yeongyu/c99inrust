@@ -73,6 +73,13 @@ fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Optio
             length: Some(length),
             ..
         }) => local_pointer_array_byte_size(*length).map(Some),
+        Some(GlobalBinding::ScalarArray {
+            scalar_type,
+            length: Some(length),
+        }) => length
+            .checked_mul(scalar_size(*scalar_type))
+            .ok_or_else(|| CompileError::new("sizeof global scalar array overflow"))
+            .map(Some),
         _ => Ok(None),
     }
 }

@@ -53,6 +53,12 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::DoubleArray { length } => length
             .checked_mul(scalar_size_for_layout(ScalarType::Double))
             .ok_or_else(|| CompileError::new("global double array sizeof overflow"))?,
+        GlobalInitializer::ScalarArray {
+            scalar_type,
+            length,
+        } => length
+            .checked_mul(scalar_size_for_layout(*scalar_type))
+            .ok_or_else(|| CompileError::new("global scalar array sizeof overflow"))?,
         GlobalInitializer::PointerArray { length, .. } => length
             .checked_mul(scalar_size_for_layout(ScalarType::Pointer))
             .ok_or_else(|| CompileError::new("global pointer array sizeof overflow"))?,

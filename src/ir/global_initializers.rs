@@ -32,6 +32,9 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     )? {
         return Ok(lowered);
     }
+    if let Some(lowered) = lower_real_array_global_initializer(&global.initializer)? {
+        return Ok(lowered);
+    }
     match &global.initializer {
         GlobalInitializer::IntArray(values) => Ok((
             LoweredGlobalInitializer::IntArray(values.clone()),
@@ -42,15 +45,6 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntMatrix { columns: *columns },
         )),
-        GlobalInitializer::DoubleArray { length } => {
-            let byte_len = length
-                .checked_mul(scalar_size(ScalarType::Double))
-                .ok_or_else(|| CompileError::new("global double-array size overflow"))?;
-            Ok((
-                LoweredGlobalInitializer::ZeroBytes(byte_len),
-                GlobalBinding::DoubleArray,
-            ))
-        }
         GlobalInitializer::PointerArray { .. }
         | GlobalInitializer::PointerStringArray { .. }
         | GlobalInitializer::PointerNameArray { .. } => Err(CompileError::new(
@@ -93,6 +87,8 @@ pub(in crate::ir) fn lower_defined_global_initializer(
         | GlobalInitializer::LongLong(_)
         | GlobalInitializer::Double(_)
         | GlobalInitializer::ComplexReal { .. }
+        | GlobalInitializer::DoubleArray { .. }
+        | GlobalInitializer::ScalarArray { .. }
         | GlobalInitializer::ScalarZero(_)
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::Extern(_)
@@ -106,6 +102,38 @@ pub(in crate::ir) fn lower_defined_global_initializer(
         | GlobalInitializer::ExternStructObject { .. } => Err(CompileError::new(
             "internal error: extern global reached definition lowering",
         )),
+    }
+}
+
+fn lower_real_array_global_initializer(
+    initializer: &GlobalInitializer,
+) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
+    match initializer {
+        GlobalInitializer::DoubleArray { length } => {
+            let byte_len = length
+                .checked_mul(scalar_size(ScalarType::Double))
+                .ok_or_else(|| CompileError::new("global double-array size overflow"))?;
+            Ok(Some((
+                LoweredGlobalInitializer::ZeroBytes(byte_len),
+                GlobalBinding::DoubleArray,
+            )))
+        }
+        GlobalInitializer::ScalarArray {
+            scalar_type,
+            length,
+        } => {
+            let byte_len = length
+                .checked_mul(scalar_size(*scalar_type))
+                .ok_or_else(|| CompileError::new("global scalar-array size overflow"))?;
+            Ok(Some((
+                LoweredGlobalInitializer::ZeroBytes(byte_len),
+                GlobalBinding::ScalarArray {
+                    scalar_type: *scalar_type,
+                    length: Some(*length),
+                },
+            )))
+        }
+        _ => Ok(None),
     }
 }
 

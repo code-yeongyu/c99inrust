@@ -40,6 +40,8 @@ mod deep_c99_extra_preprocessor;
 mod deep_c99_for_init_declarations;
 #[path = "clang_oracle/deep_c99_function_pointer_typedef_compound.rs"]
 mod deep_c99_function_pointer_typedef_compound;
+#[path = "clang_oracle/deep_c99_global_complex_arrays.rs"]
+mod deep_c99_global_complex_arrays;
 #[path = "clang_oracle/deep_c99_global_pointer_array_designators.rs"]
 mod deep_c99_global_pointer_array_designators;
 #[path = "clang_oracle/deep_c99_layout_more.rs"]

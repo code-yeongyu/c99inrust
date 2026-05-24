@@ -87,6 +87,10 @@ pub enum GlobalInitializer {
     DoubleArray {
         length: usize,
     },
+    ScalarArray {
+        scalar_type: ScalarType,
+        length: usize,
+    },
     PointerNull {
         referent: Option<String>,
     },

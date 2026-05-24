@@ -193,15 +193,3 @@ fn global_specifiers_are_long_long_like(tokens: &[Token], allow_extern: bool) ->
     }
     long_count > 0
 }
-
-pub(super) fn global_specifiers_are_double(tokens: &[Token]) -> bool {
-    let mut saw_double = false;
-    for token in tokens {
-        match &token.kind {
-            TokenKind::Keyword(Keyword::Static | Keyword::Const | Keyword::Volatile) => {}
-            TokenKind::Keyword(Keyword::Double) => saw_double = true,
-            _ => return false,
-        }
-    }
-    saw_double
-}

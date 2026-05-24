@@ -2,12 +2,12 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::global_byte_declarations::parse_unsigned_char_array_length;
-use super::global_specifiers::global_specifiers_are_double;
+use super::global_floatlike_declarations::global_floatlike_scalar_type;
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier,
     top_level_punctuator_index,
 };
-use super::{Constant, Global, GlobalInitializer};
+use super::{Constant, Global, GlobalInitializer, ScalarType};
 
 pub(super) fn parse_global_double_array(
     tokens: &[Token],
@@ -22,9 +22,9 @@ pub(super) fn parse_global_double_array(
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
         return Ok(None);
     };
-    if !global_specifiers_are_double(&declaration[..name_index]) {
+    let Some(scalar_type) = global_floatlike_scalar_type(&declaration[..name_index], false) else {
         return Ok(None);
-    }
+    };
     let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
         return Err(
             CompileError::new("unterminated global double-array declarator").at(
@@ -41,8 +41,13 @@ pub(super) fn parse_global_double_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global double-array name"))?
         .to_owned();
-    Ok(Some(Global::new(
-        name,
-        GlobalInitializer::DoubleArray { length },
-    )))
+    let initializer = if scalar_type == ScalarType::Double {
+        GlobalInitializer::DoubleArray { length }
+    } else {
+        GlobalInitializer::ScalarArray {
+            scalar_type,
+            length,
+        }
+    };
+    Ok(Some(Global::new(name, initializer)))
 }
