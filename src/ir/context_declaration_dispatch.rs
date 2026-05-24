@@ -21,6 +21,22 @@ impl LoweringContext {
                 referent.clone(),
                 initializer.as_ref(),
             )),
+            Statement::LocalConstants(constants) => {
+                for constant in constants {
+                    self.constants.insert(constant.name.clone(), constant.value);
+                }
+                Some(Ok(()))
+            }
+            Statement::ExternGlobal(global) => Some(self.lower_extern_global(global)),
+            statement => self.lower_local_declaration_statement(statement),
+        }
+    }
+
+    fn lower_local_declaration_statement(
+        &mut self,
+        statement: &Statement,
+    ) -> Option<CompileResult<()>> {
+        match statement {
             Statement::LocalCharArray {
                 name,
                 length,
@@ -89,15 +105,9 @@ impl LoweringContext {
                 *length,
                 initializer.as_deref(),
             )),
-            Statement::LocalConstants(constants) => {
-                for constant in constants {
-                    self.constants.insert(constant.name.clone(), constant.value);
-                }
-                Some(Ok(()))
-            }
-            Statement::ExternGlobal(global) => Some(self.lower_extern_global(global)),
             Statement::Empty
             | Statement::Block(_)
+            | Statement::Declaration { .. }
             | Statement::DeclarationList(_)
             | Statement::ExpressionList(_)
             | Statement::Assignment { .. }
@@ -111,7 +121,9 @@ impl LoweringContext {
             | Statement::Continue
             | Statement::Label(_)
             | Statement::Goto(_)
-            | Statement::Return(_) => None,
+            | Statement::Return(_)
+            | Statement::LocalConstants(_)
+            | Statement::ExternGlobal(_) => None,
         }
     }
 }
