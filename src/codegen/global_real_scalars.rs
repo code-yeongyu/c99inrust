@@ -39,7 +39,7 @@ pub(in crate::codegen) fn emit_real_array_global(
     assembly: &mut String,
 ) -> CompileResult<()> {
     let byte_len = scalar_byte_len(scalar_type);
-    let real_len = real_part_byte_len(byte_len);
+    let real_len = real_array_value_byte_len(scalar_type);
     if real_len == 4 {
         assembly.push_str(".p2align 2\n");
     } else {
@@ -88,6 +88,17 @@ fn float_literal_bits(value: &str) -> CompileResult<u32> {
 
 const fn real_part_byte_len(byte_len: usize) -> usize {
     if byte_len == 8 { 4 } else { 8 }
+}
+
+const fn real_array_value_byte_len(scalar_type: ScalarType) -> usize {
+    match scalar_type {
+        ScalarType::ComplexFloat => 4,
+        ScalarType::ComplexDouble
+        | ScalarType::ComplexLongDouble
+        | ScalarType::Double
+        | ScalarType::LongDouble => 8,
+        _ => scalar_byte_len(scalar_type),
+    }
 }
 
 const fn scalar_byte_len(scalar_type: ScalarType) -> usize {

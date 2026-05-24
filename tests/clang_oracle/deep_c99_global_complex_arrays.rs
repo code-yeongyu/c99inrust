@@ -59,3 +59,15 @@ fn initialized_global_complex_double_array_matches_host_stdout_and_exit_code() {
         source,
     });
 }
+
+#[test]
+fn initialized_global_double_array_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double values[2] = { 1.0, 2.0 }; int main(void) { puts(\"initialized-global-double-array\"); return values[0] == 1.0 && values[1] == 2.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "initialized_global_double_array",
+        source,
+    });
+}
