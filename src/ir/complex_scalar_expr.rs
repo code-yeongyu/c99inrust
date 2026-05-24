@@ -88,7 +88,7 @@ pub(in crate::ir) fn complex_lane_value_expr(
             complex_unary_lane_expr(*op, expr, scalar_type, index, element_byte_size)
         }
         LoweredExpr::Cast { target, expr } if *target == scalar_type => {
-            Some(complex_cast_lane_expr(expr, index))
+            complex_cast_lane_expr(expr, *target, index)
         }
         LoweredExpr::Binary { op, left, right } if is_complex_arithmetic_op(*op) => {
             complex_binary_lane_expr(*op, left, right, scalar_type, index, element_byte_size)
@@ -158,12 +158,26 @@ fn complex_unary_lane_expr(
     }
 }
 
-fn complex_cast_lane_expr(expr: &LoweredExpr, index: i64) -> LoweredExpr {
-    if index == 0 {
+fn complex_cast_lane_expr(
+    expr: &LoweredExpr,
+    target: ScalarType,
+    index: i64,
+) -> Option<LoweredExpr> {
+    if let Some(source_type) = complex_expr_scalar_type(expr)
+        && source_type == target
+    {
+        return complex_lane_value_expr(
+            expr,
+            source_type,
+            index,
+            complex_lane_byte_size(source_type),
+        );
+    }
+    Some(if index == 0 {
         expr.clone()
     } else {
         zero_lane_expr()
-    }
+    })
 }
 
 fn complex_lane_comparison(

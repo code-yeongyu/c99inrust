@@ -74,6 +74,19 @@ fn scalar_complex_compound_literal_zeroes_imaginary_lane_matches_host_stdout_and
 }
 
 #[test]
+fn scalar_complex_compound_literal_assignment_preserves_imaginary_lane_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int hits = 0; int bump(void) { hits = hits + 1; return 1; } int main(void) { double _Complex b = 2.0; double *bp = (double *)&b; bp[1] = 4.0; double _Complex z = ((double _Complex){ bump() } = b); double *raw = (double *)&z; puts(\"complex-scalar-compound-assign\"); return hits == 1 && raw[0] == 2.0 && raw[1] == 4.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "scalar_complex_compound_literal_assignment_preserves_imaginary_lane",
+        source,
+    );
+}
+
+#[test]
 fn complex_array_compound_literal_designator_preserves_imaginary_lane_matches_host_stdout_and_exit_code()
  {
     // given
