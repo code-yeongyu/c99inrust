@@ -2,6 +2,9 @@
 pub enum ReturnType {
     Int,
     Pointer,
+    ComplexFloat,
+    ComplexDouble,
+    ComplexLongDouble,
     Double,
     LongDouble,
     Void,

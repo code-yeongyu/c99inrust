@@ -8,6 +8,7 @@ pub(in crate::codegen) fn instruction_depth(instruction: &Instruction) -> usize 
         | Instruction::StoreGlobal { value, .. }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_depth(value),
+        Instruction::StoreComplexReturn { pointer, .. } => expr_depth(pointer),
         Instruction::JumpIfZero { condition, .. } => expr_depth(condition),
         Instruction::Return(None)
         | Instruction::Jump { .. }
@@ -44,6 +45,7 @@ pub(in crate::codegen) const fn instruction_label(instruction: &Instruction) -> 
     match instruction {
         Instruction::StoreLocal { .. }
         | Instruction::StoreGlobal { .. }
+        | Instruction::StoreComplexReturn { .. }
         | Instruction::Eval(_)
         | Instruction::Return(_)
         | Instruction::InitLocalBytes { .. }

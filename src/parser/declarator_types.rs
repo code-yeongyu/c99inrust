@@ -3,8 +3,8 @@ use crate::front_end::lexer::{Keyword, Token, TokenKind};
 use super::ScalarType;
 use super::declaration_base_referent_type;
 use super::pointer_referent_for_depth;
+use super::supported_typedefs::supported_typedef_scalar;
 use super::token_scan::{token_identifier, token_is_punctuator, update_depths};
-use super::type_recognition::supported_typedef_scalar;
 
 pub(super) fn parameter_scalar_type(
     tokens: &[Token],
@@ -124,7 +124,9 @@ fn integer_parameter_type_with_typedefs(
 ) -> Option<ScalarType> {
     let mut saw_type = false;
     let mut saw_bool = false;
+    let mut saw_complex = false;
     let mut saw_double = false;
+    let mut saw_float = false;
     let mut long_count = 0usize;
     for token in tokens {
         match &token.kind {
@@ -141,6 +143,14 @@ fn integer_parameter_type_with_typedefs(
             TokenKind::Keyword(Keyword::Double) => {
                 saw_type = true;
                 saw_double = true;
+            }
+            TokenKind::Keyword(Keyword::Float) => {
+                saw_type = true;
+                saw_float = true;
+            }
+            TokenKind::Keyword(Keyword::Complex) => {
+                saw_type = true;
+                saw_complex = true;
             }
             TokenKind::Keyword(Keyword::Long) => {
                 saw_type = true;
@@ -164,7 +174,11 @@ fn integer_parameter_type_with_typedefs(
     if !saw_type {
         return None;
     }
-    if saw_bool {
+    if saw_complex {
+        Some(complex_parameter_type(saw_float, long_count))
+    } else if saw_float {
+        None
+    } else if saw_bool {
         Some(ScalarType::Bool)
     } else if saw_double && long_count == 0 {
         Some(ScalarType::Double)
@@ -174,5 +188,15 @@ fn integer_parameter_type_with_typedefs(
         Some(ScalarType::Int)
     } else {
         Some(ScalarType::LongLong)
+    }
+}
+
+const fn complex_parameter_type(saw_float: bool, long_count: usize) -> ScalarType {
+    if saw_float {
+        ScalarType::ComplexFloat
+    } else if long_count == 0 {
+        ScalarType::ComplexDouble
+    } else {
+        ScalarType::ComplexLongDouble
     }
 }

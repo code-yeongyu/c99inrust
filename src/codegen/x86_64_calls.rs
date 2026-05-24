@@ -1,3 +1,4 @@
+use super::complex_abi::expr_complex_scalar_type;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::stack_helpers::call_stack_argument_bytes;
@@ -7,6 +8,7 @@ use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
 };
 use super::x86_64_builtin_calls::{emit_x86_64_alloca, emit_x86_64_va_start};
+use super::x86_64_complex_abi::emit_x86_64_complex_register_arguments;
 use super::x86_64_expr::emit_x86_64_expr_with_width;
 use super::x86_64_temporaries::{
     emit_x86_64_load_temporary_to_register, emit_x86_64_store_temporary,
@@ -32,6 +34,21 @@ pub(in crate::codegen) fn emit_x86_64_call(
     }
     if callee == "va_end" {
         assembly.push_str("\txorl %eax, %eax\n");
+        return Ok(());
+    }
+    if args
+        .iter()
+        .any(|arg| expr_complex_scalar_type(arg).is_some())
+    {
+        emit_x86_64_complex_register_arguments(
+            args,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        )?;
+        write_assembly!(assembly, "\tcall {}\n", label_name(callee, target))?;
         return Ok(());
     }
     let register_count = args.len().min(MAX_REGISTER_ARGS);
@@ -114,6 +131,31 @@ pub(in crate::codegen) fn emit_x86_64_indirect_call(
     const MAX_REGISTER_ARGS: usize = 6;
     let register_count = args.len().min(MAX_REGISTER_ARGS);
     let stack_bytes = call_stack_argument_bytes(args.len(), MAX_REGISTER_ARGS)?;
+    if args
+        .iter()
+        .any(|arg| expr_complex_scalar_type(arg).is_some())
+    {
+        emit_x86_64_complex_register_arguments(
+            args,
+            temporary_base,
+            depth,
+            target,
+            labels,
+            assembly,
+        )?;
+        emit_x86_64_expr_with_width(
+            callee,
+            ValueWidth::I64,
+            temporary_base,
+            depth + args.len() + 1,
+            target,
+            labels,
+            assembly,
+        )?;
+        assembly.push_str("\tmovq %rax, %r11\n");
+        assembly.push_str("\tcall *%r11\n");
+        return Ok(());
+    }
     let callee_offset = temporary_base + ((depth + args.len()) * TEMPORARY_BYTES);
     let arg_depth = depth + args.len() + 1;
     for (index, arg) in args.iter().enumerate() {

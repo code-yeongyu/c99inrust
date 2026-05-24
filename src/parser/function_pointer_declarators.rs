@@ -44,6 +44,9 @@ pub(super) fn function_pointer_variable(
 
 pub(super) const fn function_referent_for_return(return_type: ReturnType) -> &'static str {
     match return_type {
+        ReturnType::ComplexFloat => "function complex float",
+        ReturnType::ComplexDouble => "function complex double",
+        ReturnType::ComplexLongDouble => "function complex long double",
         ReturnType::Double => "function double",
         ReturnType::LongDouble => "function long double",
         ReturnType::Pointer => "function pointer",
@@ -53,6 +56,9 @@ pub(super) const fn function_referent_for_return(return_type: ReturnType) -> &'s
 
 pub(super) const fn function_referent_for_scalar(return_type: ScalarType) -> &'static str {
     match return_type {
+        ScalarType::ComplexFloat => "function complex float",
+        ScalarType::ComplexDouble => "function complex double",
+        ScalarType::ComplexLongDouble => "function complex long double",
         ScalarType::Double => "function double",
         ScalarType::LongDouble => "function long double",
         ScalarType::Pointer => "function pointer",

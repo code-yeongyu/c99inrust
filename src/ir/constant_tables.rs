@@ -67,6 +67,9 @@ const fn function_return_type(return_type: ReturnType) -> Option<ScalarType> {
     match return_type {
         ReturnType::Int => Some(ScalarType::Int),
         ReturnType::Pointer => Some(ScalarType::Pointer),
+        ReturnType::ComplexFloat => Some(ScalarType::ComplexFloat),
+        ReturnType::ComplexDouble => Some(ScalarType::ComplexDouble),
+        ReturnType::ComplexLongDouble => Some(ScalarType::ComplexLongDouble),
         ReturnType::Double => Some(ScalarType::Double),
         ReturnType::LongDouble => Some(ScalarType::LongDouble),
         ReturnType::Void => None,

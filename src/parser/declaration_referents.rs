@@ -1,7 +1,7 @@
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
+use super::supported_typedefs::supported_typedef_scalar;
 use super::token_scan::{token_identifier, token_is_punctuator};
-use super::type_recognition::supported_typedef_scalar;
 use super::typedef_referent;
 
 const POINTER_REFERENT: &str = "*";

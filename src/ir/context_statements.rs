@@ -1,6 +1,7 @@
-use super::{Instruction, LoweringContext};
+use super::scalar_size;
+use super::{Instruction, LoweredExpr, LoweringContext};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, ReturnType, Statement};
+use crate::parser::{Expr, ReturnType, ScalarType, Statement};
 
 impl LoweringContext {
     pub(in crate::ir) fn lower_statement(&mut self, statement: &Statement) -> CompileResult<()> {
@@ -115,6 +116,28 @@ impl LoweringContext {
     pub(in crate::ir) fn lower_return(&mut self, expr: Option<&Expr>) -> CompileResult<()> {
         match (self.return_type, expr) {
             (
+                ReturnType::ComplexFloat
+                | ReturnType::ComplexDouble
+                | ReturnType::ComplexLongDouble,
+                Some(expr),
+            ) => {
+                let scalar_type = complex_return_scalar_type(self.return_type)?;
+                let value = self.lower_expr(expr)?;
+                let byte_size = scalar_size(scalar_type);
+                let slot = self.declare_anonymous_slot(scalar_type, byte_size, byte_size)?;
+                let offset = self.local_offset(slot)?;
+                self.push_complex_object_store(
+                    &LoweredExpr::LocalAddress { offset, byte_size },
+                    scalar_type,
+                    value,
+                )?;
+                self.instructions
+                    .push(Instruction::Return(Some(LoweredExpr::Local {
+                        offset,
+                        scalar_type,
+                    })));
+            }
+            (
                 ReturnType::Int | ReturnType::Pointer | ReturnType::Double | ReturnType::LongDouble,
                 Some(expr),
             ) => {
@@ -135,6 +158,14 @@ impl LoweringContext {
                     "long double function must return a value",
                 ));
             }
+            (
+                ReturnType::ComplexFloat
+                | ReturnType::ComplexDouble
+                | ReturnType::ComplexLongDouble,
+                None,
+            ) => {
+                return Err(CompileError::new("complex function must return a value"));
+            }
             (ReturnType::Void, Some(_)) => {
                 return Err(CompileError::new("void function cannot return a value"));
             }
@@ -144,5 +175,18 @@ impl LoweringContext {
         }
         self.has_return = true;
         Ok(())
+    }
+}
+
+fn complex_return_scalar_type(return_type: ReturnType) -> CompileResult<ScalarType> {
+    match return_type {
+        ReturnType::ComplexFloat => Ok(ScalarType::ComplexFloat),
+        ReturnType::ComplexDouble => Ok(ScalarType::ComplexDouble),
+        ReturnType::ComplexLongDouble => Ok(ScalarType::ComplexLongDouble),
+        ReturnType::Int
+        | ReturnType::Pointer
+        | ReturnType::Double
+        | ReturnType::LongDouble
+        | ReturnType::Void => Err(CompileError::new("internal error: expected complex return")),
     }
 }

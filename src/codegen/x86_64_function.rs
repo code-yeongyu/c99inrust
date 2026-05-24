@@ -1,4 +1,5 @@
 use super::aarch64_analysis::instruction_depth;
+use super::complex_abi::{is_complex_scalar, return_complex_scalar_type};
 use super::data_literals::{branch_label, label_name};
 use super::frames::LabelAllocator;
 use super::stack_helpers::{align_to, local_offset, local_stack_bytes, x86_stack_offset};
@@ -6,6 +7,10 @@ use super::target::Target;
 use super::widths::{TEMPORARY_BYTES, ValueWidth, scalar_width};
 use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
+};
+use super::x86_64_complex_abi::{
+    emit_x86_64_complex_parameter_stores, emit_x86_64_complex_return_expr,
+    emit_x86_64_store_complex_return,
 };
 use super::x86_64_expr::{emit_x86_64_expr, emit_x86_64_expr_with_width};
 use super::x86_64_loads::{emit_x86_64_store_global, emit_x86_64_store_global_bool};
@@ -43,6 +48,16 @@ pub(in crate::codegen) fn emit_x86_64_function(
     }
     emit_x86_64_variadic_register_saves(function, assembly)?;
     emit_x86_64_parameter_stores(function, assembly)?;
+    emit_x86_64_instructions(function, target, temporary_base, &mut labels, assembly)
+}
+
+fn emit_x86_64_instructions(
+    function: &LoweredFunction,
+    target: Target,
+    temporary_base: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal {
@@ -58,7 +73,7 @@ pub(in crate::codegen) fn emit_x86_64_function(
                     temporary_base,
                     0,
                     target,
-                    &mut labels,
+                    labels,
                     assembly,
                 )?;
                 emit_x86_64_store_result(width, *offset, assembly)?;
@@ -79,11 +94,22 @@ pub(in crate::codegen) fn emit_x86_64_function(
                 value,
                 temporary_base,
                 target,
-                &mut labels,
+                labels,
+                assembly,
+            )?,
+            Instruction::StoreComplexReturn {
+                pointer,
+                scalar_type,
+            } => emit_x86_64_store_complex_return(
+                pointer,
+                *scalar_type,
+                temporary_base,
+                target,
+                labels,
                 assembly,
             )?,
             Instruction::JumpIfZero { condition, label } => {
-                emit_x86_64_expr(condition, temporary_base, 0, target, &mut labels, assembly)?;
+                emit_x86_64_expr(condition, temporary_base, 0, target, labels, assembly)?;
                 assembly.push_str("\tcmpl $0, %eax\n");
                 write_assembly!(
                     assembly,
@@ -106,17 +132,40 @@ pub(in crate::codegen) fn emit_x86_64_function(
                 )?;
             }
             Instruction::Eval(expr) => {
-                emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
+                emit_x86_64_expr(expr, temporary_base, 0, target, labels, assembly)?;
             }
             Instruction::Return(expr) => {
-                if let Some(expr) = expr {
-                    emit_x86_64_expr(expr, temporary_base, 0, target, &mut labels, assembly)?;
-                }
-                assembly.push_str("\tleave\n");
-                assembly.push_str("\tret\n");
+                emit_x86_64_return_instruction(
+                    function,
+                    expr.as_ref(),
+                    temporary_base,
+                    target,
+                    labels,
+                    assembly,
+                )?;
             }
         }
     }
+    Ok(())
+}
+
+fn emit_x86_64_return_instruction(
+    function: &LoweredFunction,
+    expr: Option<&LoweredExpr>,
+    temporary_base: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if let Some(expr) = expr {
+        if return_complex_scalar_type(function.return_type).is_some() {
+            emit_x86_64_complex_return_expr(expr, assembly)?;
+        } else {
+            emit_x86_64_expr(expr, temporary_base, 0, target, labels, assembly)?;
+        }
+    }
+    assembly.push_str("\tleave\n");
+    assembly.push_str("\tret\n");
     Ok(())
 }
 
@@ -142,6 +191,14 @@ pub(in crate::codegen) fn emit_x86_64_parameter_stores(
     function: &LoweredFunction,
     assembly: &mut String,
 ) -> CompileResult<()> {
+    if function
+        .local_slots
+        .iter()
+        .take(function.parameter_count)
+        .any(|slot| is_complex_scalar(slot.scalar_type))
+    {
+        return emit_x86_64_complex_parameter_stores(function, assembly);
+    }
     for slot in 0..function.parameter_count {
         let Some(local_slot) = function.local_slots.get(slot) else {
             return Err(CompileError::new("internal error: missing parameter slot"));

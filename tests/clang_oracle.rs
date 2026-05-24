@@ -14,6 +14,8 @@ mod deep_c99_complex;
 mod deep_c99_complex_arithmetic;
 #[path = "clang_oracle/deep_c99_complex_compound_more.rs"]
 mod deep_c99_complex_compound_more;
+#[path = "clang_oracle/deep_c99_complex_function_abi.rs"]
+mod deep_c99_complex_function_abi;
 #[path = "clang_oracle/deep_c99_compound_complex_edges.rs"]
 mod deep_c99_compound_complex_edges;
 #[path = "clang_oracle/deep_c99_compound_flex.rs"]

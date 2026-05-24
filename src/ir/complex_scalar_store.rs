@@ -31,6 +31,17 @@ impl LoweringContext {
                 *else_expr,
             );
         }
+        if matches!(
+            value,
+            LoweredExpr::Call { .. } | LoweredExpr::IndirectCall { .. }
+        ) {
+            self.instructions.push(Instruction::Eval(value));
+            self.instructions.push(Instruction::StoreComplexReturn {
+                pointer: pointer.clone(),
+                scalar_type,
+            });
+            return Ok(());
+        }
         if let Some(source) = complex_object_pointer(&value, scalar_type) {
             return self.push_complex_object_copy(pointer, &source, scalar_type);
         }

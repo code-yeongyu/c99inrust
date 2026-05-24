@@ -1,13 +1,16 @@
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 use super::scalar_layout::sizeof_scalar_type;
+use super::supported_typedefs::supported_typedef_scalar;
 use super::token_scan::token_is_punctuator;
 use super::{ReturnType, ScalarType};
 
 pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
     let mut saw_void = false;
     let mut saw_non_void_type = false;
+    let mut saw_complex = false;
     let mut saw_double = false;
+    let mut saw_float = false;
     let mut long_count = 0usize;
     let mut saw_pointer = false;
     for token in tokens {
@@ -24,6 +27,14 @@ pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
                 Keyword::Void => saw_void = true,
                 Keyword::Double => {
                     saw_double = true;
+                    saw_non_void_type = true;
+                }
+                Keyword::Float => {
+                    saw_float = true;
+                    saw_non_void_type = true;
+                }
+                Keyword::Complex => {
+                    saw_complex = true;
                     saw_non_void_type = true;
                 }
                 Keyword::Bool
@@ -51,10 +62,22 @@ pub(super) fn supported_return_type(tokens: &[Token]) -> Option<ReturnType> {
     match (saw_void, saw_non_void_type, saw_pointer) {
         (true, false, false) => Some(ReturnType::Void),
         (_, _, true) if saw_void || saw_non_void_type => Some(ReturnType::Pointer),
+        (false, true, false) if saw_complex => Some(complex_return_type(saw_float, long_count)),
+        (false, true, false) if saw_float => None,
         (false, true, false) if saw_double && long_count == 0 => Some(ReturnType::Double),
         (false, true, false) if saw_double => Some(ReturnType::LongDouble),
         (false, true, false) => Some(ReturnType::Int),
         _ => None,
+    }
+}
+
+const fn complex_return_type(saw_float: bool, long_count: usize) -> ReturnType {
+    if saw_float {
+        ReturnType::ComplexFloat
+    } else if long_count == 0 {
+        ReturnType::ComplexDouble
+    } else {
+        ReturnType::ComplexLongDouble
     }
 }
 
@@ -230,19 +253,4 @@ fn cast_type_starts_with_pointer_declarator(tokens: &[Token]) -> bool {
 
 pub(super) fn sizeof_type(tokens: &[Token]) -> Option<usize> {
     supported_cast_type(tokens).map(|scalar_type| sizeof_scalar_type(tokens, scalar_type))
-}
-
-pub(super) fn supported_typedef_scalar(name: &str) -> Option<ScalarType> {
-    match name {
-        "Atom" | "Bool" | "Colormap" | "Cursor" | "Drawable" | "FILE" | "Font" | "GC"
-        | "GameMission_t" | "GameMode_t" | "KeyCode" | "KeySym" | "Language_t" | "Pixmap"
-        | "ShmSeg" | "Status" | "Time" | "VisualID" | "Window" | "XID" | "ammotype_t"
-        | "angle_t" | "boolean" | "buttoncode_t" | "byte" | "card_t" | "cheat_t" | "command_t"
-        | "evtype_t" | "fixed_t" | "gameaction_t" | "gamestate_t" | "key_t" | "lighttable_t"
-        | "mobjflag_t" | "mobjtype_t" | "playerstate_t" | "powerduration_t" | "powertype_t"
-        | "psprnum_t" | "skill_t" | "slopetype_t" | "spritenum_t" | "statenum_t"
-        | "weapontype_t" => Some(ScalarType::Int),
-        "va_list" => Some(ScalarType::VaList),
-        _ => None,
-    }
 }

@@ -215,6 +215,9 @@ fn global_function_pointer_return_type(binding: &GlobalBinding) -> Option<Scalar
 
 fn function_return_type_for_referent(referent: &str) -> Option<ScalarType> {
     match referent {
+        "function complex float" => Some(ScalarType::ComplexFloat),
+        "function complex double" => Some(ScalarType::ComplexDouble),
+        "function complex long double" => Some(ScalarType::ComplexLongDouble),
         "function double" => Some(ScalarType::Double),
         "function long double" => Some(ScalarType::LongDouble),
         "function pointer" => Some(ScalarType::Pointer),

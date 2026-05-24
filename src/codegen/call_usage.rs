@@ -21,6 +21,7 @@ pub(in crate::codegen) fn instruction_needs_preserved_temp(instruction: &Instruc
         }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_needs_preserved_temp(value),
+        Instruction::StoreComplexReturn { pointer, .. } => expr_needs_preserved_temp(pointer),
         Instruction::Return(None)
         | Instruction::Jump { .. }
         | Instruction::Label { .. }
@@ -123,6 +124,7 @@ pub(in crate::codegen) fn instruction_uses_call(instruction: &Instruction) -> bo
         }
         | Instruction::Eval(value)
         | Instruction::Return(Some(value)) => expr_uses_call(value),
+        Instruction::StoreComplexReturn { pointer, .. } => expr_uses_call(pointer),
         Instruction::Return(None)
         | Instruction::Jump { .. }
         | Instruction::Label { .. }

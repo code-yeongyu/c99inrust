@@ -89,6 +89,7 @@ mod struct_anonymous_fields;
 mod struct_bitfields;
 mod struct_fields;
 mod struct_layout_helpers;
+mod supported_typedefs;
 mod surface_parser;
 mod surface_types;
 mod syntax;
@@ -143,6 +144,7 @@ use parser_expression_helpers::{lvalue_from_expr, prefix_update_expr, statement_
 use parser_local_struct_initializers::{field_type_at, resize_values_for_index};
 use parser_local_vlas::LocalVlaElement;
 pub use program::{Function, FunctionPrototype, Parameter, Program};
+use supported_typedefs::supported_typedef_scalar;
 use surface_parser::SurfaceParser;
 pub use surface_types::{ExternalItem, SurfaceTranslationUnit};
 pub use syntax::{
@@ -156,9 +158,7 @@ use token_scan::{
     top_level_punctuator_index,
 };
 pub use translation_unit_parser::parse_supported_translation_unit;
-use type_recognition::{
-    sizeof_type, supported_cast_type_with_typedefs, supported_return_type, supported_typedef_scalar,
-};
+use type_recognition::{sizeof_type, supported_cast_type_with_typedefs, supported_return_type};
 
 const DOOM_EXPAND_PIXEL_UNION: &str = "__doom_expand_pixel_union";
 const DOOM_NAME8_UNION: &str = "__doom_name8_union";

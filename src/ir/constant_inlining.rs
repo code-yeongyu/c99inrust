@@ -36,6 +36,7 @@ pub(in crate::ir) fn inline_constant_calls_in_instruction(
     match instruction {
         Instruction::StoreLocal { value, .. }
         | Instruction::StoreGlobal { value, .. }
+        | Instruction::StoreComplexReturn { pointer: value, .. }
         | Instruction::JumpIfZero {
             condition: value, ..
         }

@@ -5,11 +5,12 @@ use super::declarator_types::integer_parameter_type;
 use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::pointer_referent_from_specifiers;
 use super::scalar_layout::{scalar_field_type, scalar_size_for_layout};
+use super::supported_typedefs::supported_typedef_scalar;
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier, token_is_punctuator,
     top_level_punctuator_index,
 };
-use super::type_recognition::{supported_cast_type, supported_typedef_scalar};
+use super::type_recognition::supported_cast_type;
 use super::{Constant, FieldType, ScalarType, StructField, StructLayout};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

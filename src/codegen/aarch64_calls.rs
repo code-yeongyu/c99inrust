@@ -1,9 +1,11 @@
 use super::aarch64_addressing::aarch64_register_prefix;
+use super::aarch64_complex_abi::emit_aarch64_complex_argument;
 use super::aarch64_expr::emit_aarch64_expr_with_width;
 use super::aarch64_temporaries::{
     emit_aarch64_load_temporary_to_register, emit_aarch64_store_temporary,
 };
 use super::aarch64_variadic::emit_aarch64_va_start;
+use super::complex_abi::expr_complex_scalar_type;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
 use super::stack_helpers::call_stack_argument_bytes;
@@ -24,6 +26,14 @@ pub(in crate::codegen) fn emit_aarch64_call(
         return emit_aarch64_va_start(args, temporary_base, depth, labels, assembly);
     }
     if callee == "va_end" {
+        return Ok(());
+    }
+    if args
+        .iter()
+        .any(|arg| expr_complex_scalar_type(arg).is_some())
+    {
+        emit_aarch64_complex_register_arguments(args, temporary_base, depth, labels, assembly)?;
+        write_assembly!(assembly, "\tbl {}\n", label_name(callee, labels.target))?;
         return Ok(());
     }
     let register_count = args.len().min(REGISTERS.len());
@@ -77,6 +87,23 @@ pub(in crate::codegen) fn emit_aarch64_indirect_call(
     let register_count = args.len().min(REGISTERS.len());
     let registers = &REGISTERS[..register_count];
     let stack_bytes = call_stack_argument_bytes(args.len(), REGISTERS.len())?;
+    if args
+        .iter()
+        .any(|arg| expr_complex_scalar_type(arg).is_some())
+    {
+        emit_aarch64_complex_register_arguments(args, temporary_base, depth, labels, assembly)?;
+        emit_aarch64_expr_with_width(
+            callee,
+            ValueWidth::I64,
+            temporary_base,
+            depth + args.len() + 1,
+            labels,
+            assembly,
+        )?;
+        assembly.push_str("\tmov x16, x0\n");
+        assembly.push_str("\tblr x16\n");
+        return Ok(());
+    }
     let callee_offset = temporary_base + ((depth + args.len()) * TEMPORARY_BYTES);
     let arg_depth = depth + args.len() + 1;
     for (index, arg) in args.iter().enumerate() {
@@ -136,6 +163,41 @@ pub(in crate::codegen) fn emit_aarch64_stack_arguments(
         emit_aarch64_load_temporary_to_register(width, adjusted_offset, "17", assembly)?;
         let prefix = aarch64_register_prefix(width);
         write_assembly!(assembly, "\tstr {prefix}17, [sp, #{stack_offset}]\n")?;
+    }
+    Ok(())
+}
+
+fn emit_aarch64_complex_register_arguments(
+    args: &[LoweredExpr],
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let mut float_register = 0usize;
+    let mut integer_register = 0usize;
+    for arg in args {
+        if expr_complex_scalar_type(arg).is_some() {
+            emit_aarch64_complex_argument(arg, float_register, assembly)?;
+            float_register += 2;
+            continue;
+        }
+        let width = expr_width(arg);
+        emit_aarch64_expr_with_width(arg, width, temporary_base, depth + 1, labels, assembly)?;
+        match width {
+            ValueWidth::F64 => {
+                write_assembly!(assembly, "\tfmov d{float_register}, d0\n")?;
+                float_register += 1;
+            }
+            ValueWidth::I64 => {
+                write_assembly!(assembly, "\tmov x{integer_register}, x0\n")?;
+                integer_register += 1;
+            }
+            ValueWidth::I32 => {
+                write_assembly!(assembly, "\tmov w{integer_register}, w0\n")?;
+                integer_register += 1;
+            }
+        }
     }
     Ok(())
 }

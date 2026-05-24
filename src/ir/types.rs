@@ -47,6 +47,10 @@ pub enum Instruction {
         scalar_type: ScalarType,
         value: LoweredExpr,
     },
+    StoreComplexReturn {
+        pointer: LoweredExpr,
+        scalar_type: ScalarType,
+    },
     JumpIfZero {
         condition: LoweredExpr,
         label: usize,

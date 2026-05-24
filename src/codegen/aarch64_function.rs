@@ -1,20 +1,23 @@
-use super::aarch64_addressing::{aarch64_parameter_register, emit_aarch64_store_local};
 use super::aarch64_analysis::should_share_aarch64_epilogue;
+use super::aarch64_complex_abi::{
+    emit_aarch64_complex_return_expr, emit_aarch64_store_complex_return,
+};
 use super::aarch64_control::{
     emit_aarch64_epilogue, emit_aarch64_jump_if_zero, emit_aarch64_prologue,
 };
 use super::aarch64_expr::emit_aarch64_expr;
-use super::aarch64_loads::{emit_aarch64_store_global, emit_aarch64_store_global_bool};
-use super::aarch64_temporaries::{
-    emit_aarch64_init_local_bytes, emit_aarch64_init_local_ints, emit_aarch64_store_result,
+use super::aarch64_function_params::{
+    emit_aarch64_parameter_stores, emit_aarch64_store_local_instruction,
 };
+use super::aarch64_loads::{emit_aarch64_store_global, emit_aarch64_store_global_bool};
+use super::aarch64_temporaries::{emit_aarch64_init_local_bytes, emit_aarch64_init_local_ints};
 use super::aarch64_variadic::{aarch64_variadic_frame, emit_aarch64_variadic_register_saves};
+use super::complex_abi::return_complex_scalar_type;
 use super::data_literals::{branch_label, label_name};
 use super::frames::{Aarch64Epilogue, Aarch64Frame, LabelAllocator};
-use super::stack_helpers::local_offset;
 use super::target::Target;
 use super::widths::scalar_width;
-use crate::diagnostics::{CompileError, CompileResult};
+use crate::diagnostics::CompileResult;
 use crate::ir::{Instruction, LoweredExpr, LoweredFunction};
 use crate::parser::ScalarType;
 
@@ -32,6 +35,34 @@ pub(in crate::codegen) fn emit_aarch64_function(
         None
     };
     emit_aarch64_function_header(function, &label, &frame, &labels, assembly)?;
+    emit_aarch64_instructions(
+        function,
+        target,
+        &frame,
+        shared_epilogue.as_deref(),
+        &mut labels,
+        assembly,
+    )?;
+    if let Some(label) = shared_epilogue {
+        write_assembly!(assembly, "{label}:\n")?;
+        emit_aarch64_epilogue(
+            frame.preserved_temp_offset,
+            frame.link_register_offset,
+            frame.stack_bytes,
+            assembly,
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_aarch64_instructions(
+    function: &LoweredFunction,
+    target: Target,
+    frame: &Aarch64Frame,
+    shared_label: Option<&str>,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal {
@@ -43,7 +74,7 @@ pub(in crate::codegen) fn emit_aarch64_function(
                 (*slot, *offset, *scalar_type),
                 value,
                 frame.temporary_base,
-                &mut labels,
+                labels,
                 assembly,
             )?,
             Instruction::InitLocalBytes { offset, values } => {
@@ -62,7 +93,17 @@ pub(in crate::codegen) fn emit_aarch64_function(
                 value,
                 frame.temporary_base,
                 target,
-                &mut labels,
+                labels,
+                assembly,
+            )?,
+            Instruction::StoreComplexReturn {
+                pointer,
+                scalar_type,
+            } => emit_aarch64_store_complex_return(
+                pointer,
+                *scalar_type,
+                frame.temporary_base,
+                labels,
                 assembly,
             )?,
             Instruction::JumpIfZero { condition, label } => {
@@ -71,7 +112,7 @@ pub(in crate::codegen) fn emit_aarch64_function(
                     condition,
                     &target_label,
                     frame.temporary_base,
-                    &mut labels,
+                    labels,
                     assembly,
                 )?;
             }
@@ -90,34 +131,44 @@ pub(in crate::codegen) fn emit_aarch64_function(
                 )?;
             }
             Instruction::Eval(expr) => {
-                emit_aarch64_expr(expr, frame.temporary_base, 0, &mut labels, assembly)?;
+                emit_aarch64_expr(expr, frame.temporary_base, 0, labels, assembly)?;
             }
             Instruction::Return(expr) => {
-                emit_aarch64_return(
+                emit_aarch64_function_return(
+                    function,
                     expr.as_ref(),
-                    Aarch64Epilogue {
-                        preserved_temp_offset: frame.preserved_temp_offset,
-                        link_register_offset: frame.link_register_offset,
-                        stack_bytes: frame.stack_bytes,
-                        shared_label: shared_epilogue.as_deref(),
-                    },
-                    frame.temporary_base,
-                    &mut labels,
+                    frame,
+                    shared_label,
+                    labels,
                     assembly,
                 )?;
             }
         }
     }
-    if let Some(label) = shared_epilogue {
-        write_assembly!(assembly, "{label}:\n")?;
-        emit_aarch64_epilogue(
-            frame.preserved_temp_offset,
-            frame.link_register_offset,
-            frame.stack_bytes,
-            assembly,
-        )?;
-    }
     Ok(())
+}
+
+fn emit_aarch64_function_return(
+    function: &LoweredFunction,
+    expr: Option<&LoweredExpr>,
+    frame: &Aarch64Frame,
+    shared_label: Option<&str>,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    emit_aarch64_return(
+        expr,
+        return_complex_scalar_type(function.return_type),
+        Aarch64Epilogue {
+            preserved_temp_offset: frame.preserved_temp_offset,
+            link_register_offset: frame.link_register_offset,
+            stack_bytes: frame.stack_bytes,
+            shared_label,
+        },
+        frame.temporary_base,
+        labels,
+        assembly,
+    )
 }
 
 fn emit_aarch64_function_header(
@@ -167,34 +218,20 @@ fn aarch64_label_allocator(
     Ok(labels)
 }
 
-pub(in crate::codegen) fn emit_aarch64_store_local_instruction(
-    local: (usize, usize, ScalarType),
-    value: &LoweredExpr,
-    temporary_base: usize,
-    labels: &mut LabelAllocator<'_>,
-    assembly: &mut String,
-) -> CompileResult<()> {
-    let (slot, offset, scalar_type) = local;
-    emit_aarch64_store_local(
-        slot,
-        offset,
-        scalar_type,
-        value,
-        temporary_base,
-        labels,
-        assembly,
-    )?;
-    emit_aarch64_store_result(scalar_width(scalar_type), offset, assembly)
-}
 pub(in crate::codegen) fn emit_aarch64_return(
     expr: Option<&LoweredExpr>,
+    complex_return: Option<ScalarType>,
     epilogue: Aarch64Epilogue<'_>,
     temporary_base: usize,
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     if let Some(expr) = expr {
-        emit_aarch64_expr(expr, temporary_base, 0, labels, assembly)?;
+        if complex_return.is_some() {
+            emit_aarch64_complex_return_expr(expr, assembly)?;
+        } else {
+            emit_aarch64_expr(expr, temporary_base, 0, labels, assembly)?;
+        }
     }
     if let Some(label) = epilogue.shared_label {
         write_assembly!(assembly, "\tb {label}\n")?;
@@ -206,26 +243,4 @@ pub(in crate::codegen) fn emit_aarch64_return(
         epilogue.stack_bytes,
         assembly,
     )
-}
-pub(in crate::codegen) fn emit_aarch64_parameter_stores(
-    function: &LoweredFunction,
-    assembly: &mut String,
-) -> CompileResult<()> {
-    const MAX_REGISTER_ARGS: usize = 8;
-    if function.parameter_count > MAX_REGISTER_ARGS {
-        return Err(CompileError::new("too many function parameters"));
-    }
-    for slot in 0..function.parameter_count {
-        let Some(local_slot) = function.local_slots.get(slot) else {
-            return Err(CompileError::new("internal error: missing parameter slot"));
-        };
-        let width = scalar_width(local_slot.scalar_type);
-        let register = aarch64_parameter_register(slot, width);
-        write_assembly!(
-            assembly,
-            "\tstr {register}, [sp, #{}]\n",
-            local_offset(function, slot)?
-        )?;
-    }
-    Ok(())
 }
