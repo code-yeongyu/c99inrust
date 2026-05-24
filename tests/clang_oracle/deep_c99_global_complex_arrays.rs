@@ -71,3 +71,15 @@ fn initialized_global_double_array_matches_host_stdout_and_exit_code() {
         source,
     });
 }
+
+#[test]
+fn unsized_initialized_global_complex_double_array_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double _Complex values[] = { 1.0, 2.0, 3.0 }; int main(void) { double *raw = (double *)values; puts(\"unsized-initialized-global-complex-array\"); return sizeof(values) == 3 * sizeof(double _Complex) && raw[0] == 1.0 && raw[1] == 0.0 && raw[4] == 3.0 && raw[5] == 0.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "unsized_initialized_global_complex_double_array",
+        source,
+    });
+}

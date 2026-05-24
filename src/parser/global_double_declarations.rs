@@ -35,11 +35,10 @@ pub(super) fn parse_global_double_array(
             ),
         );
     };
-    let length =
-        parse_unsigned_char_array_length(&declaration[open_bracket + 1..close_bracket], constants)?;
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global double-array name"))?
         .to_owned();
+    let length_tokens = &declaration[open_bracket + 1..close_bracket];
     let initializer = if let Some(assign_index) =
         top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
     {
@@ -47,6 +46,11 @@ pub(super) fn parse_global_double_array(
             &declaration[close_bracket + assign_index + 2..],
             constants,
         )?;
+        let length = if length_tokens.is_empty() {
+            values.len()
+        } else {
+            parse_unsigned_char_array_length(length_tokens, constants)?
+        };
         if values.len() > length {
             return Err(CompileError::new(
                 "too many global scalar-array initializers",
@@ -57,12 +61,15 @@ pub(super) fn parse_global_double_array(
             length,
             values,
         }
-    } else if scalar_type == ScalarType::Double {
-        GlobalInitializer::DoubleArray { length }
     } else {
-        GlobalInitializer::ScalarArray {
-            scalar_type,
-            length,
+        let length = parse_unsigned_char_array_length(length_tokens, constants)?;
+        if scalar_type == ScalarType::Double {
+            GlobalInitializer::DoubleArray { length }
+        } else {
+            GlobalInitializer::ScalarArray {
+                scalar_type,
+                length,
+            }
         }
     };
     Ok(Some(Global::new(name, initializer)))
