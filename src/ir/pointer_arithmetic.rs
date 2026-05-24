@@ -4,7 +4,7 @@ use crate::parser::ScalarType;
 use super::{POINTER_REFERENT, scalar_size};
 
 pub(in crate::ir) fn byte_size(referent: &str) -> Option<usize> {
-    if is_pointer(referent) {
+    if is_pointer(referent) || is_function_pointer(referent) {
         Some(scalar_size(ScalarType::Pointer))
     } else if matches!(referent, "byte" | "char") {
         Some(1)
@@ -33,6 +33,10 @@ pub(in crate::ir) fn byte_size(referent: &str) -> Option<usize> {
 
 pub(in crate::ir) fn is_pointer(referent: &str) -> bool {
     referent.starts_with(POINTER_REFERENT)
+}
+
+pub(in crate::ir) fn is_function_pointer(referent: &str) -> bool {
+    referent.starts_with("function ")
 }
 
 pub(in crate::ir) fn is_unsigned_integer(referent: &str) -> bool {

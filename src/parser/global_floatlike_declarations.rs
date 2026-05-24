@@ -104,6 +104,7 @@ fn parse_global_real_initializer(
         known_constants: constants,
         known_scalar_typedefs: &[],
         known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
     };
     let expr = parser.expression()?;
     if parser.index != tokens.len() {

@@ -136,6 +136,7 @@ impl Parser<'_> {
             known_constants: self.known_constants,
             known_scalar_typedefs: self.known_scalar_typedefs,
             known_pointer_typedefs: self.known_pointer_typedefs,
+            known_function_pointer_typedefs: self.known_function_pointer_typedefs,
         };
         let expr = parser.expression()?;
         if let Some(token) = parser.peek() {

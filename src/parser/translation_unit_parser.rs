@@ -2,7 +2,7 @@ use super::{
     CompileError, CompileResult, Constant, Function, Parser, Program, StructLayout, SurfaceParser,
     Token, aggregate_tag_name, builtin_struct_layouts, enum_typedef_name,
     function_definition_has_supported_signature, function_definition_name,
-    function_pointer_typedef_name, function_prototype, global_sizeof_symbols, parse_enum_constants,
+    function_pointer_typedef, function_prototype, global_sizeof_symbols, parse_enum_constants,
     parse_struct_definition, parse_struct_typedef, parse_supported_global_declarations,
     pointer_return_function, struct_alias_layouts, struct_forward_typedef_alias,
     unsupported_data_declaration_blocks_empty_unit,
@@ -22,14 +22,16 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
     let mut constants = Vec::new();
     let mut scalar_typedefs = Vec::new();
     let mut pointer_typedefs = Vec::new();
+    let mut function_pointer_typedefs = Vec::new();
     let mut globals = Vec::new();
     let mut pointer_return_functions = Vec::new();
     let mut function_prototypes = Vec::new();
     let mut functions = Vec::new();
     let mut unsupported_data_declaration = false;
     for item_tokens in &external_items {
-        if let Some(name) = function_pointer_typedef_name(item_tokens) {
-            pointer_typedefs.push(name);
+        if let Some((name, referent)) = function_pointer_typedef(item_tokens) {
+            pointer_typedefs.push(name.clone());
+            function_pointer_typedefs.push((name, referent));
             continue;
         }
         if let Some(alias) = struct_forward_typedef_alias(item_tokens) {
@@ -87,6 +89,7 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             &constants,
             &scalar_typedefs,
             &pointer_typedefs,
+            &function_pointer_typedefs,
         )?);
     }
     if functions.is_empty() && unsupported_data_declaration {
@@ -145,6 +148,7 @@ fn parse_supported_function_definition(
     constants: &[Constant],
     scalar_typedefs: &[String],
     pointer_typedefs: &[String],
+    function_pointer_typedefs: &[(String, String)],
 ) -> CompileResult<Function> {
     if !function_definition_has_supported_signature(tokens) {
         let Some(token) = tokens.first() else {
@@ -164,6 +168,7 @@ fn parse_supported_function_definition(
         known_constants: constants,
         known_scalar_typedefs: scalar_typedefs,
         known_pointer_typedefs: pointer_typedefs,
+        known_function_pointer_typedefs: function_pointer_typedefs,
     };
     let function = function_parser.function()?;
     if !function_parser.check_end() {

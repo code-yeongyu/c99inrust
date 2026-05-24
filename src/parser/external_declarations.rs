@@ -1,6 +1,8 @@
 use crate::front_end::lexer::{Keyword, Token};
 
-use super::function_pointer_declarators::{function_pointer_variable, pointer_return_declarator};
+use super::function_pointer_declarators::{
+    function_pointer_variable, function_referent_for_return, pointer_return_declarator,
+};
 use super::pointer_referent_from_specifiers;
 use super::token_scan::{
     array_declarator_name, last_token_is_punctuator, last_top_level_identifier,
@@ -128,10 +130,19 @@ fn typedef_name(tokens: &[Token]) -> Option<String> {
     function_pointer_name(tokens).or_else(|| last_top_level_identifier(tokens))
 }
 
-pub(super) fn function_pointer_typedef_name(tokens: &[Token]) -> Option<String> {
-    token_has_keyword(tokens, Keyword::Typedef)
-        .then(|| function_pointer_name(tokens))
-        .flatten()
+pub(super) fn function_pointer_typedef(tokens: &[Token]) -> Option<(String, String)> {
+    if !token_has_keyword(tokens, Keyword::Typedef) {
+        return None;
+    }
+    let declarator = function_pointer_variable(tokens)?;
+    let specifier_start = tokens[..declarator.specifier_end]
+        .iter()
+        .position(|token| !token_is_keyword(token, Keyword::Typedef))?;
+    let return_type = supported_return_type(&tokens[specifier_start..declarator.specifier_end])?;
+    Some((
+        declarator.name,
+        function_referent_for_return(return_type).to_owned(),
+    ))
 }
 
 fn struct_forward_name(tokens: &[Token]) -> Option<String> {

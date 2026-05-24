@@ -18,6 +18,7 @@ pub(super) fn parse_global_member_address(
         known_constants: constants,
         known_scalar_typedefs: &[],
         known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
     };
     let Ok(expr) = parser.expression() else {
         return Ok(None);

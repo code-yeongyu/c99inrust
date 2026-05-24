@@ -12,6 +12,7 @@ mod doom_layout;
 mod enum_declarations;
 mod external_declarations;
 mod function_pointer_declarators;
+mod function_pointer_typedefs;
 mod global_byte_declarations;
 mod global_byte_initializers;
 mod global_declarations;
@@ -43,6 +44,7 @@ mod model;
 mod parser_assignment_ops;
 mod parser_compound_literals;
 mod parser_control_flow;
+mod parser_declaration_statement;
 mod parser_declaration_types;
 mod parser_designated_initializers;
 mod parser_expression_core;
@@ -91,7 +93,7 @@ use declarator_types::{parameter_scalar_type, pointer_referent_type};
 use enum_declarations::{enum_typedef_name, parse_enum_constants};
 use external_declarations::{
     function_definition_has_supported_signature, function_definition_name,
-    function_pointer_cast_type, function_pointer_name, function_pointer_typedef_name,
+    function_pointer_cast_type, function_pointer_name, function_pointer_typedef,
     function_prototype, pointer_return_function, top_level_function_open_paren,
 };
 use function_pointer_declarators::{
@@ -161,6 +163,7 @@ pub fn parse(tokens: &[Token]) -> CompileResult<Program> {
         known_constants: &[],
         known_scalar_typedefs: &[],
         known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
     };
     parser.program()
 }
@@ -183,4 +186,5 @@ struct Parser<'a> {
     known_constants: &'a [Constant],
     known_scalar_typedefs: &'a [String],
     known_pointer_typedefs: &'a [String],
+    known_function_pointer_typedefs: &'a [(String, String)],
 }

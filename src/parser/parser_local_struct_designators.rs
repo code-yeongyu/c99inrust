@@ -67,6 +67,7 @@ impl Parser<'_> {
             known_constants: self.known_constants,
             known_scalar_typedefs: self.known_scalar_typedefs,
             known_pointer_typedefs: self.known_pointer_typedefs,
+            known_function_pointer_typedefs: self.known_function_pointer_typedefs,
         };
         let index = eval_integer_initializer_expr_with_constants(
             &parser.expression()?,

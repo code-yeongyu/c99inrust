@@ -68,6 +68,7 @@ pub(super) fn parse_string_initializer(tokens: &[Token]) -> CompileResult<String
         known_constants: &[],
         known_scalar_typedefs: &[],
         known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
@@ -103,6 +104,7 @@ fn parse_initializer_expr(tokens: &[Token], constants: &[Constant]) -> CompileRe
         known_constants: constants,
         known_scalar_typedefs: &[],
         known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {

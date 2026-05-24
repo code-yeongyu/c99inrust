@@ -29,6 +29,7 @@ pub(super) fn parse_integer_initializer_with_context(
         known_constants: constants,
         known_scalar_typedefs: &[],
         known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
     };
     let expr = parser.expression()?;
     if let Some(token) = parser.peek() {
