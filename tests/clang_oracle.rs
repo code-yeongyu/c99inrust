@@ -50,6 +50,8 @@ mod deep_c99_layout_more;
 mod deep_c99_local_struct_init;
 #[path = "clang_oracle/deep_c99_long_double.rs"]
 mod deep_c99_long_double;
+#[path = "clang_oracle/deep_c99_nested_designators.rs"]
+mod deep_c99_nested_designators;
 #[path = "clang_oracle/deep_c99_numeric_more.rs"]
 mod deep_c99_numeric_more;
 #[path = "clang_oracle/deep_c99_pointer_array_offsets.rs"]

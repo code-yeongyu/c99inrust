@@ -74,6 +74,21 @@ impl Parser<'_> {
                 continue;
             }
             let item = &tokens[start..end];
+            if let Some((field_name, element_index, value_tokens)) =
+                self.struct_array_field_designator(item)?
+            {
+                let index = struct_field_index(self.known_structs, struct_name, field_name)?;
+                next_index = index + 1;
+                resize_values_for_index(&mut values, layout, index);
+                self.write_local_array_field_designator(
+                    layout,
+                    &mut values,
+                    index,
+                    element_index,
+                    value_tokens,
+                )?;
+                continue;
+            }
             let (index, value_tokens) =
                 if let Some((field_name, value_tokens)) = struct_field_designator(item)? {
                     let index = struct_field_index(self.known_structs, struct_name, field_name)?;
@@ -93,6 +108,33 @@ impl Parser<'_> {
             values[index] = value;
         }
         Ok(values)
+    }
+
+    fn write_local_array_field_designator(
+        &self,
+        layout: &StructLayout,
+        values: &mut [LocalStructInitializerValue],
+        field_index: usize,
+        element_index: usize,
+        value_tokens: &[Token],
+    ) -> CompileResult<()> {
+        let Some(FieldType::Array { .. }) = field_type_at(layout, field_index) else {
+            return Err(CompileError::new(
+                "struct array field designator requires array field",
+            ));
+        };
+        let LocalStructInitializerValue::Nested(nested_values) = &mut values[field_index] else {
+            return Err(CompileError::new(
+                "struct array field designator requires nested field value",
+            ));
+        };
+        if nested_values.len() <= element_index {
+            nested_values.resize_with(element_index + 1, || {
+                LocalStructInitializerValue::Expr(zero_expr())
+            });
+        }
+        nested_values[element_index] = self.parse_local_struct_initializer_value(value_tokens)?;
+        Ok(())
     }
 
     fn parse_local_struct_field_value(

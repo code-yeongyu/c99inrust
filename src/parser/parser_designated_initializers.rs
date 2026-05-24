@@ -2,7 +2,8 @@ use crate::front_end::lexer::Token;
 
 use super::{
     CompileError, CompileResult, Expr, Parser, StructLayout,
-    eval_integer_initializer_expr_with_constants, token_identifier, token_is_punctuator,
+    eval_integer_initializer_expr_with_constants, matching_top_level_bracket, token_identifier,
+    token_is_punctuator,
 };
 
 impl Parser<'_> {
@@ -21,6 +22,39 @@ impl Parser<'_> {
         usize::try_from(index)
             .map(Some)
             .map_err(|_| CompileError::new("local array designator is negative"))
+    }
+
+    pub(super) fn struct_array_field_designator<'a>(
+        &self,
+        tokens: &'a [Token],
+    ) -> CompileResult<Option<(&'a str, usize, &'a [Token])>> {
+        if !tokens
+            .first()
+            .is_some_and(|token| token_is_punctuator(token, "."))
+        {
+            return Ok(None);
+        }
+        let Some(field) = tokens.get(1).and_then(token_identifier) else {
+            return Err(CompileError::new("expected struct initializer field name"));
+        };
+        if !tokens
+            .get(2)
+            .is_some_and(|token| token_is_punctuator(token, "["))
+        {
+            return Ok(None);
+        }
+        let close_bracket = matching_top_level_bracket(tokens, 2)
+            .ok_or_else(|| CompileError::new("unterminated struct array field designator"))?;
+        if !tokens
+            .get(close_bracket + 1)
+            .is_some_and(|token| token_is_punctuator(token, "="))
+        {
+            return Err(CompileError::new(
+                "expected struct array field designator assignment",
+            ));
+        }
+        let index = self.designator_index_from_tokens(&tokens[3..close_bracket])?;
+        Ok(Some((field, index, &tokens[close_bracket + 2..])))
     }
 }
 

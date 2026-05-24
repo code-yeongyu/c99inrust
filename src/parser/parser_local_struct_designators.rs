@@ -59,7 +59,7 @@ impl Parser<'_> {
         Ok(Some((index, &tokens[close_bracket + 2..])))
     }
 
-    fn designator_index_from_tokens(&self, tokens: &[Token]) -> CompileResult<usize> {
+    pub(super) fn designator_index_from_tokens(&self, tokens: &[Token]) -> CompileResult<usize> {
         let mut parser = Parser {
             tokens,
             index: 0,
