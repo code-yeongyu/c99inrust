@@ -56,6 +56,8 @@ mod deep_c99_global_complex_arrays;
 mod deep_c99_global_pointer_array_designators;
 #[path = "clang_oracle/deep_c99_layout_more.rs"]
 mod deep_c99_layout_more;
+#[path = "clang_oracle/deep_c99_local_extended_scalar_arrays.rs"]
+mod deep_c99_local_extended_scalar_arrays;
 #[path = "clang_oracle/deep_c99_local_scalar_arrays.rs"]
 mod deep_c99_local_scalar_arrays;
 #[path = "clang_oracle/deep_c99_local_short_arrays.rs"]

@@ -36,7 +36,13 @@ impl Parser<'_> {
         }
         if matches!(
             scalar_type,
-            ScalarType::Bool | ScalarType::Double | ScalarType::LongLong
+            ScalarType::Bool
+                | ScalarType::Double
+                | ScalarType::LongDouble
+                | ScalarType::ComplexFloat
+                | ScalarType::ComplexDouble
+                | ScalarType::ComplexLongDouble
+                | ScalarType::LongLong
         ) {
             let explicit_length = explicit_length_expr
                 .as_ref()
@@ -46,7 +52,7 @@ impl Parser<'_> {
         }
         if scalar_type != ScalarType::Int {
             return Err(CompileError::new(
-                "only local _Bool, int, char, double, long long, and pointer arrays are supported",
+                "only local scalar, char, and pointer arrays are supported",
             ));
         }
         let has_second_dimension = self.check_punctuator("[");
