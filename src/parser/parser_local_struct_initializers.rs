@@ -69,22 +69,36 @@ impl Parser<'_> {
         let layout = self.local_struct_layout(struct_name)?;
         let mut values = Vec::new();
         let mut next_index = 0usize;
+        let mut designator_cursor = None;
         for (start, end) in top_level_comma_ranges(tokens) {
             if start == end {
                 continue;
             }
             let item = &tokens[start..end];
-            if let Some(updated_next_index) =
+            if let Some(write) =
                 self.write_local_struct_designator_item(layout, struct_name, &mut values, item)?
             {
-                next_index = updated_next_index;
+                next_index = write.next_index;
+                designator_cursor = write.cursor;
                 continue;
             }
             let (index, value_tokens) =
                 if let Some((field_name, value_tokens)) = struct_field_designator(item)? {
                     let index = struct_field_index(self.known_structs, struct_name, field_name)?;
                     next_index = index + 1;
+                    designator_cursor = None;
                     (index, value_tokens)
+                } else if let Some(cursor) = designator_cursor.take() {
+                    let write = self.write_local_struct_cursor_value(
+                        layout,
+                        struct_name,
+                        &mut values,
+                        cursor,
+                        item,
+                    )?;
+                    next_index = write.next_index;
+                    designator_cursor = write.cursor;
+                    continue;
                 } else {
                     let index = next_index;
                     next_index += 1;

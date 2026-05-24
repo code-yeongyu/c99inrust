@@ -2,7 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::global_struct_initializer_addresses::{address_from_expr, string_pointer_from_expr};
-use super::global_struct_initializer_designators::write_designator;
+use super::global_struct_initializer_designator_cursor::{write_cursor_value, write_designator};
 use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
     Constant, Expr, GlobalStructInitializerValue, Parser, StructLayout,
@@ -139,12 +139,13 @@ fn parse_values_for_struct(
         known_pointer_typedefs: &[],
         known_function_pointer_typedefs: &[],
     };
+    let mut designator_cursor = None;
     for (start, end) in top_level_comma_ranges(tokens) {
         if start == end {
             continue;
         }
         let item = &tokens[start..end];
-        if let Some(updated_next_index) = write_designator(
+        if let Some(write) = write_designator(
             &mut values,
             &designator_parser,
             known_structs,
@@ -152,14 +153,28 @@ fn parse_values_for_struct(
             item,
             constants,
         )? {
-            next_index = updated_next_index;
+            next_index = write.next_index;
+            designator_cursor = write.cursor;
             continue;
         }
         let (index, value_tokens) =
             if let Some((field_name, value_tokens)) = struct_field_designator(item)? {
                 let index = struct_field_index(known_structs, struct_name, field_name)?;
                 next_index = index + 1;
+                designator_cursor = None;
                 (index, value_tokens)
+            } else if let Some(cursor) = designator_cursor.take() {
+                let write = write_cursor_value(
+                    &mut values,
+                    known_structs,
+                    struct_name,
+                    cursor,
+                    item,
+                    constants,
+                )?;
+                next_index = write.next_index;
+                designator_cursor = write.cursor;
+                continue;
             } else {
                 let index = next_index;
                 next_index += 1;

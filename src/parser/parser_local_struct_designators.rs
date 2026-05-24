@@ -2,9 +2,8 @@ use crate::front_end::lexer::Token;
 
 use super::token_scan::{matching_top_level_bracket, top_level_comma_ranges};
 use super::{
-    CompileError, CompileResult, FieldType, LocalStructInitializerValue, Parser, StructLayout,
-    eval_integer_initializer_expr_with_constants, field_type_at, resize_values_for_index,
-    struct_field_index, struct_field_path_designator, token_is_punctuator, zero_expr,
+    CompileError, CompileResult, LocalStructInitializerValue, Parser,
+    eval_integer_initializer_expr_with_constants, token_is_punctuator, zero_expr,
 };
 
 impl Parser<'_> {
@@ -83,105 +82,5 @@ impl Parser<'_> {
         }
         usize::try_from(index)
             .map_err(|_| CompileError::new("local array field designator is negative"))
-    }
-
-    pub(super) fn write_local_struct_designator_item(
-        &self,
-        layout: &StructLayout,
-        struct_name: &str,
-        values: &mut Vec<LocalStructInitializerValue>,
-        item: &[Token],
-    ) -> CompileResult<Option<usize>> {
-        if let Some((field_name, element_index, value_tokens)) =
-            self.struct_array_field_designator(item)?
-        {
-            let index = struct_field_index(self.known_structs, struct_name, field_name)?;
-            resize_values_for_index(values, layout, index);
-            self.write_local_array_field_designator(
-                layout,
-                values,
-                index,
-                element_index,
-                value_tokens,
-            )?;
-            return Ok(Some(index + 1));
-        }
-        if let Some((field_path, value_tokens)) = struct_field_path_designator(item)? {
-            let index = struct_field_index(self.known_structs, struct_name, field_path[0])?;
-            resize_values_for_index(values, layout, index);
-            self.write_local_struct_field_path_designator(
-                layout,
-                values,
-                index,
-                &field_path[1..],
-                value_tokens,
-            )?;
-            return Ok(Some(index + 1));
-        }
-        Ok(None)
-    }
-
-    pub(super) fn write_local_struct_field_path_designator(
-        &self,
-        layout: &StructLayout,
-        values: &mut [LocalStructInitializerValue],
-        field_index: usize,
-        field_path: &[&str],
-        value_tokens: &[Token],
-    ) -> CompileResult<()> {
-        let Some(FieldType::Struct(struct_name)) = field_type_at(layout, field_index) else {
-            return Err(CompileError::new(
-                "nested struct field designator requires struct field",
-            ));
-        };
-        let LocalStructInitializerValue::Nested(nested_values) = &mut values[field_index] else {
-            return Err(CompileError::new(
-                "nested struct field designator requires nested field value",
-            ));
-        };
-        self.write_local_nested_field_value(
-            struct_name.as_str(),
-            nested_values,
-            field_path,
-            value_tokens,
-        )
-    }
-
-    fn write_local_nested_field_value(
-        &self,
-        struct_name: &str,
-        values: &mut Vec<LocalStructInitializerValue>,
-        field_path: &[&str],
-        value_tokens: &[Token],
-    ) -> CompileResult<()> {
-        let Some(field_name) = field_path.first() else {
-            return Err(CompileError::new("expected nested struct field designator"));
-        };
-        let layout = self.local_struct_layout(struct_name)?;
-        let index = struct_field_index(self.known_structs, struct_name, field_name)?;
-        resize_values_for_index(values, layout, index);
-        let Some(field_type) = field_type_at(layout, index) else {
-            return Err(CompileError::new("unknown nested struct field designator"));
-        };
-        if field_path.len() == 1 {
-            values[index] = self.parse_local_struct_field_value(field_type, value_tokens)?;
-            return Ok(());
-        }
-        let FieldType::Struct(nested_struct_name) = field_type else {
-            return Err(CompileError::new(
-                "nested struct field designator requires struct field",
-            ));
-        };
-        let LocalStructInitializerValue::Nested(nested_values) = &mut values[index] else {
-            return Err(CompileError::new(
-                "nested struct field designator requires nested field value",
-            ));
-        };
-        self.write_local_nested_field_value(
-            nested_struct_name,
-            nested_values,
-            &field_path[1..],
-            value_tokens,
-        )
     }
 }

@@ -2,49 +2,9 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::global_struct_initializer::parse_value;
-use super::{
-    Constant, FieldType, GlobalStructInitializerValue, Parser, StructLayout, struct_field_index,
-    struct_field_path_designator,
-};
+use super::{Constant, FieldType, GlobalStructInitializerValue, StructLayout};
 
-pub(super) fn write_designator(
-    values: &mut Vec<GlobalStructInitializerValue>,
-    designator_parser: &Parser<'_>,
-    known_structs: &[StructLayout],
-    struct_name: &str,
-    item: &[Token],
-    constants: &[Constant],
-) -> CompileResult<Option<usize>> {
-    if let Some((field_name, element_index, value_tokens)) =
-        designator_parser.struct_array_field_designator(item)?
-    {
-        let index = struct_field_index(known_structs, struct_name, field_name)?;
-        write_array_field_designator(
-            values,
-            known_structs,
-            struct_name,
-            index,
-            element_index,
-            value_tokens,
-            constants,
-        )?;
-        return Ok(Some(index + 1));
-    }
-    if let Some((field_path, value_tokens)) = struct_field_path_designator(item)? {
-        let index = write_field_path_designator(
-            values,
-            known_structs,
-            struct_name,
-            &field_path,
-            value_tokens,
-            constants,
-        )?;
-        return Ok(Some(index + 1));
-    }
-    Ok(None)
-}
-
-fn write_array_field_designator(
+pub(super) fn write_array_field_designator(
     values: &mut Vec<GlobalStructInitializerValue>,
     known_structs: &[StructLayout],
     struct_name: &str,
@@ -53,10 +13,7 @@ fn write_array_field_designator(
     value_tokens: &[Token],
     constants: &[Constant],
 ) -> CompileResult<()> {
-    let layout = known_structs
-        .iter()
-        .find(|layout| layout.name == struct_name)
-        .ok_or_else(|| CompileError::new(format!("unknown struct type: {struct_name}")))?;
+    let layout = global_struct_layout(known_structs, struct_name)?;
     let Some(FieldType::Array { .. }) = layout
         .fields
         .get(field_index)
@@ -84,79 +41,63 @@ fn write_array_field_designator(
     Ok(())
 }
 
-fn write_field_path_designator(
+pub(super) fn write_index_path_value(
     values: &mut Vec<GlobalStructInitializerValue>,
     known_structs: &[StructLayout],
     struct_name: &str,
-    field_path: &[&str],
-    value_tokens: &[Token],
-    constants: &[Constant],
-) -> CompileResult<usize> {
-    let Some(field_name) = field_path.first() else {
-        return Err(CompileError::new(
-            "expected nested global struct field designator",
-        ));
-    };
-    let field_index = struct_field_index(known_structs, struct_name, field_name)?;
-    write_nested_field_value(
-        values,
-        known_structs,
-        struct_name,
-        field_path,
-        value_tokens,
-        constants,
-    )?;
-    Ok(field_index)
-}
-
-fn write_nested_field_value(
-    values: &mut Vec<GlobalStructInitializerValue>,
-    known_structs: &[StructLayout],
-    struct_name: &str,
-    field_path: &[&str],
+    index_path: &[usize],
     value_tokens: &[Token],
     constants: &[Constant],
 ) -> CompileResult<()> {
-    let Some(field_name) = field_path.first() else {
+    let Some((field_index, nested_path)) = index_path.split_first() else {
         return Err(CompileError::new(
             "expected nested global struct field designator",
         ));
     };
-    let layout = known_structs
-        .iter()
-        .find(|layout| layout.name == struct_name)
-        .ok_or_else(|| CompileError::new(format!("unknown struct type: {struct_name}")))?;
-    let field_index = struct_field_index(known_structs, struct_name, field_name)?;
-    if values.len() <= field_index {
-        values.resize(field_index + 1, GlobalStructInitializerValue::Integer(0));
+    let layout = global_struct_layout(known_structs, struct_name)?;
+    if values.len() <= *field_index {
+        values.resize(*field_index + 1, GlobalStructInitializerValue::Integer(0));
     }
-    if field_path.len() == 1 {
-        values[field_index] = parse_value(value_tokens, known_structs, constants)?;
+    if nested_path.is_empty() {
+        values[*field_index] = parse_value(value_tokens, known_structs, constants)?;
         return Ok(());
     }
     let Some(FieldType::Struct(nested_struct_name)) = layout
         .fields
-        .get(field_index)
+        .get(*field_index)
         .map(|field| &field.field_type)
     else {
         return Err(CompileError::new(
             "nested global struct field designator requires struct field",
         ));
     };
-    if !matches!(values[field_index], GlobalStructInitializerValue::Nested(_)) {
-        values[field_index] = GlobalStructInitializerValue::Nested(Vec::new());
+    if !matches!(
+        values[*field_index],
+        GlobalStructInitializerValue::Nested(_)
+    ) {
+        values[*field_index] = GlobalStructInitializerValue::Nested(Vec::new());
     }
-    let GlobalStructInitializerValue::Nested(nested_values) = &mut values[field_index] else {
+    let GlobalStructInitializerValue::Nested(nested_values) = &mut values[*field_index] else {
         return Err(CompileError::new(
             "nested global struct field designator requires nested field value",
         ));
     };
-    write_nested_field_value(
+    write_index_path_value(
         nested_values,
         known_structs,
         nested_struct_name,
-        &field_path[1..],
+        nested_path,
         value_tokens,
         constants,
     )
+}
+
+pub(super) fn global_struct_layout<'a>(
+    known_structs: &'a [StructLayout],
+    struct_name: &str,
+) -> CompileResult<&'a StructLayout> {
+    known_structs
+        .iter()
+        .find(|layout| layout.name == struct_name)
+        .ok_or_else(|| CompileError::new(format!("unknown struct type: {struct_name}")))
 }

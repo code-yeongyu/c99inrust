@@ -39,3 +39,39 @@ fn global_struct_field_nested_designators_match_host_stdout_and_exit_code() {
     // when/then
     assert_case("global_struct_field_nested_designators", source);
 }
+
+#[test]
+fn local_struct_field_nested_designator_continues_inside_nested_struct() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; int z; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; int main(void) { box_t b = { .inner.y = 9, 10, .tail = 7 }; puts(\"local-nested-field-continuation\"); return b.tag == 0 && b.inner.x == 0 && b.inner.y == 9 && b.inner.z == 10 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("local_struct_field_nested_designator_continuation", source);
+}
+
+#[test]
+fn global_struct_field_nested_designator_continues_inside_nested_struct() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; int z; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; box_t b = { .inner.y = 9, 10, .tail = 7 }; int main(void) { puts(\"global-nested-field-continuation\"); return b.tag == 0 && b.inner.x == 0 && b.inner.y == 9 && b.inner.z == 10 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_struct_field_nested_designator_continuation", source);
+}
+
+#[test]
+fn local_struct_array_field_designator_continues_inside_array_field() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int tail; } bucket_t; int main(void) { bucket_t b = { .values[2] = 9, 10, .tail = 7 }; puts(\"local-array-field-continuation\"); return b.values[0] == 0 && b.values[1] == 0 && b.values[2] == 9 && b.values[3] == 10 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("local_struct_array_field_designator_continuation", source);
+}
+
+#[test]
+fn global_struct_array_field_designator_continues_inside_array_field() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int tail; } bucket_t; bucket_t b = { .values[2] = 9, 10, .tail = 7 }; int main(void) { puts(\"global-array-field-continuation\"); return b.values[0] == 0 && b.values[1] == 0 && b.values[2] == 9 && b.values[3] == 10 && b.tail == 7 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_struct_array_field_designator_continuation", source);
+}
