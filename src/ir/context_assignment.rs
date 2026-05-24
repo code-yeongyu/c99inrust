@@ -118,7 +118,8 @@ impl LoweringContext {
                         | LocalBinding::CharMatrix { .. }
                         | LocalBinding::IntArray { .. }
                         | LocalBinding::IntMatrix { .. }
-                        | LocalBinding::ShortArray { .. } => Err(CompileError::new(
+                        | LocalBinding::ShortArray { .. }
+                        | LocalBinding::ScalarArray { .. } => Err(CompileError::new(
                             "assignment to local array is not supported",
                         )),
                         LocalBinding::PointerArray { .. } => Err(CompileError::new(

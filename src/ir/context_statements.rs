@@ -16,6 +16,7 @@ impl LoweringContext {
             | Statement::LocalIntArray { .. }
             | Statement::LocalIntMatrix { .. }
             | Statement::LocalShortArray { .. }
+            | Statement::LocalScalarArray { .. }
             | Statement::LocalPointerArray { .. }
             | Statement::LocalStruct { .. }
             | Statement::LocalStructArray { .. }
@@ -117,6 +118,11 @@ impl LoweringContext {
                 length,
                 is_unsigned,
             } => Some(self.lower_local_short_array(name, *length, *is_unsigned)),
+            Statement::LocalScalarArray {
+                name,
+                scalar_type,
+                length,
+            } => Some(self.lower_local_scalar_array(name, *scalar_type, *length)),
             Statement::LocalPointerArray {
                 name,
                 length,

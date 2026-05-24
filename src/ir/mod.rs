@@ -47,6 +47,7 @@ mod global_pointer_arrays;
 mod global_pointer_initializers;
 mod local_array;
 mod local_initializer_values;
+mod local_scalar_arrays;
 mod local_scalar_conversion;
 mod local_struct_initializer;
 mod local_struct_initializer_array;
@@ -108,8 +109,8 @@ pub(in crate::ir) use global_lowering::{lower_extern_global_binding, lower_globa
 pub(in crate::ir) use local_initializer_values::{
     align_to, local_char_array_initializer_values, local_char_matrix_byte_size,
     local_char_matrix_initializer_values, local_int_array_byte_size, local_int_matrix_byte_size,
-    local_pointer_array_byte_size, local_short_array_byte_size, scalar_size, struct_alignment,
-    zero_expr_for,
+    local_pointer_array_byte_size, local_scalar_array_byte_size, local_short_array_byte_size,
+    scalar_size, struct_alignment, zero_expr_for,
 };
 pub(in crate::ir) use local_scalar_conversion::{
     local_scalar_referent_size, narrow_local_scalar_value,

@@ -195,6 +195,15 @@ impl LoweringContext {
                 element_unsigned,
             )));
         }
+        if let Some((pointer, scalar_type)) = self.resolve_local_scalar_array(array)? {
+            return Ok(Some(Self::pointer_subscript_expr(
+                pointer,
+                self.lower_expr(index)?,
+                scalar_type,
+                scalar_size(scalar_type),
+                false,
+            )));
+        }
         if let Some(pointer) = self.resolve_local_pointer_array(array)? {
             return Ok(Some(Self::pointer_subscript_expr(
                 pointer,

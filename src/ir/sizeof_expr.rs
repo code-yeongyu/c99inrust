@@ -4,8 +4,8 @@ use crate::parser::{Expr, ScalarType};
 use super::{
     GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, local_char_matrix_byte_size,
     local_int_array_byte_size, local_int_matrix_byte_size, local_pointer_array_byte_size,
-    local_scalar_referent_size, local_short_array_byte_size, lowered_expr_scalar_type,
-    pointer_arithmetic, scalar_size,
+    local_scalar_array_byte_size, local_scalar_referent_size, local_short_array_byte_size,
+    lowered_expr_scalar_type, pointer_arithmetic, scalar_size,
 };
 
 pub(in crate::ir) fn lower(context: &LoweringContext, expr: &Expr) -> CompileResult<LoweredExpr> {
@@ -110,6 +110,11 @@ fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
             local_int_matrix_byte_size(*rows, *columns)
         }
         LocalBinding::ShortArray { length, .. } => local_short_array_byte_size(*length),
+        LocalBinding::ScalarArray {
+            scalar_type,
+            length,
+            ..
+        } => local_scalar_array_byte_size(*scalar_type, *length),
         LocalBinding::PointerArray { length, .. } => local_pointer_array_byte_size(*length),
         LocalBinding::StructObject { byte_size, .. } => Ok(*byte_size),
         LocalBinding::StructArray {

@@ -117,6 +117,15 @@ pub(in crate::ir) fn local_pointer_array_byte_size(length: usize) -> CompileResu
         .ok_or_else(|| CompileError::new("local pointer array size overflow"))
 }
 
+pub(in crate::ir) fn local_scalar_array_byte_size(
+    scalar_type: ScalarType,
+    length: usize,
+) -> CompileResult<usize> {
+    length
+        .checked_mul(scalar_size(scalar_type))
+        .ok_or_else(|| CompileError::new("local scalar array size overflow"))
+}
+
 pub(in crate::ir) fn struct_alignment(layout: &StructLayout) -> usize {
     layout.size.clamp(1, 8)
 }

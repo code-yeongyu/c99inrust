@@ -34,9 +34,16 @@ impl Parser<'_> {
                 .transpose()?;
             return self.local_pointer_array_declaration(name, explicit_length, referent);
         }
+        if scalar_type == ScalarType::Double {
+            let explicit_length = explicit_length_expr
+                .as_ref()
+                .map(|expr| local_array_length(expr, self.known_constants))
+                .transpose()?;
+            return self.local_scalar_array_declaration(name, scalar_type, explicit_length);
+        }
         if scalar_type != ScalarType::Int {
             return Err(CompileError::new(
-                "only local int, char, and pointer arrays are supported",
+                "only local int, char, double, and pointer arrays are supported",
             ));
         }
         let has_second_dimension = self.check_punctuator("[");
@@ -74,6 +81,27 @@ impl Parser<'_> {
             return self.local_short_array_declaration(name, explicit_length, type_is_unsigned);
         }
         self.local_int_array_declaration(name, explicit_length)
+    }
+
+    pub(super) fn local_scalar_array_declaration(
+        &self,
+        name: String,
+        scalar_type: ScalarType,
+        explicit_length: Option<usize>,
+    ) -> CompileResult<Statement> {
+        if self.check_punctuator("=") {
+            return Err(CompileError::new(
+                "local scalar array initializers are not supported",
+            ));
+        }
+        let Some(length) = explicit_length else {
+            return Err(CompileError::new("local scalar arrays require a size"));
+        };
+        Ok(Statement::LocalScalarArray {
+            name,
+            scalar_type,
+            length,
+        })
     }
 
     pub(super) fn local_char_array_declaration(

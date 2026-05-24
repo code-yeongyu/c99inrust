@@ -46,6 +46,11 @@ pub enum Statement {
         length: usize,
         is_unsigned: bool,
     },
+    LocalScalarArray {
+        name: String,
+        scalar_type: ScalarType,
+        length: usize,
+    },
     LocalPointerArray {
         name: String,
         length: usize,

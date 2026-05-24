@@ -38,6 +38,11 @@ pub(in crate::ir) enum LocalBinding {
         length: usize,
         is_unsigned: bool,
     },
+    ScalarArray {
+        slot: usize,
+        scalar_type: ScalarType,
+        length: usize,
+    },
     PointerArray {
         slot: usize,
         length: usize,
