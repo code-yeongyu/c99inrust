@@ -72,6 +72,7 @@ fn array_field_referent(element_type: ScalarType, element_unsigned: bool) -> Str
         "byte".to_owned()
     } else {
         match element_type {
+            ScalarType::Bool => "_Bool".to_owned(),
             ScalarType::Pointer => POINTER_REFERENT.to_owned(),
             ScalarType::LongLong => "long long".to_owned(),
             ScalarType::Double => "double".to_owned(),
@@ -79,7 +80,7 @@ fn array_field_referent(element_type: ScalarType, element_unsigned: bool) -> Str
             ScalarType::ComplexFloat => "float _Complex".to_owned(),
             ScalarType::ComplexDouble => "double _Complex".to_owned(),
             ScalarType::ComplexLongDouble => "long double _Complex".to_owned(),
-            ScalarType::Int | ScalarType::Bool | ScalarType::VaList => "int".to_owned(),
+            ScalarType::Int | ScalarType::VaList => "int".to_owned(),
         }
     }
 }

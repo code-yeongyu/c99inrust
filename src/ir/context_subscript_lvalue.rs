@@ -238,6 +238,7 @@ impl LoweringContext {
             {
                 ScalarType::Pointer
             }
+            Some("_Bool") => ScalarType::Bool,
             Some("float" | "double") => ScalarType::Double,
             Some("long double") => ScalarType::LongDouble,
             Some("float _Complex") => ScalarType::ComplexFloat,

@@ -1,7 +1,4 @@
-use super::{
-    GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, StructAddress, pointer_arithmetic,
-    pointer_referent,
-};
+use super::{GlobalBinding, LocalBinding, LoweredExpr, LoweringContext, StructAddress};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Expr, FieldType};
 
@@ -159,92 +156,5 @@ impl LoweringContext {
             offset: 0,
             struct_name,
         })
-    }
-
-    pub(in crate::ir) fn pointer_referent_for_identifier(&self, name: &str) -> Option<String> {
-        if name == "__func__" {
-            return Some("char".to_owned());
-        }
-        if let Some(binding) = self.local_binding(name) {
-            return match binding {
-                LocalBinding::Scalar {
-                    referent: Some(referent),
-                    ..
-                }
-                | LocalBinding::StaticScalar {
-                    referent: Some(referent),
-                    ..
-                } => Some(referent),
-                LocalBinding::CharArray { is_unsigned, .. } => {
-                    Some(if is_unsigned { "byte" } else { "char" }.to_owned())
-                }
-                LocalBinding::IntArray { .. } | LocalBinding::IntMatrix { .. } => {
-                    Some("int".to_owned())
-                }
-                LocalBinding::ShortArray { .. } => Some("short".to_owned()),
-                LocalBinding::PointerArray { .. } => {
-                    Some(pointer_arithmetic::nested_referent(None))
-                }
-                LocalBinding::StructArray { struct_name, .. } => Some(struct_name),
-                _ => None,
-            };
-        }
-        if let Some(GlobalBinding::Pointer {
-            referent: Some(referent),
-        }) = self.global_bindings.get(name)
-        {
-            return Some(referent.clone());
-        }
-        if let Some(GlobalBinding::StructArray { struct_name, .. }) = self.global_bindings.get(name)
-        {
-            return Some(struct_name.clone());
-        }
-        if matches!(
-            self.global_bindings.get(name),
-            Some(GlobalBinding::IntArray)
-        ) {
-            return Some("int".to_owned());
-        }
-        if matches!(
-            self.global_bindings.get(name),
-            Some(GlobalBinding::IntMatrix { .. })
-        ) {
-            return Some("int".to_owned());
-        }
-        if matches!(
-            self.global_bindings.get(name),
-            Some(GlobalBinding::ShortArray { .. })
-        ) {
-            return Some("short".to_owned());
-        }
-        None
-    }
-
-    pub(in crate::ir) fn pointer_referent_for_expr(&self, expr: &Expr) -> CompileResult<String> {
-        pointer_referent::for_expr(self, expr)
-    }
-
-    pub(in crate::ir) fn pointer_referent_stride(&self, referent: &str) -> CompileResult<usize> {
-        pointer_arithmetic::byte_size(referent)
-            .or_else(|| self.structs.get(referent).map(|layout| layout.size))
-            .ok_or_else(|| CompileError::new("unknown pointer arithmetic referent"))
-    }
-
-    pub(in crate::ir) fn pointer_difference_stride(
-        &self,
-        left_referent: &str,
-        right_referent: &str,
-    ) -> CompileResult<usize> {
-        pointer_arithmetic::difference_stride(
-            self.pointer_referent_stride(left_referent)?,
-            self.pointer_referent_stride(right_referent)?,
-        )
-    }
-
-    pub(in crate::ir) fn expr_is_pointer_return_call(&self, expr: &Expr) -> bool {
-        matches!(
-            expr,
-            Expr::Call { callee, .. } if self.pointer_return_functions.contains_key(callee)
-        )
     }
 }

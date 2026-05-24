@@ -27,6 +27,12 @@ pub(super) fn declaration_base_referent_type(tokens: &[Token]) -> Option<String>
     }
     if tokens
         .iter()
+        .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Bool)))
+    {
+        return Some("_Bool".to_owned());
+    }
+    if tokens
+        .iter()
         .any(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Int)))
     {
         return Some("int".to_owned());

@@ -6,7 +6,7 @@ use super::{POINTER_REFERENT, scalar_size};
 pub(in crate::ir) fn byte_size(referent: &str) -> Option<usize> {
     if is_pointer(referent) || is_function_pointer(referent) {
         Some(scalar_size(ScalarType::Pointer))
-    } else if matches!(referent, "byte" | "char") {
+    } else if matches!(referent, "_Bool" | "byte" | "char") {
         Some(1)
     } else if matches!(referent, "short" | "unsigned short") {
         Some(2)

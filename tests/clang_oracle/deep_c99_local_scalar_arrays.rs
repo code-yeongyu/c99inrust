@@ -71,3 +71,15 @@ fn local_bool_array_initializer_uses_one_byte_elements_matches_host_stdout_and_e
         source,
     });
 }
+
+#[test]
+fn local_bool_array_decays_to_one_byte_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { _Bool values[3] = { 1, 0, 1 }; _Bool *p = values; puts(\"local-bool-array-decay\"); return p[2] == 1 && ((char *)&p[1] - (char *)&p[0]) == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "local_bool_array_decay_one_byte_pointer",
+        source,
+    });
+}

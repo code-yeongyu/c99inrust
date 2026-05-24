@@ -31,6 +31,7 @@ mod context_identifiers;
 mod context_int_matrices;
 mod context_labels;
 mod context_members;
+mod context_pointer_referents;
 mod context_post_increment;
 mod context_slots;
 mod context_statements;
