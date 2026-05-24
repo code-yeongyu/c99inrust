@@ -29,6 +29,7 @@ mod global_pointer_compound_literals;
 mod global_pointer_name_arrays;
 mod global_pointer_scalars;
 mod global_pointer_string_arrays;
+mod global_scalar_compound_literals;
 mod global_scalar_declarations;
 mod global_short_declarations;
 mod global_sizeof;

@@ -90,3 +90,42 @@ fn file_scope_pointer_array_compound_literal_pointer_matches_host_stdout_and_exi
     // when/then
     assert_case("file_scope_pointer_array_compound_literal_pointer", source);
 }
+
+#[test]
+fn file_scope_int_scalar_compound_literal_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int *item = &(int){ 41 }; int main(void) { puts(\"global-compound-int-scalar-ptr\"); return *item == 41 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_int_scalar_compound_literal_address", source);
+}
+
+#[test]
+fn file_scope_bool_scalar_compound_literal_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); _Bool *flag = &(_Bool){ 7 }; int main(void) { puts(\"global-compound-bool-scalar-ptr\"); return *flag == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_bool_scalar_compound_literal_address", source);
+}
+
+#[test]
+fn file_scope_long_long_scalar_compound_literal_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); long long *value = &(long long){ 4294967296LL }; int main(void) { puts(\"global-compound-ll-scalar-ptr\"); return *value == 4294967296LL ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_long_long_scalar_compound_literal_address",
+        source,
+    );
+}
+
+#[test]
+fn file_scope_double_scalar_compound_literal_address_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double *value = &(double){ 2.25 }; int main(void) { puts(\"global-compound-double-scalar-ptr\"); return *value == 2.25 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_double_scalar_compound_literal_address", source);
+}

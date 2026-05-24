@@ -195,7 +195,7 @@ fn pointer_initializer_value(
     )
 }
 
-fn real_initializer_value(expr: &Expr, constants: &[Constant]) -> CompileResult<String> {
+pub(super) fn real_initializer_value(expr: &Expr, constants: &[Constant]) -> CompileResult<String> {
     match expr {
         Expr::DoubleLiteral(value) => Ok(value.clone()),
         Expr::Integer(value) | Expr::LongInteger(value) => Ok(value.to_string()),

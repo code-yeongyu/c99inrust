@@ -4,6 +4,7 @@ use crate::front_end::lexer::{Keyword, Token};
 use super::global_array_compound_literals::{
     GlobalArrayCompoundLiteralBacking, global_array_compound_literal_initializer,
 };
+use super::global_scalar_compound_literals::scalar_compound_literal_globals;
 use super::global_specifiers::global_specifiers_are_pointer;
 use super::integer_initializer::eval_integer_initializer_expr_with_constants;
 use super::token_scan::{
@@ -104,6 +105,22 @@ fn compound_literal_globals(
         .map(Some),
         Expr::AddressOf {
             target:
+                LValue::ScalarCompoundLiteral {
+                    scalar_type,
+                    referent: scalar_referent,
+                    value,
+                },
+        } => scalar_compound_literal_globals(
+            name,
+            referent,
+            scalar_type,
+            scalar_referent.as_deref(),
+            value.as_ref(),
+            constants,
+        )
+        .map(Some),
+        Expr::AddressOf {
+            target:
                 LValue::StructCompoundLiteral {
                     struct_name,
                     values,
@@ -197,9 +214,13 @@ fn global_struct_value(
 }
 
 fn int_initializer_value(expr: &Expr, constants: &[Constant]) -> CompileResult<i32> {
-    let value = eval_integer_initializer_expr_with_constants(expr, constants)?.to_i64_trunc()?;
+    let value = integer_initializer_value(expr, constants)?;
     i32::try_from(value)
         .map_err(|_| CompileError::new("global compound literal integer does not fit i32"))
+}
+
+fn integer_initializer_value(expr: &Expr, constants: &[Constant]) -> CompileResult<i64> {
+    eval_integer_initializer_expr_with_constants(expr, constants)?.to_i64_trunc()
 }
 
 fn compound_backing_name(name: &str) -> String {
