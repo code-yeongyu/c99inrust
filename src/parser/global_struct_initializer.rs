@@ -2,7 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::global_struct_initializer_addresses::{address_from_expr, string_pointer_from_expr};
-use super::global_struct_initializer_designators::write_array_field_designator;
+use super::global_struct_initializer_designators::write_designator;
 use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
     Constant, Expr, GlobalStructInitializerValue, Parser, StructLayout,
@@ -144,20 +144,15 @@ fn parse_values_for_struct(
             continue;
         }
         let item = &tokens[start..end];
-        if let Some((field_name, element_index, value_tokens)) =
-            designator_parser.struct_array_field_designator(item)?
-        {
-            let index = struct_field_index(known_structs, struct_name, field_name)?;
-            next_index = index + 1;
-            write_array_field_designator(
-                &mut values,
-                known_structs,
-                struct_name,
-                index,
-                element_index,
-                value_tokens,
-                constants,
-            )?;
+        if let Some(updated_next_index) = write_designator(
+            &mut values,
+            &designator_parser,
+            known_structs,
+            struct_name,
+            item,
+            constants,
+        )? {
+            next_index = updated_next_index;
             continue;
         }
         let (index, value_tokens) =

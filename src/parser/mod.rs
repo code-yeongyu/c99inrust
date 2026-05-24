@@ -120,8 +120,11 @@ pub use model::{
     GlobalStructInitializerAddress, GlobalStructInitializerValue, PointerReturnFunction,
     ReturnType, ScalarFieldType, ScalarType, StructField, StructLayout,
 };
-use parser_designated_initializers::{struct_field_designator, struct_field_index, zero_expr};
+use parser_designated_initializers::{
+    struct_field_designator, struct_field_index, struct_field_path_designator, zero_expr,
+};
 use parser_expression_helpers::{lvalue_from_expr, prefix_update_expr, statement_from_expression};
+use parser_local_struct_initializers::{field_type_at, resize_values_for_index};
 use parser_local_vlas::LocalVlaElement;
 pub use program::{Function, FunctionPrototype, Parameter, Program};
 use surface_parser::SurfaceParser;

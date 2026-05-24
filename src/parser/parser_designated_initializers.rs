@@ -79,6 +79,47 @@ pub(super) fn struct_field_designator(tokens: &[Token]) -> CompileResult<Option<
     Ok(Some((field, &tokens[3..])))
 }
 
+pub(super) fn struct_field_path_designator(
+    tokens: &[Token],
+) -> CompileResult<Option<(Vec<&str>, &[Token])>> {
+    if !tokens
+        .first()
+        .is_some_and(|token| token_is_punctuator(token, "."))
+    {
+        return Ok(None);
+    }
+    let mut fields = Vec::new();
+    let mut index = 0usize;
+    loop {
+        let Some(field) = tokens.get(index + 1).and_then(token_identifier) else {
+            return Err(CompileError::new("expected struct initializer field name"));
+        };
+        fields.push(field);
+        index += 2;
+        let Some(token) = tokens.get(index) else {
+            return Err(CompileError::new(
+                "expected nested struct initializer designator assignment",
+            ));
+        };
+        if token_is_punctuator(token, ".") {
+            continue;
+        }
+        if token_is_punctuator(token, "=") {
+            return if fields.len() > 1 {
+                Ok(Some((fields, &tokens[index + 1..])))
+            } else {
+                Ok(None)
+            };
+        }
+        if fields.len() == 1 && token_is_punctuator(token, "[") {
+            return Ok(None);
+        }
+        return Err(CompileError::new(
+            "expected nested struct initializer designator assignment",
+        ));
+    }
+}
+
 pub(super) fn struct_field_index(
     layouts: &[StructLayout],
     struct_name: &str,

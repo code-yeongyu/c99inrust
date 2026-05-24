@@ -74,19 +74,10 @@ impl Parser<'_> {
                 continue;
             }
             let item = &tokens[start..end];
-            if let Some((field_name, element_index, value_tokens)) =
-                self.struct_array_field_designator(item)?
+            if let Some(updated_next_index) =
+                self.write_local_struct_designator_item(layout, struct_name, &mut values, item)?
             {
-                let index = struct_field_index(self.known_structs, struct_name, field_name)?;
-                next_index = index + 1;
-                resize_values_for_index(&mut values, layout, index);
-                self.write_local_array_field_designator(
-                    layout,
-                    &mut values,
-                    index,
-                    element_index,
-                    value_tokens,
-                )?;
+                next_index = updated_next_index;
                 continue;
             }
             let (index, value_tokens) =
@@ -110,7 +101,7 @@ impl Parser<'_> {
         Ok(values)
     }
 
-    fn write_local_array_field_designator(
+    pub(super) fn write_local_array_field_designator(
         &self,
         layout: &StructLayout,
         values: &mut [LocalStructInitializerValue],
@@ -137,7 +128,7 @@ impl Parser<'_> {
         Ok(())
     }
 
-    fn parse_local_struct_field_value(
+    pub(super) fn parse_local_struct_field_value(
         &self,
         field_type: &FieldType,
         tokens: &[Token],
@@ -190,7 +181,7 @@ impl Parser<'_> {
         Ok(LocalStructInitializerValue::Expr(expr))
     }
 
-    fn local_struct_layout(&self, struct_name: &str) -> CompileResult<&StructLayout> {
+    pub(super) fn local_struct_layout(&self, struct_name: &str) -> CompileResult<&StructLayout> {
         self.known_structs
             .iter()
             .find(|layout| layout.name == struct_name)
@@ -213,11 +204,11 @@ fn braced_value_tokens(tokens: &[Token]) -> CompileResult<Option<&[Token]>> {
     Ok(None)
 }
 
-fn field_type_at(layout: &StructLayout, index: usize) -> Option<&FieldType> {
+pub(super) fn field_type_at(layout: &StructLayout, index: usize) -> Option<&FieldType> {
     layout.fields.get(index).map(|field| &field.field_type)
 }
 
-fn resize_values_for_index(
+pub(super) fn resize_values_for_index(
     values: &mut Vec<LocalStructInitializerValue>,
     layout: &StructLayout,
     index: usize,
