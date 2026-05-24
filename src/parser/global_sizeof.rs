@@ -43,6 +43,10 @@ fn global_initializer_sizeof_bytes(
             .len()
             .checked_mul(scalar_size_for_layout(ScalarType::Int))
             .ok_or_else(|| CompileError::new("global int array sizeof overflow"))?,
+        GlobalInitializer::LongLongArray(values) => values
+            .len()
+            .checked_mul(scalar_size_for_layout(ScalarType::LongLong))
+            .ok_or_else(|| CompileError::new("global long-long array sizeof overflow"))?,
         GlobalInitializer::BoolArray(values)
         | GlobalInitializer::UnsignedCharArray { values, .. }
         | GlobalInitializer::UnsignedCharMatrix { values, .. } => values.len(),

@@ -1,6 +1,9 @@
 use super::data_literals::{
     emit_string_literal_data_returning_to, global_string_label, label_name,
 };
+use super::global_integer_arrays::{
+    emit_int_array_global, emit_long_long_array_global, emit_short_array_global,
+};
 use super::global_pointer_arrays::{
     emit_pointer_name_array_global, emit_pointer_string_array_global,
 };
@@ -58,6 +61,9 @@ fn emit_global_initializer(
             length,
             values,
         } => emit_real_array_global(label, *scalar_type, values, *length, assembly),
+        LoweredGlobalInitializer::LongLongArray(values) => {
+            emit_long_long_array_global(label, values, assembly)
+        }
         LoweredGlobalInitializer::IntArray(values) => {
             emit_int_array_global(label, values, assembly)
         }
@@ -97,38 +103,6 @@ fn emit_global_initializer(
             write_assembly!(assembly, "{label}:\n")?;
             emit_byte_values(values, assembly)
         }
-    }
-}
-
-fn emit_int_array_global(label: &str, values: &[i32], assembly: &mut String) -> CompileResult<()> {
-    assembly.push_str(".p2align 2\n");
-    write_assembly!(assembly, "{label}:\n")?;
-    if values.iter().all(|value| *value == 0) {
-        let byte_len = values
-            .len()
-            .checked_mul(4)
-            .ok_or_else(|| CompileError::new("global int-array size overflow"))?;
-        write_assembly!(assembly, "\t.zero {byte_len}\n")
-    } else {
-        emit_int_values(values, assembly)
-    }
-}
-
-fn emit_short_array_global(
-    label: &str,
-    values: &[i32],
-    assembly: &mut String,
-) -> CompileResult<()> {
-    assembly.push_str(".p2align 1\n");
-    write_assembly!(assembly, "{label}:\n")?;
-    if values.iter().all(|value| *value == 0) {
-        let byte_len = values
-            .len()
-            .checked_mul(2)
-            .ok_or_else(|| CompileError::new("global short-array size overflow"))?;
-        write_assembly!(assembly, "\t.zero {byte_len}\n")
-    } else {
-        emit_short_values(values, assembly)
     }
 }
 
@@ -180,42 +154,6 @@ pub(in crate::codegen) fn emit_pointer_global_offset(
     } else {
         write_assembly!(assembly, "\t.quad {base_label}+{byte_offset}\n")
     }
-}
-
-pub(in crate::codegen) fn emit_int_values(
-    values: &[i32],
-    assembly: &mut String,
-) -> CompileResult<()> {
-    assembly.push_str("\t.long ");
-    let mut first = true;
-    for value in values {
-        if first {
-            first = false;
-        } else {
-            assembly.push(',');
-        }
-        write_assembly!(assembly, "{value}")?;
-    }
-    assembly.push('\n');
-    Ok(())
-}
-
-pub(in crate::codegen) fn emit_short_values(
-    values: &[i32],
-    assembly: &mut String,
-) -> CompileResult<()> {
-    assembly.push_str("\t.short ");
-    let mut first = true;
-    for value in values {
-        if first {
-            first = false;
-        } else {
-            assembly.push(',');
-        }
-        write_assembly!(assembly, "{value}")?;
-    }
-    assembly.push('\n');
-    Ok(())
 }
 
 pub(in crate::codegen) fn emit_byte_values(

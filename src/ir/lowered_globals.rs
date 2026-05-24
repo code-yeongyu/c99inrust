@@ -21,6 +21,7 @@ pub enum LoweredGlobalInitializer {
         length: usize,
         values: Vec<String>,
     },
+    LongLongArray(Vec<i64>),
     IntArray(Vec<i32>),
     ShortArray(Vec<i32>),
     PointerNull,

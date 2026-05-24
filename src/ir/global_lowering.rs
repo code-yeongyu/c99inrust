@@ -100,6 +100,7 @@ pub(in crate::ir) fn lower_extern_global_binding(
         | GlobalInitializer::Double(_)
         | GlobalInitializer::ComplexReal { .. }
         | GlobalInitializer::ScalarZero(_)
+        | GlobalInitializer::LongLongArray(_)
         | GlobalInitializer::IntArray(_)
         | GlobalInitializer::BoolArray(_)
         | GlobalInitializer::ShortArray { .. }

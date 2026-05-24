@@ -74,6 +74,7 @@ pub enum GlobalInitializer {
         real: String,
     },
     ScalarZero(ScalarType),
+    LongLongArray(Vec<i64>),
     IntArray(Vec<i32>),
     BoolArray(Vec<u8>),
     ShortArray {

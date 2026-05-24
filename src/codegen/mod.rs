@@ -35,6 +35,7 @@ mod complex_abi;
 mod data_literals;
 mod emit_program;
 mod frames;
+mod global_integer_arrays;
 mod global_pointer_arrays;
 mod global_real_scalars;
 mod globals;

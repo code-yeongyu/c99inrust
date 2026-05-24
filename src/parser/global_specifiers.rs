@@ -77,6 +77,7 @@ fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> b
             ) => {}
             TokenKind::Keyword(
                 Keyword::Char
+                | Keyword::Bool
                 | Keyword::Complex
                 | Keyword::Double
                 | Keyword::Float

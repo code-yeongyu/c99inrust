@@ -87,7 +87,14 @@ pub(super) fn parse_string_pointer_initializer(
     constants: &[Constant],
 ) -> CompileResult<Option<(String, usize)>> {
     let expr = parse_initializer_expr(tokens, constants)?;
-    string_pointer_initializer(&expr, constants)?
+    string_pointer_initializer_expr(&expr, constants)
+}
+
+pub(super) fn string_pointer_initializer_expr(
+    expr: &Expr,
+    constants: &[Constant],
+) -> CompileResult<Option<(String, usize)>> {
+    string_pointer_initializer(expr, constants)?
         .map(|initializer| {
             usize::try_from(initializer.byte_offset)
                 .map(|byte_offset| (initializer.value, byte_offset))

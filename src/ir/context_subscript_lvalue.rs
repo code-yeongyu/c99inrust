@@ -240,6 +240,7 @@ impl LoweringContext {
             }
             Some("_Bool") => ScalarType::Bool,
             Some("float" | "double") => ScalarType::Double,
+            Some("long long") => ScalarType::LongLong,
             Some("long double") => ScalarType::LongDouble,
             Some("float _Complex") => ScalarType::ComplexFloat,
             Some("double _Complex") => ScalarType::ComplexDouble,

@@ -1,9 +1,9 @@
 use super::{
-    GlobalBinding, LoweredGlobalInitializer, global_pointer_arrays, global_pointer_initializers,
-    lower_scalar_global_initializer, scalar_size, struct_initializer,
+    GlobalBinding, LoweredGlobalInitializer, global_array_initializers, global_pointer_arrays,
+    global_pointer_initializers, lower_scalar_global_initializer, struct_initializer,
 };
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Global, GlobalInitializer, ScalarType, StructLayout};
+use crate::parser::{Global, GlobalInitializer, StructLayout};
 use std::collections::HashMap;
 
 pub(in crate::ir) fn lower_defined_global_initializer(
@@ -19,9 +19,6 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     ) {
         return lowered;
     }
-    if let Some(lowered) = lower_unsigned_char_global_initializer(&global.initializer) {
-        return Ok(lowered);
-    }
     if let Some(lowered) = lower_scalar_global_initializer(global, constants)? {
         return Ok(lowered);
     }
@@ -32,38 +29,23 @@ pub(in crate::ir) fn lower_defined_global_initializer(
     )? {
         return Ok(lowered);
     }
-    if let Some(lowered) = lower_real_array_global_initializer(&global.initializer)? {
+    if let Some(lowered) = global_array_initializers::lower_array_global_initializer(global)? {
         return Ok(lowered);
     }
-    match &global.initializer {
-        GlobalInitializer::IntArray(values) => Ok((
-            LoweredGlobalInitializer::IntArray(values.clone()),
-            GlobalBinding::IntArray,
-        )),
-        GlobalInitializer::BoolArray(values) => Ok((
-            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
-            GlobalBinding::ScalarArray {
-                scalar_type: ScalarType::Bool,
-                length: Some(values.len()),
-            },
-        )),
-        GlobalInitializer::ShortArray { .. } => lower_short_array_global_initializer(global),
-        GlobalInitializer::IntMatrix { values, columns } => Ok((
-            LoweredGlobalInitializer::IntArray(values.clone()),
-            GlobalBinding::IntMatrix { columns: *columns },
-        )),
-        GlobalInitializer::PointerArray { .. }
-        | GlobalInitializer::PointerStringArray { .. }
-        | GlobalInitializer::PointerNameArray { .. } => Err(CompileError::new(
-            "internal error: pointer array global reached fallback lowering",
-        )),
-        GlobalInitializer::PointerNull { .. }
-        | GlobalInitializer::PointerString { .. }
-        | GlobalInitializer::PointerName { .. }
-        | GlobalInitializer::PointerSubscriptAddress { .. }
-        | GlobalInitializer::PointerMemberAddress { .. } => Err(CompileError::new(
-            "internal error: pointer scalar global reached fallback lowering",
-        )),
+    if let Some(lowered) =
+        lower_struct_global_initializer(&global.initializer, structs, global_bindings)?
+    {
+        return Ok(lowered);
+    }
+    invalid_defined_global_initializer(&global.initializer)
+}
+
+fn lower_struct_global_initializer(
+    initializer: &GlobalInitializer,
+    structs: &HashMap<String, StructLayout>,
+    global_bindings: &HashMap<String, GlobalBinding>,
+) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
+    match initializer {
         GlobalInitializer::StructObject {
             struct_name,
             values,
@@ -72,7 +54,8 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             values,
             structs,
             global_bindings,
-        ),
+        )
+        .map(Some),
         GlobalInitializer::StructArray {
             struct_name,
             length,
@@ -85,7 +68,37 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             values,
             structs,
             global_bindings,
-        ),
+        )
+        .map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn invalid_defined_global_initializer(
+    initializer: &GlobalInitializer,
+) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
+    match initializer {
+        GlobalInitializer::PointerArray { .. }
+        | GlobalInitializer::PointerStringArray { .. }
+        | GlobalInitializer::PointerNameArray { .. } => Err(CompileError::new(
+            "internal error: pointer array global reached fallback lowering",
+        )),
+        GlobalInitializer::PointerNull { .. }
+        | GlobalInitializer::PointerString { .. }
+        | GlobalInitializer::PointerName { .. }
+        | GlobalInitializer::PointerSubscriptAddress { .. }
+        | GlobalInitializer::PointerMemberAddress { .. } => Err(CompileError::new(
+            "internal error: pointer scalar global reached fallback lowering",
+        )),
+        GlobalInitializer::LongLongArray(_)
+        | GlobalInitializer::IntArray(_)
+        | GlobalInitializer::BoolArray(_)
+        | GlobalInitializer::ShortArray { .. }
+        | GlobalInitializer::IntMatrix { .. }
+        | GlobalInitializer::StructObject { .. }
+        | GlobalInitializer::StructArray { .. } => Err(CompileError::new(
+            "internal error: supported global reached fallback lowering",
+        )),
         GlobalInitializer::UnsignedCharArray { .. }
         | GlobalInitializer::UnsignedCharMatrix { .. } => Err(CompileError::new(
             "internal error: byte global reached fallback lowering",
@@ -112,99 +125,4 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             "internal error: extern global reached definition lowering",
         )),
     }
-}
-
-fn lower_real_array_global_initializer(
-    initializer: &GlobalInitializer,
-) -> CompileResult<Option<(LoweredGlobalInitializer, GlobalBinding)>> {
-    match initializer {
-        GlobalInitializer::DoubleArray { length } => {
-            let byte_len = length
-                .checked_mul(scalar_size(ScalarType::Double))
-                .ok_or_else(|| CompileError::new("global double-array size overflow"))?;
-            Ok(Some((
-                LoweredGlobalInitializer::ZeroBytes(byte_len),
-                GlobalBinding::DoubleArray,
-            )))
-        }
-        GlobalInitializer::ScalarArray {
-            scalar_type,
-            length,
-        } => {
-            let byte_len = length
-                .checked_mul(scalar_size(*scalar_type))
-                .ok_or_else(|| CompileError::new("global scalar-array size overflow"))?;
-            Ok(Some((
-                LoweredGlobalInitializer::ZeroBytes(byte_len),
-                GlobalBinding::ScalarArray {
-                    scalar_type: *scalar_type,
-                    length: Some(*length),
-                },
-            )))
-        }
-        GlobalInitializer::ScalarArrayValues {
-            scalar_type,
-            length,
-            values,
-        } => Ok(Some((
-            LoweredGlobalInitializer::RealArray {
-                scalar_type: *scalar_type,
-                length: *length,
-                values: values.clone(),
-            },
-            GlobalBinding::ScalarArray {
-                scalar_type: *scalar_type,
-                length: Some(*length),
-            },
-        ))),
-        _ => Ok(None),
-    }
-}
-
-fn lower_unsigned_char_global_initializer(
-    initializer: &GlobalInitializer,
-) -> Option<(LoweredGlobalInitializer, GlobalBinding)> {
-    match initializer {
-        GlobalInitializer::UnsignedCharArray {
-            values,
-            is_unsigned,
-        } => Some((
-            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
-            GlobalBinding::UnsignedCharArray {
-                is_unsigned: *is_unsigned,
-            },
-        )),
-        GlobalInitializer::UnsignedCharMatrix {
-            values,
-            columns,
-            is_unsigned,
-        } => Some((
-            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
-            GlobalBinding::UnsignedCharMatrix {
-                columns: *columns,
-                is_unsigned: *is_unsigned,
-            },
-        )),
-        _ => None,
-    }
-}
-
-pub(in crate::ir) fn lower_short_array_global_initializer(
-    global: &Global,
-) -> CompileResult<(LoweredGlobalInitializer, GlobalBinding)> {
-    let GlobalInitializer::ShortArray {
-        values,
-        is_unsigned,
-        columns,
-    } = &global.initializer
-    else {
-        return Err(CompileError::new("expected short-array global initializer"));
-    };
-    Ok((
-        LoweredGlobalInitializer::ShortArray(values.clone()),
-        GlobalBinding::ShortArray {
-            is_unsigned: *is_unsigned,
-            columns: *columns,
-        },
-    ))
 }

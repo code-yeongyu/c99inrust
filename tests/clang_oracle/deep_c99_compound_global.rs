@@ -39,3 +39,54 @@ fn file_scope_double_array_compound_literal_pointer_matches_host_stdout_and_exit
     // when/then
     assert_case("file_scope_double_array_compound_literal_pointer", source);
 }
+
+#[test]
+fn file_scope_short_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); short *values = (short[]){ 1, 258, 513 }; int main(void) { puts(\"global-compound-short-ptr\"); return values[0] == 1 && values[1] == 258 && values[2] == 513 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_short_array_compound_literal_pointer", source);
+}
+
+#[test]
+fn file_scope_unsigned_short_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); unsigned short *values = (unsigned short[]){ 65535, 2, 65534 }; int main(void) { puts(\"global-compound-ushort-ptr\"); return values[0] == 65535 && values[1] == 2 && values[2] == 65534 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_unsigned_short_array_compound_literal_pointer",
+        source,
+    );
+}
+
+#[test]
+fn file_scope_long_long_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); long long *values = (long long[]){ 4294967296LL, -7LL }; int main(void) { puts(\"global-compound-long-long-ptr\"); return values[0] == 4294967296LL && values[1] == -7LL ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_long_long_array_compound_literal_pointer",
+        source,
+    );
+}
+
+#[test]
+fn file_scope_bool_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); _Bool *flags = (_Bool[]){ 2, 0, -3 }; int main(void) { puts(\"global-compound-bool-ptr\"); return flags[0] == 1 && flags[1] == 0 && flags[2] == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_bool_array_compound_literal_pointer", source);
+}
+
+#[test]
+fn file_scope_pointer_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); char **items = (char *[]){ \"alpha\" + 2, \"doom\" + 1, 0 }; int main(void) { puts(\"global-compound-pointer-array\"); return items[0][0] == 'p' && items[1][0] == 'o' && items[2] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_pointer_array_compound_literal_pointer", source);
+}

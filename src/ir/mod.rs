@@ -42,6 +42,7 @@ mod context_subscript_lvalue;
 mod doom_alloc;
 mod function_lowering;
 mod global_address_offsets;
+mod global_array_initializers;
 mod global_bindings;
 mod global_initializers;
 mod global_lowering;
