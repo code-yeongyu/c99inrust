@@ -1,4 +1,5 @@
 use super::aarch64_addressing::aarch64_register_prefix;
+use super::aarch64_call_preserve::{restore_aarch64_fp_registers, save_aarch64_fp_registers};
 use super::aarch64_complex_abi::emit_aarch64_complex_argument;
 use super::aarch64_expr::emit_aarch64_expr_with_width;
 use super::aarch64_temporaries::{
@@ -8,7 +9,7 @@ use super::aarch64_variadic::emit_aarch64_va_start;
 use super::complex_abi::expr_complex_scalar_type;
 use super::data_literals::label_name;
 use super::frames::LabelAllocator;
-use super::stack_helpers::call_stack_argument_bytes;
+use super::stack_helpers::{call_fp_preserve_base_depth, call_stack_argument_bytes};
 use super::widths::{TEMPORARY_BYTES, ValueWidth, expr_width};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::LoweredExpr;
@@ -176,8 +177,14 @@ fn emit_aarch64_complex_register_arguments(
 ) -> CompileResult<()> {
     let mut float_register = 0usize;
     let mut integer_register = 0usize;
+    let fp_save_base = call_fp_preserve_base_depth(args)
+        .map(|base| temporary_base + ((depth + base) * TEMPORARY_BYTES));
     for arg in args {
         if expr_complex_scalar_type(arg).is_some() {
+            let saved_float_registers = float_register;
+            if let Some(base) = fp_save_base {
+                save_aarch64_fp_registers(saved_float_registers, base, assembly)?;
+            }
             emit_aarch64_complex_argument(
                 arg,
                 float_register,
@@ -186,10 +193,17 @@ fn emit_aarch64_complex_register_arguments(
                 labels,
                 assembly,
             )?;
+            if let Some(base) = fp_save_base {
+                restore_aarch64_fp_registers(saved_float_registers, base, assembly)?;
+            }
             float_register += 2;
             continue;
         }
         let width = expr_width(arg);
+        let saved_float_registers = float_register;
+        if let Some(base) = fp_save_base {
+            save_aarch64_fp_registers(saved_float_registers, base, assembly)?;
+        }
         emit_aarch64_expr_with_width(arg, width, temporary_base, depth + 1, labels, assembly)?;
         match width {
             ValueWidth::F64 => {
@@ -204,6 +218,9 @@ fn emit_aarch64_complex_register_arguments(
                 write_assembly!(assembly, "\tmov w{integer_register}, w0\n")?;
                 integer_register += 1;
             }
+        }
+        if let Some(base) = fp_save_base {
+            restore_aarch64_fp_registers(saved_float_registers, base, assembly)?;
         }
     }
     Ok(())

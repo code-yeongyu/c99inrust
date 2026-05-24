@@ -110,6 +110,27 @@ fn complex_comma_argument_evaluates_left_once_matches_host_stdout_and_exit_code(
 }
 
 #[test]
+fn complex_argument_survives_following_double_call_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double marker(void) { return 9.0; } int consume(double _Complex z, double marker_value) { double *raw = (double *)&z; return raw[0] == 5.0 && raw[1] == 6.0 && marker_value == 9.0; } int main(void) { double _Complex z = 5.0; double *raw = (double *)&z; raw[1] = 6.0; puts(\"complex-followed-by-double-call\"); return consume(z, marker()) ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_argument_survives_following_double_call", source);
+}
+
+#[test]
+fn prior_complex_argument_survives_following_comma_complex_arg_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int hits = 0; int bump(void) { hits = hits + 1; return 0; } int consume2(double _Complex first, double _Complex second) { double *a = (double *)&first; double *b = (double *)&second; return a[0] == 1.0 && a[1] == 2.0 && b[0] == 5.0 && b[1] == 6.0 && hits == 1; } int main(void) { double _Complex a = 1.0; double _Complex z = 5.0; double *ap = (double *)&a; double *zp = (double *)&z; ap[1] = 2.0; zp[1] = 6.0; puts(\"multi-complex-comma-arg\"); return consume2(a, (bump(), z)) ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "prior_complex_argument_survives_following_comma_complex_arg",
+        source,
+    );
+}
+
+#[test]
 fn extern_complex_double_function_return_matches_host_stdout_and_exit_code() {
     // given
     let case = OracleMultiFileCase {

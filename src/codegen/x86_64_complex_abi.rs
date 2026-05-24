@@ -1,8 +1,11 @@
 use super::complex_abi::expr_complex_scalar_type;
 use super::frames::LabelAllocator;
-use super::stack_helpers::{x86_stack_byte_offset, x86_stack_object_offset};
+use super::stack_helpers::{
+    call_fp_preserve_base_depth, x86_stack_byte_offset, x86_stack_object_offset,
+};
 use super::target::Target;
-use super::widths::{ValueWidth, expr_width};
+use super::widths::{TEMPORARY_BYTES, ValueWidth, expr_width};
+use super::x86_64_call_preserve::{restore_x86_64_fp_registers, save_x86_64_fp_registers};
 use super::x86_64_complex_expr_args::{
     X86_64ComplexExpressionArg, emit_x86_64_complex_expression_argument,
 };
@@ -134,8 +137,14 @@ pub(in crate::codegen) fn emit_x86_64_complex_register_arguments(
 ) -> CompileResult<()> {
     let mut float_register = 0usize;
     let mut integer_register = 0usize;
+    let fp_save_base = call_fp_preserve_base_depth(args)
+        .map(|base| temporary_base + ((depth + base) * TEMPORARY_BYTES));
     for arg in args {
         if let Some(scalar_type) = expr_complex_scalar_type(arg) {
+            let saved_float_registers = float_register;
+            if let Some(base) = fp_save_base {
+                save_x86_64_fp_registers(saved_float_registers, base, assembly)?;
+            }
             emit_x86_64_complex_argument(
                 arg,
                 float_register,
@@ -145,10 +154,17 @@ pub(in crate::codegen) fn emit_x86_64_complex_register_arguments(
                 labels,
                 assembly,
             )?;
+            if let Some(base) = fp_save_base {
+                restore_x86_64_fp_registers(saved_float_registers, base, assembly)?;
+            }
             float_register += x86_64_complex_register_count(scalar_type)?;
             continue;
         }
         let width = expr_width(arg);
+        let saved_float_registers = float_register;
+        if let Some(base) = fp_save_base {
+            save_x86_64_fp_registers(saved_float_registers, base, assembly)?;
+        }
         emit_x86_64_expr_with_width(
             arg,
             width,
@@ -179,6 +195,9 @@ pub(in crate::codegen) fn emit_x86_64_complex_register_arguments(
                 )?;
                 integer_register += 1;
             }
+        }
+        if let Some(base) = fp_save_base {
+            restore_x86_64_fp_registers(saved_float_registers, base, assembly)?;
         }
     }
     Ok(())

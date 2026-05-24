@@ -64,7 +64,27 @@ pub(in crate::codegen) fn call_arg_depth(args: &[LoweredExpr]) -> usize {
     if args.is_empty() {
         0
     } else {
-        args.len() + args.iter().map(expr_depth).max().unwrap_or(0) + complex_arg_scratch(args)
+        call_arg_base_depth(args) + fp_preserve_scratch(args)
+    }
+}
+
+pub(in crate::codegen) fn call_fp_preserve_base_depth(args: &[LoweredExpr]) -> Option<usize> {
+    (fp_preserve_scratch(args) > 0).then(|| call_arg_base_depth(args))
+}
+
+fn call_arg_base_depth(args: &[LoweredExpr]) -> usize {
+    args.len() + args.iter().map(expr_depth).max().unwrap_or(0) + complex_arg_scratch(args)
+}
+
+fn fp_preserve_scratch(args: &[LoweredExpr]) -> usize {
+    if args
+        .iter()
+        .any(|arg| expr_complex_scalar_type(arg).is_some())
+        && args.len() > 1
+    {
+        8
+    } else {
+        0
     }
 }
 
