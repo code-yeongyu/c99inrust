@@ -80,6 +80,15 @@ fn complex_expression_argument_preserves_imaginary_lane_matches_host_stdout_and_
 }
 
 #[test]
+fn complex_division_argument_preserves_result_lanes_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int consume(double _Complex z) { double *raw = (double *)&z; return raw[0] == 3.0 && raw[1] == -1.0; } int main(void) { double _Complex a = 4.0; double _Complex b = 1.0; double *ap = (double *)&a; double *bp = (double *)&b; ap[1] = 2.0; bp[1] = 1.0; puts(\"complex-division-arg\"); return consume(a / b) ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_division_argument_preserves_result_lanes", source);
+}
+
+#[test]
 fn complex_conditional_argument_preserves_selected_lane_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); int hits = 0; int pick(void) { hits = hits + 1; return 0; } int consume(double _Complex z) { double *raw = (double *)&z; return raw[0] == 3.0 && raw[1] == 4.0; } int main(void) { double _Complex a = 1.0; double _Complex b = 3.0; double *ap = (double *)&a; double *bp = (double *)&b; ap[1] = 2.0; bp[1] = 4.0; puts(\"complex-conditional-arg\"); return consume(pick() ? a : b) && hits == 1 ? 0 : 1; }\n";

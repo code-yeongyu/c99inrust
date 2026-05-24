@@ -2,7 +2,7 @@ use super::aarch64_analysis::expr_depth;
 use super::complex_abi::expr_complex_scalar_type;
 use super::widths::{TEMPORARY_BYTES, ValueWidth, width_bytes};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::ir::{LoweredExpr, LoweredFunction};
+use crate::ir::{LoweredExpr, LoweredFunction, complex_lane_byte_size, complex_lane_value_expr};
 
 pub(in crate::codegen) fn local_offset(
     function: &LoweredFunction,
@@ -69,13 +69,38 @@ pub(in crate::codegen) fn call_arg_depth(args: &[LoweredExpr]) -> usize {
 }
 
 fn complex_arg_scratch(args: &[LoweredExpr]) -> usize {
-    if args.iter().any(|arg| {
-        expr_complex_scalar_type(arg).is_some() && !matches!(arg, LoweredExpr::Local { .. })
-    }) {
-        2
-    } else {
-        0
-    }
+    args.iter()
+        .filter(|arg| !matches!(arg, LoweredExpr::Local { .. }))
+        .filter_map(complex_arg_scratch_depth)
+        .max()
+        .unwrap_or(0)
+}
+
+fn complex_arg_scratch_depth(arg: &LoweredExpr) -> Option<usize> {
+    let scalar_type = expr_complex_scalar_type(arg)?;
+    Some(match arg {
+        LoweredExpr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+        } => (1 + expr_depth(condition))
+            .max(complex_arg_scratch_depth(then_expr).unwrap_or(0))
+            .max(complex_arg_scratch_depth(else_expr).unwrap_or(0)),
+        LoweredExpr::Comma { left, right } => {
+            (1 + expr_depth(left)).max(complex_arg_scratch_depth(right).unwrap_or(0))
+        }
+        _ => complex_lane_scratch_depth(arg, scalar_type),
+    })
+}
+
+fn complex_lane_scratch_depth(arg: &LoweredExpr, scalar_type: crate::parser::ScalarType) -> usize {
+    let lane_size = complex_lane_byte_size(scalar_type);
+    [0_i64, 1_i64]
+        .into_iter()
+        .filter_map(|lane_index| complex_lane_value_expr(arg, scalar_type, lane_index, lane_size))
+        .map(|lane| 2 + expr_depth(&lane))
+        .max()
+        .unwrap_or(2)
 }
 
 pub(in crate::codegen) const fn memory_scale_shift_for_byte_size(byte_size: usize) -> Option<u8> {
