@@ -38,6 +38,36 @@ fn complex_double_parameter_return_arithmetic_matches_host_stdout_and_exit_code(
 }
 
 #[test]
+fn complex_float_function_return_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); float _Complex make_value(void) { float _Complex z = 4.0f; float *raw = (float *)&z; raw[1] = 5.0f; return z; } int main(void) { float _Complex z = make_value(); float *raw = (float *)&z; puts(\"complex-return-float\"); return raw[0] == 4.0f && raw[1] == 5.0f ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "complex_float_function_return_preserves_imaginary_lane",
+        source,
+    );
+}
+
+#[test]
+fn complex_float_parameter_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int consume(float _Complex z) { float *raw = (float *)&z; return raw[0] == 6.0f && raw[1] == 7.0f; } int main(void) { float _Complex z = 6.0f; float *raw = (float *)&z; raw[1] = 7.0f; puts(\"complex-parameter-float\"); return consume(z) ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_float_parameter_preserves_imaginary_lane", source);
+}
+
+#[test]
+fn complex_float_parameter_return_arithmetic_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); float _Complex combine(float _Complex a, float _Complex b) { return a + b; } int main(void) { float _Complex a = 1.0f; float _Complex b = 3.0f; float *ap = (float *)&a; float *bp = (float *)&b; ap[1] = 2.0f; bp[1] = 4.0f; float _Complex z = combine(a, b); float *raw = (float *)&z; puts(\"complex-float-param-return-arith\"); return raw[0] == 4.0f && raw[1] == 6.0f ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_float_parameter_return_arithmetic", source);
+}
+
+#[test]
 fn extern_complex_double_function_return_matches_host_stdout_and_exit_code() {
     // given
     let case = OracleMultiFileCase {

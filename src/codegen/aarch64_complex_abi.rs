@@ -11,16 +11,25 @@ pub(in crate::codegen) fn emit_aarch64_complex_argument(
     first_register: usize,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let Some(ScalarType::ComplexDouble) = expr_complex_scalar_type(arg) else {
-        return Err(CompileError::new("expected complex double argument"));
+    let Some(scalar_type) = expr_complex_scalar_type(arg) else {
+        return Err(CompileError::new("expected complex argument"));
     };
     if first_register + 1 >= 8 {
         return Err(CompileError::new(
             "too many complex function call arguments",
         ));
     }
-    match arg {
-        LoweredExpr::Local { offset, .. } => {
+    match (arg, scalar_type) {
+        (LoweredExpr::Local { offset, .. }, ScalarType::ComplexFloat) => {
+            write_assembly!(assembly, "\tldr s{first_register}, [sp, #{offset}]\n")?;
+            write_assembly!(
+                assembly,
+                "\tldr s{}, [sp, #{}]\n",
+                first_register + 1,
+                offset + 4
+            )
+        }
+        (LoweredExpr::Local { offset, .. }, ScalarType::ComplexDouble) => {
             write_assembly!(assembly, "\tldr d{first_register}, [sp, #{offset}]\n")?;
             write_assembly!(
                 assembly,
@@ -42,11 +51,6 @@ pub(in crate::codegen) fn emit_aarch64_store_complex_return(
     labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    if scalar_type != ScalarType::ComplexDouble {
-        return Err(CompileError::new(
-            "complex return store supports double only",
-        ));
-    }
     emit_aarch64_expr_with_width(
         pointer,
         ValueWidth::I64,
@@ -56,8 +60,21 @@ pub(in crate::codegen) fn emit_aarch64_store_complex_return(
         assembly,
     )?;
     assembly.push_str("\tmov x16, x0\n");
-    assembly.push_str("\tstr d0, [x16]\n");
-    assembly.push_str("\tstr d1, [x16, #8]\n");
+    match scalar_type {
+        ScalarType::ComplexFloat => {
+            assembly.push_str("\tstr s0, [x16]\n");
+            assembly.push_str("\tstr s1, [x16, #4]\n");
+        }
+        ScalarType::ComplexDouble => {
+            assembly.push_str("\tstr d0, [x16]\n");
+            assembly.push_str("\tstr d1, [x16, #8]\n");
+        }
+        _ => {
+            return Err(CompileError::new(
+                "complex return store supports float and double only",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -65,11 +82,15 @@ pub(in crate::codegen) fn emit_aarch64_complex_return_expr(
     expr: &LoweredExpr,
     assembly: &mut String,
 ) -> CompileResult<()> {
-    let Some(ScalarType::ComplexDouble) = expr_complex_scalar_type(expr) else {
-        return Err(CompileError::new("expected complex double return"));
+    let Some(scalar_type) = expr_complex_scalar_type(expr) else {
+        return Err(CompileError::new("expected complex return"));
     };
-    match expr {
-        LoweredExpr::Local { offset, .. } => {
+    match (expr, scalar_type) {
+        (LoweredExpr::Local { offset, .. }, ScalarType::ComplexFloat) => {
+            write_assembly!(assembly, "\tldr s0, [sp, #{offset}]\n")?;
+            write_assembly!(assembly, "\tldr s1, [sp, #{}]\n", offset + 4)
+        }
+        (LoweredExpr::Local { offset, .. }, ScalarType::ComplexDouble) => {
             write_assembly!(assembly, "\tldr d0, [sp, #{offset}]\n")?;
             write_assembly!(assembly, "\tldr d1, [sp, #{}]\n", offset + 8)
         }
@@ -90,6 +111,23 @@ pub(in crate::codegen) fn emit_aarch64_complex_parameter_stores(
             return Err(CompileError::new("internal error: missing parameter slot"));
         };
         match local_slot.scalar_type {
+            ScalarType::ComplexFloat => {
+                if float_register + 1 >= 8 {
+                    return Err(CompileError::new("too many complex function parameters"));
+                }
+                write_assembly!(
+                    assembly,
+                    "\tstr s{float_register}, [sp, #{}]\n",
+                    local_slot.offset
+                )?;
+                write_assembly!(
+                    assembly,
+                    "\tstr s{}, [sp, #{}]\n",
+                    float_register + 1,
+                    local_slot.offset + 4
+                )?;
+                float_register += 2;
+            }
             ScalarType::ComplexDouble => {
                 if float_register + 1 >= 8 {
                     return Err(CompileError::new("too many complex function parameters"));

@@ -9,9 +9,9 @@ use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
 };
 use super::x86_64_complex_abi::{
-    emit_x86_64_complex_parameter_stores, emit_x86_64_complex_return_expr,
-    emit_x86_64_store_complex_return,
+    emit_x86_64_complex_return_expr, emit_x86_64_store_complex_return,
 };
+use super::x86_64_complex_params::emit_x86_64_complex_parameter_stores;
 use super::x86_64_expr::{emit_x86_64_expr, emit_x86_64_expr_with_width};
 use super::x86_64_loads::{emit_x86_64_store_global, emit_x86_64_store_global_bool};
 use super::x86_64_temporaries::{
