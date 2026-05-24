@@ -18,6 +18,8 @@ mod deep_c99_compound_complex_edges;
 mod deep_c99_compound_flex;
 #[path = "clang_oracle/deep_c99_compound_literal_addresses.rs"]
 mod deep_c99_compound_literal_addresses;
+#[path = "clang_oracle/deep_c99_compound_runtime.rs"]
+mod deep_c99_compound_runtime;
 #[path = "clang_oracle/deep_c99_compound_storage.rs"]
 mod deep_c99_compound_storage;
 #[path = "clang_oracle/deep_c99_designated_initializers.rs"]
