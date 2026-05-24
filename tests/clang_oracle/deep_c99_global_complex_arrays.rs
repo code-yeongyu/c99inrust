@@ -1,3 +1,6 @@
+use super::multifile_support::{
+    OracleMultiFileCase, OracleSourceFile, assert_multifile_compile_run_matches_host,
+};
 use super::support::{OracleCase, assert_compile_run_matches_host};
 
 #[test]
@@ -22,4 +25,25 @@ fn sizeof_global_complex_double_array_matches_host_stdout_and_exit_code() {
         name: "sizeof_global_complex_double_array",
         source,
     });
+}
+
+#[test]
+fn extern_global_complex_double_array_matches_host_stdout_and_exit_code() {
+    // given
+    let case = OracleMultiFileCase {
+        name: "extern_global_complex_double_array",
+        files: &[
+            OracleSourceFile {
+                path: "state.c",
+                source: "double _Complex values[2]; void seed(void) { double _Complex z = 5.0; double *zp = (double *)&z; zp[1] = 6.0; values[1] = z; }\n",
+            },
+            OracleSourceFile {
+                path: "main.c",
+                source: "int puts(char*); extern double _Complex values[2]; void seed(void); int main(void) { seed(); double *raw = (double *)values; puts(\"extern-global-complex-array\"); return raw[0] == 0.0 && raw[1] == 0.0 && raw[2] == 5.0 && raw[3] == 6.0 ? 0 : 1; }\n",
+            },
+        ],
+    };
+
+    // when/then
+    assert_multifile_compile_run_matches_host(case);
 }
