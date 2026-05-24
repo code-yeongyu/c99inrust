@@ -21,3 +21,21 @@ fn global_struct_array_field_nested_designators_match_host_stdout_and_exit_code(
     // when/then
     assert_case("global_struct_array_field_nested_designators", source);
 }
+
+#[test]
+fn local_struct_field_nested_designators_match_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; int main(void) { box_t b = { .inner.y = 9, .inner.x = 4, .tag = 1, .tail = 2 }; puts(\"local-nested-struct-field\"); return b.tag == 1 && b.inner.x == 4 && b.inner.y == 9 && b.tail == 2 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("local_struct_field_nested_designators", source);
+}
+
+#[test]
+fn global_struct_field_nested_designators_match_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } inner_t; typedef struct { int tag; inner_t inner; int tail; } box_t; box_t b = { .inner.y = 9, .inner.x = 4, .tag = 1, .tail = 2 }; int main(void) { puts(\"global-nested-struct-field\"); return b.tag == 1 && b.inner.x == 4 && b.inner.y == 9 && b.tail == 2 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_struct_field_nested_designators", source);
+}
