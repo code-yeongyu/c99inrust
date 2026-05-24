@@ -2,6 +2,7 @@ use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
 use super::global_struct_initializer_addresses::{address_from_expr, string_pointer_from_expr};
+use super::global_struct_initializer_designators::write_array_field_designator;
 use super::token_scan::{matching_top_level_brace, token_is_punctuator, top_level_comma_ranges};
 use super::{
     Constant, Expr, GlobalStructInitializerValue, Parser, StructLayout,
@@ -129,11 +130,36 @@ fn parse_values_for_struct(
 ) -> CompileResult<Vec<GlobalStructInitializerValue>> {
     let mut values = Vec::new();
     let mut next_index = 0usize;
+    let designator_parser = Parser {
+        tokens: &[],
+        index: 0,
+        known_structs,
+        known_constants: constants,
+        known_scalar_typedefs: &[],
+        known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
+    };
     for (start, end) in top_level_comma_ranges(tokens) {
         if start == end {
             continue;
         }
         let item = &tokens[start..end];
+        if let Some((field_name, element_index, value_tokens)) =
+            designator_parser.struct_array_field_designator(item)?
+        {
+            let index = struct_field_index(known_structs, struct_name, field_name)?;
+            next_index = index + 1;
+            write_array_field_designator(
+                &mut values,
+                known_structs,
+                struct_name,
+                index,
+                element_index,
+                value_tokens,
+                constants,
+            )?;
+            continue;
+        }
         let (index, value_tokens) =
             if let Some((field_name, value_tokens)) = struct_field_designator(item)? {
                 let index = struct_field_index(known_structs, struct_name, field_name)?;
@@ -152,7 +178,7 @@ fn parse_values_for_struct(
     Ok(values)
 }
 
-fn parse_value(
+pub(super) fn parse_value(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],

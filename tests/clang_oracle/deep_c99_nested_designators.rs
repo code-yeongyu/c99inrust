@@ -12,3 +12,12 @@ fn local_struct_array_field_nested_designators_match_host_stdout_and_exit_code()
     // when/then
     assert_case("local_struct_array_field_nested_designators", source);
 }
+
+#[test]
+fn global_struct_array_field_nested_designators_match_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int values[4]; int tail; } bucket_t; bucket_t b = { .values[2] = 9, .values[0] = 1, .tail = 5 }; int main(void) { puts(\"global-nested-array-designator\"); return b.values[0] == 1 && b.values[1] == 0 && b.values[2] == 9 && b.values[3] == 0 && b.tail == 5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("global_struct_array_field_nested_designators", source);
+}
