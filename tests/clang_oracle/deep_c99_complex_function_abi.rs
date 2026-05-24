@@ -92,6 +92,15 @@ fn complex_conditional_argument_preserves_selected_lane_matches_host_stdout_and_
 }
 
 #[test]
+fn complex_comma_argument_evaluates_left_once_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int hits = 0; int bump(void) { hits = hits + 1; return 0; } int consume(double _Complex z) { double *raw = (double *)&z; return raw[0] == 5.0 && raw[1] == 6.0; } int main(void) { double _Complex z = 5.0; double *raw = (double *)&z; raw[1] = 6.0; puts(\"complex-comma-arg\"); return consume((bump(), z)) && hits == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("complex_comma_argument_evaluates_left_once", source);
+}
+
+#[test]
 fn extern_complex_double_function_return_matches_host_stdout_and_exit_code() {
     // given
     let case = OracleMultiFileCase {

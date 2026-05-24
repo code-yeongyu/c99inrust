@@ -74,7 +74,27 @@ impl X86_64ComplexArgMaterializer<'_, '_> {
                 temp_offset,
             );
         }
+        if let LoweredExpr::Comma { left, right } = arg {
+            return self.emit_comma_value_to_temp(left, right, temp_offset);
+        }
         self.emit_lanes_to_temp(arg, temp_offset)
+    }
+
+    fn emit_comma_value_to_temp(
+        &mut self,
+        left: &LoweredExpr,
+        right: &LoweredExpr,
+        temp_offset: usize,
+    ) -> CompileResult<()> {
+        emit_x86_64_expr(
+            left,
+            self.temporary_base,
+            self.depth + 1,
+            self.target,
+            self.labels,
+            self.assembly,
+        )?;
+        self.emit_value_to_temp(right, temp_offset)
     }
 
     fn emit_conditional_value_to_temp(
