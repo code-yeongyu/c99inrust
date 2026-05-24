@@ -5,6 +5,7 @@ use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::global_floatlike_declarations::{
     global_floatlike_scalar_type, parse_global_real_initializer,
 };
+use super::integer_initializer::parse_integer_initializer_with_constants;
 use super::token_scan::{
     matching_top_level_brace, matching_top_level_bracket, previous_identifier_index,
     token_identifier, token_is_punctuator, top_level_punctuator_index,
@@ -105,6 +106,7 @@ fn parse_global_real_array_initializer(
 
     let mut values = Vec::new();
     let mut start = 1usize;
+    let mut next_index = 0usize;
     while start < close_brace {
         let item = &tokens[start..close_brace];
         let item_len = top_level_punctuator_index(item, ",").unwrap_or(item.len());
@@ -114,11 +116,36 @@ fn parse_global_real_array_initializer(
                     .at(tokens[start].line, tokens[start].column),
             );
         }
-        values.push(parse_global_real_initializer(
-            &item[..item_len],
-            constants,
-            &[],
-        )?);
+        let item = &item[..item_len];
+        let (index, value_tokens) = if token_is_punctuator(&item[0], "[") {
+            let close = matching_top_level_bracket(item, 0)
+                .ok_or_else(|| CompileError::new("unterminated global scalar-array designator"))?;
+            if !item
+                .get(close + 1)
+                .is_some_and(|token| token_is_punctuator(token, "="))
+            {
+                return Err(CompileError::new(
+                    "expected global scalar-array designator assignment",
+                ));
+            }
+            let index = parse_integer_initializer_with_constants(&item[1..close], constants)?;
+            let index = usize::try_from(index)
+                .map_err(|_| CompileError::new("global scalar-array designator is negative"))?;
+            next_index = index
+                .checked_add(1)
+                .ok_or_else(|| CompileError::new("global scalar-array designator is too large"))?;
+            (index, &item[close + 2..])
+        } else {
+            let index = next_index;
+            next_index = next_index
+                .checked_add(1)
+                .ok_or_else(|| CompileError::new("too many global scalar-array initializers"))?;
+            (index, item)
+        };
+        if values.len() <= index {
+            values.resize(index + 1, "0".to_owned());
+        }
+        values[index] = parse_global_real_initializer(value_tokens, constants, &[])?;
         start += item_len;
         if start < close_brace {
             start += 1;
