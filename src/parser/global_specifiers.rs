@@ -76,7 +76,14 @@ fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> b
                 | Keyword::Unsigned,
             ) => {}
             TokenKind::Keyword(
-                Keyword::Char | Keyword::Int | Keyword::Long | Keyword::Short | Keyword::Void,
+                Keyword::Char
+                | Keyword::Complex
+                | Keyword::Double
+                | Keyword::Float
+                | Keyword::Int
+                | Keyword::Long
+                | Keyword::Short
+                | Keyword::Void,
             )
             | TokenKind::Identifier(_) => saw_type = true,
             TokenKind::Punctuator(value) if value == "*" => saw_pointer = true,
