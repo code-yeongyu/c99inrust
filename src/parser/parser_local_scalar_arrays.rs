@@ -1,4 +1,4 @@
-use super::{CompileError, CompileResult, Expr, Parser, ScalarType, Statement};
+use super::{CompileError, CompileResult, Expr, Parser, ScalarType, Statement, zero_expr};
 
 impl Parser<'_> {
     pub(super) fn local_scalar_array_declaration(
@@ -9,7 +9,7 @@ impl Parser<'_> {
     ) -> CompileResult<Statement> {
         let initializer = if self.check_punctuator("=") {
             self.advance();
-            Some(self.local_pointer_array_initializer()?)
+            Some(self.local_scalar_array_initializer()?)
         } else {
             None
         };
@@ -29,6 +29,40 @@ impl Parser<'_> {
             length,
             initializer,
         })
+    }
+
+    fn local_scalar_array_initializer(&mut self) -> CompileResult<Vec<Expr>> {
+        self.expect_punctuator("{")?;
+        let mut values = Vec::new();
+        if self.check_punctuator("}") {
+            self.advance();
+            return Ok(values);
+        }
+        let mut next_index = 0usize;
+        loop {
+            let index = if let Some(index) = self.local_array_designator_index()? {
+                next_index = index + 1;
+                index
+            } else {
+                let index = next_index;
+                next_index += 1;
+                index
+            };
+            let value = self.assignment()?;
+            if values.len() <= index {
+                values.resize_with(index + 1, zero_expr);
+            }
+            values[index] = value;
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+            self.expect_punctuator(",")?;
+            if self.check_punctuator("}") {
+                self.advance();
+                return Ok(values);
+            }
+        }
     }
 }
 
