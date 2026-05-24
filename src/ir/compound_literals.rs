@@ -22,10 +22,14 @@ impl LoweringContext {
             }
             let index = usize::try_from(index)
                 .map_err(|_| CompileError::new("compound literal subscript is too large"))?;
-            if let Some(value) = values.get(index) {
-                return self.lower_expr(value).map(Some);
-            }
-            return Ok(Some(zero_expr_for(*element_type)));
+            let value = if let Some(value) = values.get(index) {
+                self.lower_expr(value)?
+            } else {
+                zero_expr_for(*element_type)
+            };
+            return self
+                .array_compound_initializer_prefix(values, index, value)
+                .map(Some);
         }
         Ok(Some(LoweredExpr::IndexSelect {
             index: Box::new(self.lower_expr(index)?),
@@ -35,6 +39,24 @@ impl LoweringContext {
                 .collect::<CompileResult<Vec<_>>>()?,
             default: Box::new(zero_expr_for(*element_type)),
         }))
+    }
+
+    fn array_compound_initializer_prefix(
+        &self,
+        values: &[Expr],
+        selected_index: usize,
+        result: LoweredExpr,
+    ) -> CompileResult<LoweredExpr> {
+        let prefix_len = selected_index.min(values.len());
+        values[..prefix_len]
+            .iter()
+            .rev()
+            .try_fold(result, |right, value| {
+                Ok(LoweredExpr::Comma {
+                    left: Box::new(self.lower_expr(value)?),
+                    right: Box::new(right),
+                })
+            })
     }
 
     pub(in crate::ir) fn compound_literal_size(&self, expr: &Expr) -> CompileResult<usize> {

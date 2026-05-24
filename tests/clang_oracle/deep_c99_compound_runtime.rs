@@ -23,3 +23,15 @@ fn array_compound_literal_runtime_index_side_effect_runs_once() {
         source,
     });
 }
+
+#[test]
+fn array_compound_literal_prior_initializer_side_effects_match_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int calls = 0; int step(int value) { calls = calls * 10 + value; return value; } int main(void) { int selected = (int[]){ step(1), step(2), step(3) }[2]; puts(\"compound-init-side-effects\"); return selected == 3 && calls == 123 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "array_compound_literal_prior_initializer_side_effects",
+        source,
+    });
+}
