@@ -1,6 +1,9 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token};
 
+use super::global_array_compound_literals::{
+    GlobalArrayCompoundLiteralBacking, global_array_compound_literal_initializer,
+};
 use super::global_specifiers::global_specifiers_are_pointer;
 use super::integer_initializer::eval_integer_initializer_expr_with_constants;
 use super::token_scan::{
@@ -8,8 +11,7 @@ use super::token_scan::{
 };
 use super::{
     Constant, Expr, Global, GlobalInitializer, GlobalStructInitializerValue, LValue,
-    LocalStructInitializerValue, Parser, ScalarType, StructLayout,
-    pointer_referent_from_specifiers,
+    LocalStructInitializerValue, Parser, StructLayout, pointer_referent_from_specifiers,
 };
 
 pub(super) fn parse_global_pointer_compound_literal(
@@ -82,13 +84,24 @@ fn compound_literal_globals(
     match expr {
         Expr::ArrayCompoundLiteral {
             element_type,
+            element_byte_size,
+            element_unsigned,
             length,
             values,
             ..
-        } => {
-            array_compound_literal_globals(name, referent, element_type, length, &values, constants)
-                .map(Some)
-        }
+        } => array_compound_literal_globals(
+            name,
+            referent,
+            GlobalArrayCompoundLiteralBacking {
+                element_type,
+                element_byte_size,
+                element_unsigned,
+                length,
+            },
+            &values,
+            constants,
+        )
+        .map(Some),
         Expr::AddressOf {
             target:
                 LValue::StructCompoundLiteral {
@@ -104,32 +117,22 @@ fn compound_literal_globals(
 fn array_compound_literal_globals(
     name: &str,
     referent: Option<String>,
-    element_type: ScalarType,
-    length: usize,
+    backing: GlobalArrayCompoundLiteralBacking,
     values: &[Expr],
     constants: &[Constant],
 ) -> CompileResult<Vec<Global>> {
-    if element_type != ScalarType::Int {
-        return Err(CompileError::new(
-            "unsupported global array compound literal element type",
-        ));
-    }
-    if values.len() > length {
+    if values.len() > backing.length {
         return Err(CompileError::new(
             "global array compound literal initializer is too large",
         ));
     }
     let backing_name = compound_backing_name(name);
-    let mut array_values = Vec::with_capacity(length);
-    for value in values {
-        array_values.push(int_initializer_value(value, constants)?);
-    }
-    array_values.resize(length, 0);
+    let initializer = global_array_compound_literal_initializer(backing, values, constants)?;
     Ok(pointer_with_backing(
         name,
         referent,
         backing_name,
-        GlobalInitializer::IntArray(array_values),
+        initializer,
     ))
 }
 

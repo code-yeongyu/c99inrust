@@ -21,3 +21,21 @@ fn file_scope_struct_compound_literal_address_matches_host_stdout_and_exit_code(
     // when/then
     assert_case("file_scope_struct_compound_literal_address", source);
 }
+
+#[test]
+fn file_scope_char_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); char *text = (char[]){ 'o', 'k', 0 }; int main(void) { puts(text); return text[0] == 'o' && text[1] == 'k' && text[2] == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_char_array_compound_literal_pointer", source);
+}
+
+#[test]
+fn file_scope_double_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double *values = (double[]){ 1.5, 2.5 }; int main(void) { puts(\"global-compound-double-ptr\"); return values[0] == 1.5 && values[1] == 2.5 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_double_array_compound_literal_pointer", source);
+}

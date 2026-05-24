@@ -13,6 +13,7 @@ mod enum_declarations;
 mod external_declarations;
 mod function_pointer_declarators;
 mod function_pointer_typedefs;
+mod global_array_compound_literals;
 mod global_bool_declarations;
 mod global_byte_declarations;
 mod global_byte_initializers;
