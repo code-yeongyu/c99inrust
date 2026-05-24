@@ -3,46 +3,15 @@ use crate::front_end::lexer::Token;
 use super::parser_local_struct_designator_cursor::{
     LocalStructDesignatorCursor, LocalStructDesignatorWrite,
 };
+use super::parser_local_struct_designator_cursor_steps::{
+    next_local_struct_field_cursor, next_local_struct_field_path,
+};
 use super::{
     CompileError, CompileResult, FieldType, LocalStructInitializerValue, Parser, StructLayout,
     field_type_at, resize_values_for_index, struct_field_index,
 };
 
 impl Parser<'_> {
-    pub(super) fn write_local_struct_array_element_designator_item(
-        &self,
-        layout: &StructLayout,
-        struct_name: &str,
-        values: &mut Vec<LocalStructInitializerValue>,
-        item: &[Token],
-    ) -> CompileResult<Option<LocalStructDesignatorWrite>> {
-        let Some(designator) = self.struct_array_element_field_designator(item)? else {
-            return Ok(None);
-        };
-        let index = struct_field_index(self.known_structs, struct_name, designator.array_path[0])?;
-        let array_path =
-            self.local_struct_field_index_path(layout, index, &designator.array_path[1..])?;
-        let (element_struct_name, _) =
-            self.local_struct_array_field_info(struct_name, &array_path)?;
-        let field_path =
-            self.local_struct_field_path_from_names(&element_struct_name, &designator.field_path)?;
-        self.write_local_struct_array_element_field_path_value(
-            struct_name,
-            values,
-            &array_path,
-            designator.element_index,
-            &field_path,
-            designator.value_tokens,
-        )?;
-        self.next_local_struct_array_element_field_cursor(
-            struct_name,
-            &array_path,
-            designator.element_index,
-            &field_path,
-        )
-        .map(Some)
-    }
-
     pub(super) fn write_local_struct_array_element_cursor_value(
         &self,
         struct_name: &str,
@@ -125,7 +94,7 @@ impl Parser<'_> {
         let (element_struct_name, length) =
             self.local_struct_array_field_info(struct_name, array_path)?;
         if let Some(next_field_path) =
-            self.next_local_struct_field_path(&element_struct_name, field_path)?
+            next_local_struct_field_path(self, &element_struct_name, field_path)?
         {
             return Ok(LocalStructDesignatorWrite {
                 next_index: array_path[0] + 1,
@@ -149,7 +118,7 @@ impl Parser<'_> {
                 }),
             });
         }
-        self.next_local_struct_field_cursor(struct_name, array_path)
+        next_local_struct_field_cursor(self, struct_name, array_path)
     }
 
     pub(super) fn local_struct_array_field_info(

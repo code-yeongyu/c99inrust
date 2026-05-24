@@ -54,3 +54,42 @@ fn compound_literal_struct_array_element_field_designator_matches_host_stdout_an
         source,
     );
 }
+
+#[test]
+fn local_struct_array_element_array_field_designator_continues_inside_array_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); typedef struct { int coords[3]; int tail; } item_t; typedef struct { item_t items[2]; int done; } box_t; int main(void) { box_t box = { .items[0].coords[1] = 5, 6 }; puts(\"mixed-local-element-array-field\"); return box.items[0].coords[0] == 0 && box.items[0].coords[1] == 5 && box.items[0].coords[2] == 6 && box.items[0].tail == 0 && box.items[1].coords[0] == 0 && box.done == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "local_struct_array_element_array_field_designator_continues_inside_array",
+        source,
+    );
+}
+
+#[test]
+fn global_struct_array_element_array_field_designator_continues_inside_array_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); typedef struct { int coords[3]; int tail; } item_t; typedef struct { item_t items[2]; int done; } box_t; box_t box = { .items[0].coords[1] = 5, 6 }; int main(void) { puts(\"mixed-global-element-array-field\"); return box.items[0].coords[0] == 0 && box.items[0].coords[1] == 5 && box.items[0].coords[2] == 6 && box.items[0].tail == 0 && box.items[1].coords[0] == 0 && box.done == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "global_struct_array_element_array_field_designator_continues_inside_array",
+        source,
+    );
+}
+
+#[test]
+fn compound_literal_struct_array_element_array_field_designator_matches_host_stdout_and_exit_code()
+{
+    // given
+    let source = "int puts(char*); typedef struct { int coords[3]; int tail; } item_t; typedef struct { item_t items[2]; int done; } box_t; int main(void) { box_t box = (box_t){ .items[0].coords[1] = 5, 6 }; puts(\"mixed-compound-element-array-field\"); return box.items[0].coords[0] == 0 && box.items[0].coords[1] == 5 && box.items[0].coords[2] == 6 && box.items[0].tail == 0 && box.items[1].coords[0] == 0 && box.done == 0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "compound_literal_struct_array_element_array_field_designator",
+        source,
+    );
+}

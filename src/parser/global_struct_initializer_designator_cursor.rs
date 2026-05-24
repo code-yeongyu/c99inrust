@@ -8,10 +8,14 @@ use super::global_struct_initializer_designator_paths::global_struct_field_index
 use super::global_struct_initializer_designators::{
     write_array_field_designator, write_array_index_path_value, write_index_path_value,
 };
-use super::global_struct_initializer_struct_array_designators::{
-    StructArrayElementWriter, next_struct_array_element_field_cursor, struct_array_field_info,
-    struct_field_path_from_names,
+use super::global_struct_initializer_struct_array_array_designators::{
+    GlobalStructArrayElementArrayTarget, GlobalStructArrayElementArrayWrite,
+    StructArrayElementArrayWriter, next_struct_array_element_array_field_cursor,
 };
+use super::global_struct_initializer_struct_array_designators::{
+    StructArrayElementWriter, next_struct_array_element_field_cursor,
+};
+use super::global_struct_initializer_struct_array_dispatch::write_struct_array_element_designator;
 use super::{
     Constant, GlobalStructInitializerValue, Parser, StructLayout, struct_field_index,
     struct_field_path_designator,
@@ -35,6 +39,12 @@ pub(super) enum GlobalStructDesignatorCursor {
         array_path: Vec<usize>,
         element_index: usize,
         field_path: Vec<usize>,
+    },
+    StructArrayArrayFieldPath {
+        array_path: Vec<usize>,
+        element_index: usize,
+        field_path: Vec<usize>,
+        field_element_index: usize,
     },
     FieldPath(Vec<usize>),
 }
@@ -62,37 +72,15 @@ pub(super) fn write_designator(
         )?;
         return next_array_field_cursor(known_structs, struct_name, index, element_index).map(Some);
     }
-    if let Some(designator) = designator_parser.struct_array_element_field_designator(item)? {
-        let array_path = global_struct_field_index_path(
-            known_structs,
-            struct_name,
-            designator.array_path[0],
-            &designator.array_path[1..],
-        )?;
-        let (element_struct_name, _) =
-            struct_array_field_info(known_structs, struct_name, &array_path)?;
-        let field_path = struct_field_path_from_names(
-            known_structs,
-            &element_struct_name,
-            &designator.field_path,
-        )?;
-        let writer = StructArrayElementWriter::new(known_structs, constants);
-        writer.write_field_path_value(
-            values,
-            struct_name,
-            &array_path,
-            designator.element_index,
-            &field_path,
-            designator.value_tokens,
-        )?;
-        return next_struct_array_element_field_cursor(
-            known_structs,
-            struct_name,
-            &array_path,
-            designator.element_index,
-            &field_path,
-        )
-        .map(Some);
+    if let Some(write) = write_struct_array_element_designator(
+        values,
+        designator_parser,
+        known_structs,
+        struct_name,
+        item,
+        constants,
+    )? {
+        return Ok(Some(write));
     }
     if let Some((field_path, element_index, value_tokens)) =
         designator_parser.struct_array_field_path_designator(item)?
@@ -200,6 +188,29 @@ pub(super) fn write_cursor_value(
                 element_index,
                 &field_path,
             )
+        }
+        GlobalStructDesignatorCursor::StructArrayArrayFieldPath {
+            array_path,
+            element_index,
+            field_path,
+            field_element_index,
+        } => {
+            let target = GlobalStructArrayElementArrayTarget {
+                array_path: &array_path,
+                element_index,
+                field_path: &field_path,
+                field_element_index,
+            };
+            let writer = StructArrayElementArrayWriter::new(known_structs, constants);
+            writer.write_field_path_value(
+                values,
+                struct_name,
+                GlobalStructArrayElementArrayWrite {
+                    target,
+                    value_tokens,
+                },
+            )?;
+            next_struct_array_element_array_field_cursor(known_structs, struct_name, target)
         }
         GlobalStructDesignatorCursor::FieldPath(index_path) => {
             write_index_path_value(
