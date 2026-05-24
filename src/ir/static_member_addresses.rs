@@ -14,9 +14,10 @@ pub(in crate::ir) fn from_lvalue(
             dereference: false,
         } => member_expr_address(base, field, constants),
         LValue::Subscript { array, index } => member_subscript_address(array, index, constants),
-        LValue::Identifier(_) | LValue::ScalarCompoundLiteral { .. } | LValue::Member { .. } => {
-            Ok(None)
-        }
+        LValue::Identifier(_)
+        | LValue::ScalarCompoundLiteral { .. }
+        | LValue::StructCompoundLiteral { .. }
+        | LValue::Member { .. } => Ok(None),
     }
 }
 

@@ -12,6 +12,7 @@ mod complex_scalar_real;
 mod complex_scalar_store;
 mod compound_literal_storage;
 mod compound_literals;
+mod compound_struct_literal_addresses;
 mod compound_struct_literals;
 mod const_eval;
 mod constant_inlining;

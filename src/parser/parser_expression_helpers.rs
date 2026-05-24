@@ -26,6 +26,13 @@ pub(super) fn lvalue_from_expr(expr: Expr) -> CompileResult<LValue> {
             referent,
             value,
         }),
+        Expr::StructCompoundLiteral {
+            struct_name,
+            values,
+        } => Ok(LValue::StructCompoundLiteral {
+            struct_name,
+            values,
+        }),
         _ => Err(CompileError::new("unsupported assignment target")),
     }
 }

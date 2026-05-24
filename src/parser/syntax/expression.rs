@@ -18,6 +18,10 @@ pub enum LValue {
         referent: Option<String>,
         value: Box<Expr>,
     },
+    StructCompoundLiteral {
+        struct_name: String,
+        values: Vec<LocalStructInitializerValue>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

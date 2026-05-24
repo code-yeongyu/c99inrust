@@ -65,9 +65,10 @@ fn member_lvalue_address(
             dereference: false,
         } => member_expr_address(base, field, constants),
         LValue::Subscript { array, index } => member_subscript_address(array, index, constants),
-        LValue::Identifier(_) | LValue::ScalarCompoundLiteral { .. } | LValue::Member { .. } => {
-            Ok(None)
-        }
+        LValue::Identifier(_)
+        | LValue::ScalarCompoundLiteral { .. }
+        | LValue::StructCompoundLiteral { .. }
+        | LValue::Member { .. } => Ok(None),
     }
 }
 

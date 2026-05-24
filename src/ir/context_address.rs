@@ -19,6 +19,9 @@ impl LoweringContext {
             LValue::ScalarCompoundLiteral { .. } => Err(CompileError::new(
                 "scalar compound literal address requires storage lowering",
             )),
+            LValue::StructCompoundLiteral { .. } => Err(CompileError::new(
+                "struct compound literal address requires storage lowering",
+            )),
         }
     }
 

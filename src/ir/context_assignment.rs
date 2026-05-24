@@ -55,6 +55,11 @@ impl LoweringContext {
         {
             return self.lower_struct_compound_member_pointer_assignment(target, value);
         }
+        if lowered_lvalue_scalar_type(&target) == ScalarType::Pointer
+            && Self::is_struct_compound_address(value)
+        {
+            return self.lower_struct_compound_pointer_assignment(target, value);
+        }
         let value = self.lower_assignment_value(&target, value)?;
         self.push_store(target, value)
     }
@@ -153,6 +158,9 @@ impl LoweringContext {
             LValue::ScalarCompoundLiteral { .. } => Err(CompileError::new(
                 "scalar compound literal assignment is not supported",
             )),
+            LValue::StructCompoundLiteral { .. } => Err(CompileError::new(
+                "struct compound literal assignment is not supported",
+            )),
         }
     }
 
@@ -217,7 +225,7 @@ impl LoweringContext {
                 }
                 Ok(None)
             }
-            LValue::ScalarCompoundLiteral { .. } => Ok(None),
+            LValue::ScalarCompoundLiteral { .. } | LValue::StructCompoundLiteral { .. } => Ok(None),
         }
     }
 
