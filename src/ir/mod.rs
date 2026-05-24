@@ -23,6 +23,7 @@ mod context_array_resolution;
 mod context_assignment;
 mod context_calls;
 mod context_control_flow;
+mod context_declaration_dispatch;
 mod context_declarations;
 mod context_expr_core;
 mod context_expr_ops;
