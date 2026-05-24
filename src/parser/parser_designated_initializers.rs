@@ -47,6 +47,12 @@ impl Parser<'_> {
         }
         let close_bracket = matching_top_level_bracket(tokens, 2)
             .ok_or_else(|| CompileError::new("unterminated struct array field designator"))?;
+        if tokens
+            .get(close_bracket + 1)
+            .is_some_and(|token| token_is_punctuator(token, "."))
+        {
+            return Ok(None);
+        }
         if !tokens
             .get(close_bracket + 1)
             .is_some_and(|token| token_is_punctuator(token, "="))

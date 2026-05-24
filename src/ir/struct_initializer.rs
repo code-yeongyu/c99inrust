@@ -126,7 +126,17 @@ fn lower_value(
         FieldType::Struct(struct_name) => {
             nested_initializer::lower(value, struct_name, structs, global_bindings)
         }
-        FieldType::Scalar(_) | FieldType::StructArray { .. } => Err(CompileError::new(
+        FieldType::StructArray {
+            struct_name,
+            length,
+        } => nested_initializer::lower_struct_array(
+            value,
+            struct_name,
+            *length,
+            structs,
+            global_bindings,
+        ),
+        FieldType::Scalar(_) => Err(CompileError::new(
             "unsupported global struct initializer field",
         )),
     }

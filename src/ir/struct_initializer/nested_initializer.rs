@@ -29,6 +29,51 @@ pub(super) fn lower(
     })
 }
 
+pub(super) fn lower_struct_array(
+    value: &GlobalStructInitializerValue,
+    struct_name: &str,
+    length: usize,
+    structs: &HashMap<String, StructLayout>,
+    global_bindings: &HashMap<String, GlobalBinding>,
+) -> CompileResult<LoweredStructInitializerScalar> {
+    let layout = structs.get(struct_name).ok_or_else(|| {
+        CompileError::new(format!(
+            "unknown nested global struct-array field: {struct_name}"
+        ))
+    })?;
+    let byte_len = layout
+        .size
+        .checked_mul(length)
+        .ok_or_else(|| CompileError::new("nested global struct-array size overflow"))?;
+    let GlobalStructInitializerValue::Nested(elements) = value else {
+        return Err(CompileError::new(
+            "unsupported nested global struct-array initializer",
+        ));
+    };
+    if elements.len() > length {
+        return Err(CompileError::new(
+            "too many nested global struct-array initializer values",
+        ));
+    }
+    let mut bytes = vec![0; byte_len];
+    for (index, element) in elements.iter().enumerate() {
+        let start = index
+            .checked_mul(layout.size)
+            .ok_or_else(|| CompileError::new("nested global struct-array offset overflow"))?;
+        let scalar = lower(element, struct_name, structs, global_bindings)?;
+        let LoweredStructInitializerScalar::Bytes { values, byte_len } = scalar else {
+            return Err(CompileError::new(
+                "unsupported nested global struct-array element initializer",
+            ));
+        };
+        write_bytes(&mut bytes, start, &values[..byte_len])?;
+    }
+    Ok(LoweredStructInitializerScalar::Bytes {
+        values: bytes,
+        byte_len,
+    })
+}
+
 fn lower_single_field(
     value: &GlobalStructInitializerValue,
     layout: &StructLayout,
@@ -91,7 +136,11 @@ fn lower_field(
             ..
         } => array_field::lower(value, *element_size, *length),
         FieldType::Struct(struct_name) => lower(value, struct_name, structs, global_bindings),
-        FieldType::Scalar(_) | FieldType::StructArray { .. } => Err(CompileError::new(
+        FieldType::StructArray {
+            struct_name,
+            length,
+        } => lower_struct_array(value, struct_name, *length, structs, global_bindings),
+        FieldType::Scalar(_) => Err(CompileError::new(
             "unsupported nested global struct initializer field",
         )),
     }

@@ -101,7 +101,7 @@ pub(super) fn next_struct_field_cursor(
     })
 }
 
-fn next_struct_field_path(
+pub(super) fn next_struct_field_path(
     known_structs: &[StructLayout],
     struct_name: &str,
     index_path: &[usize],

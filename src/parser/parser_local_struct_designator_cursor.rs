@@ -19,6 +19,11 @@ pub(super) enum LocalStructDesignatorCursor {
         index_path: Vec<usize>,
         element_index: usize,
     },
+    StructArrayFieldPath {
+        array_path: Vec<usize>,
+        element_index: usize,
+        field_path: Vec<usize>,
+    },
     FieldPath(Vec<usize>),
 }
 
@@ -43,6 +48,14 @@ impl Parser<'_> {
                 value_tokens,
             )?;
             return Self::next_local_array_field_cursor(layout, index, element_index).map(Some);
+        }
+        if let Some(write) = self.write_local_struct_array_element_designator_item(
+            layout,
+            struct_name,
+            values,
+            item,
+        )? {
+            return Ok(Some(write));
         }
         if let Some((field_path, element_index, value_tokens)) =
             self.struct_array_field_path_designator(item)?
@@ -112,6 +125,18 @@ impl Parser<'_> {
                 )?;
                 self.next_local_struct_array_path_cursor(struct_name, &index_path, element_index)
             }
+            LocalStructDesignatorCursor::StructArrayFieldPath {
+                array_path,
+                element_index,
+                field_path,
+            } => self.write_local_struct_array_element_cursor_value(
+                struct_name,
+                values,
+                &array_path,
+                element_index,
+                &field_path,
+                value_tokens,
+            ),
             LocalStructDesignatorCursor::FieldPath(index_path) => {
                 self.write_local_struct_index_path_value(
                     struct_name,
@@ -185,7 +210,7 @@ impl Parser<'_> {
         self.next_local_struct_field_cursor(struct_name, index_path)
     }
 
-    fn next_local_struct_field_cursor(
+    pub(super) fn next_local_struct_field_cursor(
         &self,
         struct_name: &str,
         index_path: &[usize],
@@ -207,7 +232,7 @@ impl Parser<'_> {
         })
     }
 
-    fn next_local_struct_field_path(
+    pub(super) fn next_local_struct_field_path(
         &self,
         struct_name: &str,
         index_path: &[usize],
