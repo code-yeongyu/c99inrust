@@ -169,16 +169,6 @@ impl LoweringContext {
         Ok(())
     }
 
-    pub(in crate::ir) fn lower_local_short_array(
-        &mut self,
-        name: &str,
-        length: usize,
-        is_unsigned: bool,
-    ) -> CompileResult<()> {
-        self.declare_short_array(name, length, is_unsigned)?;
-        Ok(())
-    }
-
     pub(in crate::ir) fn lower_local_pointer_array(
         &mut self,
         name: &str,

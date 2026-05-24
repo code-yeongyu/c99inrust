@@ -58,6 +58,8 @@ mod deep_c99_global_pointer_array_designators;
 mod deep_c99_layout_more;
 #[path = "clang_oracle/deep_c99_local_scalar_arrays.rs"]
 mod deep_c99_local_scalar_arrays;
+#[path = "clang_oracle/deep_c99_local_short_arrays.rs"]
+mod deep_c99_local_short_arrays;
 #[path = "clang_oracle/deep_c99_local_struct_init.rs"]
 mod deep_c99_local_struct_init;
 #[path = "clang_oracle/deep_c99_long_double.rs"]

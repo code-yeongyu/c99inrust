@@ -52,6 +52,7 @@ mod local_array;
 mod local_initializer_values;
 mod local_scalar_arrays;
 mod local_scalar_conversion;
+mod local_short_arrays;
 mod local_struct_initializer;
 mod local_struct_initializer_array;
 mod local_struct_initializer_struct_array;

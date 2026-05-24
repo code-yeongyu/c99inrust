@@ -112,23 +112,38 @@ impl Parser<'_> {
     }
 
     pub(super) fn local_short_array_declaration(
-        &self,
+        &mut self,
         name: String,
         explicit_length: Option<usize>,
         is_unsigned: bool,
     ) -> CompileResult<Statement> {
-        if self.check_punctuator("=") {
-            return Err(CompileError::new(
-                "local short array initializers are not supported",
-            ));
-        }
-        let Some(length) = explicit_length else {
-            return Err(CompileError::new("local short arrays require a size"));
+        let initializer = if self.check_punctuator("=") {
+            self.advance();
+            Some(self.local_int_array_initializer()?)
+        } else {
+            None
         };
+        let length = match (explicit_length, &initializer) {
+            (Some(length), _) => length,
+            (None, Some(values)) if !values.is_empty() => values.len(),
+            (None, _) => return Err(CompileError::new("local short arrays require a size")),
+        };
+        let initializer = initializer
+            .map(|mut values| {
+                if values.len() > length {
+                    return Err(CompileError::new(
+                        "local short array initializer is too large",
+                    ));
+                }
+                values.resize(length, 0);
+                Ok(values)
+            })
+            .transpose()?;
         Ok(Statement::LocalShortArray {
             name,
             length,
             is_unsigned,
+            initializer,
         })
     }
 

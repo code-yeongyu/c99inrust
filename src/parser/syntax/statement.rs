@@ -45,6 +45,7 @@ pub enum Statement {
         name: String,
         length: usize,
         is_unsigned: bool,
+        initializer: Option<Vec<i32>>,
     },
     LocalScalarArray {
         name: String,

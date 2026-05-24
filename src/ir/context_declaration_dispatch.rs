@@ -66,7 +66,13 @@ impl LoweringContext {
                 name,
                 length,
                 is_unsigned,
-            } => Some(self.lower_local_short_array(name, *length, *is_unsigned)),
+                initializer,
+            } => Some(self.lower_local_short_array(
+                name,
+                *length,
+                *is_unsigned,
+                initializer.as_deref(),
+            )),
             Statement::LocalScalarArray {
                 name,
                 scalar_type,
