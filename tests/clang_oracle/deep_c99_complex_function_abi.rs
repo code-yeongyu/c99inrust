@@ -68,6 +68,18 @@ fn complex_float_parameter_return_arithmetic_matches_host_stdout_and_exit_code()
 }
 
 #[test]
+fn complex_expression_argument_preserves_imaginary_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int consume(double _Complex z) { double *raw = (double *)&z; return raw[0] == 4.0 && raw[1] == 6.0; } int main(void) { double _Complex a = 1.0; double _Complex b = 3.0; double *ap = (double *)&a; double *bp = (double *)&b; ap[1] = 2.0; bp[1] = 4.0; puts(\"complex-expression-arg\"); return consume(a + b) ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "complex_expression_argument_preserves_imaginary_lane",
+        source,
+    );
+}
+
+#[test]
 fn extern_complex_double_function_return_matches_host_stdout_and_exit_code() {
     // given
     let case = OracleMultiFileCase {

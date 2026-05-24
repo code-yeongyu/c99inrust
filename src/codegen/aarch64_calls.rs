@@ -178,7 +178,14 @@ fn emit_aarch64_complex_register_arguments(
     let mut integer_register = 0usize;
     for arg in args {
         if expr_complex_scalar_type(arg).is_some() {
-            emit_aarch64_complex_argument(arg, float_register, assembly)?;
+            emit_aarch64_complex_argument(
+                arg,
+                float_register,
+                temporary_base,
+                depth,
+                labels,
+                assembly,
+            )?;
             float_register += 2;
             continue;
         }

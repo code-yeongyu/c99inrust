@@ -48,6 +48,7 @@ mod x86_64_binary;
 mod x86_64_builtin_calls;
 mod x86_64_calls;
 mod x86_64_complex_abi;
+mod x86_64_complex_expr_args;
 mod x86_64_complex_params;
 mod x86_64_conditionals;
 mod x86_64_expr;

@@ -1,14 +1,17 @@
 use super::aarch64_expr::emit_aarch64_expr_with_width;
 use super::complex_abi::expr_complex_scalar_type;
 use super::frames::LabelAllocator;
-use super::widths::ValueWidth;
+use super::widths::{TEMPORARY_BYTES, ValueWidth};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::ir::{LoweredExpr, LoweredFunction};
+use crate::ir::{LoweredExpr, LoweredFunction, complex_lane_byte_size, complex_lane_value_expr};
 use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_aarch64_complex_argument(
     arg: &LoweredExpr,
     first_register: usize,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let Some(scalar_type) = expr_complex_scalar_type(arg) else {
@@ -38,8 +41,76 @@ pub(in crate::codegen) fn emit_aarch64_complex_argument(
                 offset + 8
             )
         }
+        _ => emit_aarch64_complex_expression_argument(
+            arg,
+            scalar_type,
+            first_register,
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
+    }
+}
+
+fn emit_aarch64_complex_expression_argument(
+    arg: &LoweredExpr,
+    scalar_type: ScalarType,
+    first_register: usize,
+    temporary_base: usize,
+    depth: usize,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let lane_size = complex_lane_byte_size(scalar_type);
+    let temp_offset = temporary_base + (depth * TEMPORARY_BYTES);
+    for (index, lane_index) in [0_i64, 1_i64].into_iter().enumerate() {
+        let lane = complex_lane_value_expr(arg, scalar_type, lane_index, lane_size)
+            .ok_or_else(|| CompileError::new("complex argument lane is unsupported"))?;
+        emit_aarch64_expr_with_width(
+            &lane,
+            ValueWidth::F64,
+            temporary_base,
+            depth + 2,
+            labels,
+            assembly,
+        )?;
+        match scalar_type {
+            ScalarType::ComplexFloat => {
+                assembly.push_str("\tfcvt s0, d0\n");
+                write_assembly!(assembly, "\tstr s0, [sp, #{}]\n", temp_offset + (index * 4))?;
+            }
+            ScalarType::ComplexDouble => {
+                write_assembly!(assembly, "\tstr d0, [sp, #{}]\n", temp_offset + (index * 8))?;
+            }
+            _ => {
+                return Err(CompileError::new(
+                    "complex expression argument supports float and double only",
+                ));
+            }
+        }
+    }
+    match scalar_type {
+        ScalarType::ComplexFloat => {
+            write_assembly!(assembly, "\tldr s{first_register}, [sp, #{temp_offset}]\n")?;
+            write_assembly!(
+                assembly,
+                "\tldr s{}, [sp, #{}]\n",
+                first_register + 1,
+                temp_offset + 4
+            )
+        }
+        ScalarType::ComplexDouble => {
+            write_assembly!(assembly, "\tldr d{first_register}, [sp, #{temp_offset}]\n")?;
+            write_assembly!(
+                assembly,
+                "\tldr d{}, [sp, #{}]\n",
+                first_register + 1,
+                temp_offset + 8
+            )
+        }
         _ => Err(CompileError::new(
-            "complex argument currently requires an object value",
+            "complex expression argument supports float and double only",
         )),
     }
 }

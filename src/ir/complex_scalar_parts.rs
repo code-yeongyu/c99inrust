@@ -118,7 +118,7 @@ pub(in crate::ir) fn complex_unary_operand(
     Some((*op, complex_object_pointer(expr, scalar_type)?))
 }
 
-pub(in crate::ir) const fn complex_lane_byte_size(scalar_type: ScalarType) -> usize {
+pub const fn complex_lane_byte_size(scalar_type: ScalarType) -> usize {
     match scalar_type {
         ScalarType::ComplexFloat => 4,
         _ => scalar_size(ScalarType::Double),

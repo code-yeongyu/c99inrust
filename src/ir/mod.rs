@@ -89,12 +89,14 @@ pub(in crate::ir) use bindings::{
 pub(in crate::ir) use complex_scalar_arithmetic_expr::{
     ComplexBinaryLanes, complex_arithmetic_lane_expr,
 };
+pub(crate) use complex_scalar_expr::complex_lane_value_expr;
 pub(in crate::ir) use complex_scalar_expr::{
-    complex_equality_expr, complex_expr_scalar_type, complex_lane_value_expr, complex_truth_expr,
+    complex_equality_expr, complex_expr_scalar_type, complex_truth_expr,
 };
+pub(crate) use complex_scalar_parts::complex_lane_byte_size;
 pub(in crate::ir) use complex_scalar_parts::{
-    complex_binary_operands, complex_indirect_target, complex_lane_byte_size, complex_lane_expr,
-    complex_object_pointer, complex_unary_operand, is_complex_scalar,
+    complex_binary_operands, complex_indirect_target, complex_lane_expr, complex_object_pointer,
+    complex_unary_operand, is_complex_scalar,
 };
 pub(in crate::ir) use complex_scalar_real::{real_scalar_expr_type, real_scalar_lane_expr};
 pub(in crate::ir) use const_eval::{cast_const_value, eval_binary};

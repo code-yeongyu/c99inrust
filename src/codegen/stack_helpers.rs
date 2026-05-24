@@ -1,4 +1,5 @@
 use super::aarch64_analysis::expr_depth;
+use super::complex_abi::expr_complex_scalar_type;
 use super::widths::{TEMPORARY_BYTES, ValueWidth, width_bytes};
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::{LoweredExpr, LoweredFunction};
@@ -63,7 +64,17 @@ pub(in crate::codegen) fn call_arg_depth(args: &[LoweredExpr]) -> usize {
     if args.is_empty() {
         0
     } else {
-        args.len() + args.iter().map(expr_depth).max().unwrap_or(0)
+        args.len() + args.iter().map(expr_depth).max().unwrap_or(0) + complex_arg_scratch(args)
+    }
+}
+
+fn complex_arg_scratch(args: &[LoweredExpr]) -> usize {
+    if args.iter().any(|arg| {
+        expr_complex_scalar_type(arg).is_some() && !matches!(arg, LoweredExpr::Local { .. })
+    }) {
+        2
+    } else {
+        0
     }
 }
 

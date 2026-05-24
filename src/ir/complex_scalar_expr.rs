@@ -74,7 +74,7 @@ pub(in crate::ir) fn complex_expr_scalar_type(value: &LoweredExpr) -> Option<Sca
     }
 }
 
-pub(in crate::ir) fn complex_lane_value_expr(
+pub fn complex_lane_value_expr(
     value: &LoweredExpr,
     scalar_type: ScalarType,
     index: i64,

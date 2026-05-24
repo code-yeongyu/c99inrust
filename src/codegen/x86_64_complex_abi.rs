@@ -3,6 +3,9 @@ use super::frames::LabelAllocator;
 use super::stack_helpers::{x86_stack_byte_offset, x86_stack_object_offset};
 use super::target::Target;
 use super::widths::{ValueWidth, expr_width};
+use super::x86_64_complex_expr_args::{
+    X86_64ComplexExpressionArg, emit_x86_64_complex_expression_argument,
+};
 use super::x86_64_expr::emit_x86_64_expr_with_width;
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::LoweredExpr;
@@ -11,6 +14,10 @@ use crate::parser::ScalarType;
 pub(in crate::codegen) fn emit_x86_64_complex_argument(
     arg: &LoweredExpr,
     first_register: usize,
+    temporary_base: usize,
+    depth: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
     assembly: &mut String,
 ) -> CompileResult<()> {
     let Some(scalar_type) = expr_complex_scalar_type(arg) else {
@@ -41,9 +48,15 @@ pub(in crate::codegen) fn emit_x86_64_complex_argument(
                 first_register + 1
             )
         }
-        _ => Err(CompileError::new(
-            "complex argument currently requires an object value",
-        )),
+        _ => emit_x86_64_complex_expression_argument(
+            arg,
+            scalar_type,
+            X86_64ComplexExpressionArg::new(first_register, target),
+            temporary_base,
+            depth,
+            labels,
+            assembly,
+        ),
     }
 }
 
@@ -123,7 +136,15 @@ pub(in crate::codegen) fn emit_x86_64_complex_register_arguments(
     let mut integer_register = 0usize;
     for arg in args {
         if let Some(scalar_type) = expr_complex_scalar_type(arg) {
-            emit_x86_64_complex_argument(arg, float_register, assembly)?;
+            emit_x86_64_complex_argument(
+                arg,
+                float_register,
+                temporary_base,
+                depth,
+                target,
+                labels,
+                assembly,
+            )?;
             float_register += x86_64_complex_register_count(scalar_type)?;
             continue;
         }
