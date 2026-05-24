@@ -35,3 +35,15 @@ fn local_double_array_pointer_decay_matches_host_stdout_and_exit_code() {
         source,
     });
 }
+
+#[test]
+fn local_long_long_array_store_and_load_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { long long values[2]; values[0] = 4000000000LL; values[1] = 5000000000LL; puts(\"local-long-long-array\"); return values[0] + values[1] == 9000000000LL ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "local_long_long_array_store_and_load",
+        source,
+    });
+}

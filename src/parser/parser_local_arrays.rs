@@ -34,7 +34,7 @@ impl Parser<'_> {
                 .transpose()?;
             return self.local_pointer_array_declaration(name, explicit_length, referent);
         }
-        if scalar_type == ScalarType::Double {
+        if matches!(scalar_type, ScalarType::Double | ScalarType::LongLong) {
             let explicit_length = explicit_length_expr
                 .as_ref()
                 .map(|expr| local_array_length(expr, self.known_constants))
@@ -43,7 +43,7 @@ impl Parser<'_> {
         }
         if scalar_type != ScalarType::Int {
             return Err(CompileError::new(
-                "only local int, char, double, and pointer arrays are supported",
+                "only local int, char, double, long long, and pointer arrays are supported",
             ));
         }
         let has_second_dimension = self.check_punctuator("[");
