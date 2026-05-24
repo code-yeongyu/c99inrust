@@ -4,7 +4,7 @@ use super::aarch64_control::{
     emit_aarch64_epilogue, emit_aarch64_jump_if_zero, emit_aarch64_prologue,
 };
 use super::aarch64_expr::emit_aarch64_expr;
-use super::aarch64_loads::emit_aarch64_store_global;
+use super::aarch64_loads::{emit_aarch64_store_global, emit_aarch64_store_global_bool};
 use super::aarch64_temporaries::{
     emit_aarch64_init_local_bytes, emit_aarch64_init_local_ints, emit_aarch64_store_result,
 };
@@ -31,17 +31,7 @@ pub(in crate::codegen) fn emit_aarch64_function(
     } else {
         None
     };
-    write_assembly!(assembly, ".globl {label}\n")?;
-    assembly.push_str(".p2align 2\n");
-    write_assembly!(assembly, "{label}:\n")?;
-    emit_aarch64_prologue(
-        frame.preserved_temp_offset,
-        frame.link_register_offset,
-        frame.stack_bytes,
-        assembly,
-    )?;
-    emit_aarch64_variadic_register_saves(function, labels.aarch64_variadic, assembly)?;
-    emit_aarch64_parameter_stores(function, assembly)?;
+    emit_aarch64_function_header(function, &label, &frame, &labels, assembly)?;
     for instruction in &function.instructions {
         match instruction {
             Instruction::StoreLocal {
@@ -66,10 +56,15 @@ pub(in crate::codegen) fn emit_aarch64_function(
                 name,
                 scalar_type,
                 value,
-            } => {
-                emit_aarch64_expr(value, frame.temporary_base, 0, &mut labels, assembly)?;
-                emit_aarch64_store_global(name, scalar_width(*scalar_type), target, assembly)?;
-            }
+            } => emit_aarch64_store_global_instruction(
+                name,
+                *scalar_type,
+                value,
+                frame.temporary_base,
+                target,
+                &mut labels,
+                assembly,
+            )?,
             Instruction::JumpIfZero { condition, label } => {
                 let target_label = branch_label(&function.name, *label, target);
                 emit_aarch64_jump_if_zero(
@@ -123,6 +118,43 @@ pub(in crate::codegen) fn emit_aarch64_function(
         )?;
     }
     Ok(())
+}
+
+fn emit_aarch64_function_header(
+    function: &LoweredFunction,
+    label: &str,
+    frame: &Aarch64Frame,
+    labels: &LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    write_assembly!(assembly, ".globl {label}\n")?;
+    assembly.push_str(".p2align 2\n");
+    write_assembly!(assembly, "{label}:\n")?;
+    emit_aarch64_prologue(
+        frame.preserved_temp_offset,
+        frame.link_register_offset,
+        frame.stack_bytes,
+        assembly,
+    )?;
+    emit_aarch64_variadic_register_saves(function, labels.aarch64_variadic, assembly)?;
+    emit_aarch64_parameter_stores(function, assembly)
+}
+
+fn emit_aarch64_store_global_instruction(
+    name: &str,
+    scalar_type: ScalarType,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    emit_aarch64_expr(value, temporary_base, 0, labels, assembly)?;
+    if scalar_type == ScalarType::Bool {
+        emit_aarch64_store_global_bool(name, target, assembly)
+    } else {
+        emit_aarch64_store_global(name, scalar_width(scalar_type), target, assembly)
+    }
 }
 
 fn aarch64_label_allocator(

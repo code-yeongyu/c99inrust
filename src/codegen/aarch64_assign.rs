@@ -3,7 +3,7 @@ use super::aarch64_global_stores::{
     emit_aarch64_store_global_byte_subscript, emit_aarch64_store_global_int_subscript,
     emit_aarch64_store_global_pointer_subscript, emit_aarch64_store_pointer_field,
 };
-use super::aarch64_loads::emit_aarch64_store_global;
+use super::aarch64_loads::{emit_aarch64_store_global, emit_aarch64_store_global_bool};
 use super::aarch64_pointer_subscript::emit_aarch64_store_pointer_subscript;
 use super::aarch64_temporaries::emit_aarch64_store_result;
 use super::frames::LabelAllocator;
@@ -12,6 +12,7 @@ use super::widths::{
 };
 use crate::diagnostics::CompileResult;
 use crate::ir::{LoweredExpr, LoweredLValue};
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_aarch64_assign(
     target: &LoweredLValue,
@@ -27,9 +28,13 @@ pub(in crate::codegen) fn emit_aarch64_assign(
             emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
             emit_aarch64_store_result(width, *offset, assembly)
         }
-        LoweredLValue::Global { name, .. } => {
+        LoweredLValue::Global { name, scalar_type } => {
             emit_aarch64_expr_with_width(value, width, temporary_base, depth, labels, assembly)?;
-            emit_aarch64_store_global(name, width, labels.target, assembly)
+            if *scalar_type == ScalarType::Bool {
+                emit_aarch64_store_global_bool(name, labels.target, assembly)
+            } else {
+                emit_aarch64_store_global(name, width, labels.target, assembly)
+            }
         }
         LoweredLValue::GlobalByteSubscript {
             name,

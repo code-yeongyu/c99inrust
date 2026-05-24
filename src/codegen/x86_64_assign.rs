@@ -7,7 +7,7 @@ use super::x86_64_expr::emit_x86_64_expr_with_width;
 use super::x86_64_global_pointer_stores::{
     emit_x86_64_store_global_pointer_subscript, emit_x86_64_store_pointer_field,
 };
-use super::x86_64_loads::emit_x86_64_store_global;
+use super::x86_64_loads::{emit_x86_64_store_global, emit_x86_64_store_global_bool};
 use super::x86_64_pointer_stores::{
     emit_x86_64_store_global_byte_subscript, emit_x86_64_store_global_int_subscript,
     emit_x86_64_store_pointer_subscript,
@@ -15,6 +15,7 @@ use super::x86_64_pointer_stores::{
 use super::x86_64_temporaries::emit_x86_64_store_result;
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::ir::{LoweredExpr, LoweredLValue};
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_x86_64_assign(
     target: &LoweredLValue,
@@ -39,7 +40,7 @@ pub(in crate::codegen) fn emit_x86_64_assign(
             )?;
             emit_x86_64_store_result(width, *offset, assembly)
         }
-        LoweredLValue::Global { name, .. } => {
+        LoweredLValue::Global { name, scalar_type } => {
             emit_x86_64_expr_with_width(
                 value,
                 width,
@@ -49,7 +50,11 @@ pub(in crate::codegen) fn emit_x86_64_assign(
                 labels,
                 assembly,
             )?;
-            emit_x86_64_store_global(name, width, codegen_target, assembly)
+            if *scalar_type == ScalarType::Bool {
+                emit_x86_64_store_global_bool(name, codegen_target, assembly)
+            } else {
+                emit_x86_64_store_global(name, width, codegen_target, assembly)
+            }
         }
         _ => emit_x86_64_assign_indirect(
             target,

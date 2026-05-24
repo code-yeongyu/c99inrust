@@ -2,6 +2,8 @@
 mod c99_edge_cases;
 #[path = "clang_oracle/control_flow.rs"]
 mod control_flow;
+#[path = "clang_oracle/deep_c99_bool_globals.rs"]
+mod deep_c99_bool_globals;
 #[path = "clang_oracle/deep_c99_bughunt_wave_a.rs"]
 mod deep_c99_bughunt_wave_a;
 #[path = "clang_oracle/deep_c99_calls_more.rs"]

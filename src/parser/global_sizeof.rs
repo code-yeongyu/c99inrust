@@ -27,6 +27,7 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::Int(_) | GlobalInitializer::IntConstant(_) => {
             scalar_size_for_layout(ScalarType::Int)
         }
+        GlobalInitializer::Bool(_) => scalar_size_for_layout(ScalarType::Bool),
         GlobalInitializer::LongLong(_) => scalar_size_for_layout(ScalarType::LongLong),
         GlobalInitializer::Double(_) => scalar_size_for_layout(ScalarType::Double),
         GlobalInitializer::ComplexReal { scalar_type, .. }
@@ -42,6 +43,9 @@ fn global_initializer_sizeof_bytes(
             .len()
             .checked_mul(scalar_size_for_layout(ScalarType::Int))
             .ok_or_else(|| CompileError::new("global int array sizeof overflow"))?,
+        GlobalInitializer::BoolArray(values)
+        | GlobalInitializer::UnsignedCharArray { values, .. }
+        | GlobalInitializer::UnsignedCharMatrix { values, .. } => values.len(),
         GlobalInitializer::ShortArray { values, .. } => values
             .len()
             .checked_mul(2)
@@ -83,8 +87,6 @@ fn global_initializer_sizeof_bytes(
         } => length
             .checked_mul(struct_size_for_initializer(struct_name, known_structs)?)
             .ok_or_else(|| CompileError::new("global struct array sizeof overflow"))?,
-        GlobalInitializer::UnsignedCharArray { values, .. }
-        | GlobalInitializer::UnsignedCharMatrix { values, .. } => values.len(),
         GlobalInitializer::Extern(_)
         | GlobalInitializer::ExternPointer { .. }
         | GlobalInitializer::ExternIntArray

@@ -32,6 +32,10 @@ impl LoweringContext {
         ) {
             return Some("short".to_owned());
         }
+        if let Some(GlobalBinding::ScalarArray { scalar_type, .. }) = self.global_bindings.get(name)
+        {
+            return scalar_array_referent(*scalar_type);
+        }
         None
     }
 

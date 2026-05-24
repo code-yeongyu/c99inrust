@@ -17,6 +17,10 @@ pub(in crate::ir) fn lower_scalar_global_initializer(
             })?),
             GlobalBinding::Int,
         ))),
+        GlobalInitializer::Bool(value) => Ok(Some((
+            LoweredGlobalInitializer::UnsignedCharArray(vec![u8::from(*value != 0)]),
+            GlobalBinding::Scalar(ScalarType::Bool),
+        ))),
         GlobalInitializer::LongLong(value) => Ok(Some(lower_long_long_global_initializer(*value))),
         GlobalInitializer::Double(value) => Ok(Some((
             LoweredGlobalInitializer::Double(value.clone()),

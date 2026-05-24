@@ -50,6 +50,19 @@ pub(in crate::codegen) fn emit_aarch64_load_global(
     write_assembly!(assembly, "\tldr {register}, [x16, {label}@PAGEOFF]\n")
 }
 
+pub(in crate::codegen) fn emit_aarch64_load_global_bool(
+    name: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if target != Target::Aarch64AppleDarwin {
+        return Err(CompileError::new("unsupported AArch64 global target"));
+    }
+    let label = label_name(name, target);
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tldrb w0, [x16, {label}@PAGEOFF]\n")
+}
+
 pub(in crate::codegen) fn emit_aarch64_load_global_f32_as_f64(
     name: &str,
     target: Target,
@@ -78,6 +91,19 @@ pub(in crate::codegen) fn emit_aarch64_store_global(
     let register = aarch64_result_register(width);
     write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
     write_assembly!(assembly, "\tstr {register}, [x16, {label}@PAGEOFF]\n")
+}
+
+pub(in crate::codegen) fn emit_aarch64_store_global_bool(
+    name: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    if target != Target::Aarch64AppleDarwin {
+        return Err(CompileError::new("unsupported AArch64 global target"));
+    }
+    let label = label_name(name, target);
+    write_assembly!(assembly, "\tadrp x16, {label}@PAGE\n")?;
+    write_assembly!(assembly, "\tstrb w0, [x16, {label}@PAGEOFF]\n")
 }
 
 pub(in crate::codegen) fn emit_aarch64_load_global_byte_subscript(

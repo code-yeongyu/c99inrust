@@ -8,13 +8,14 @@ use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
 };
 use super::x86_64_expr::{emit_x86_64_expr, emit_x86_64_expr_with_width};
-use super::x86_64_loads::emit_x86_64_store_global;
+use super::x86_64_loads::{emit_x86_64_store_global, emit_x86_64_store_global_bool};
 use super::x86_64_temporaries::{
     emit_x86_64_init_local_bytes, emit_x86_64_init_local_ints, emit_x86_64_store_result,
 };
 use super::x86_64_variadic::{emit_x86_64_variadic_register_saves, x86_64_variadic_frame};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::ir::{Instruction, LoweredFunction};
+use crate::ir::{Instruction, LoweredExpr, LoweredFunction};
+use crate::parser::ScalarType;
 
 pub(in crate::codegen) fn emit_x86_64_function(
     function: &LoweredFunction,
@@ -72,19 +73,15 @@ pub(in crate::codegen) fn emit_x86_64_function(
                 name,
                 scalar_type,
                 value,
-            } => {
-                let width = scalar_width(*scalar_type);
-                emit_x86_64_expr_with_width(
-                    value,
-                    width,
-                    temporary_base,
-                    0,
-                    target,
-                    &mut labels,
-                    assembly,
-                )?;
-                emit_x86_64_store_global(name, width, target, assembly)?;
-            }
+            } => emit_x86_64_store_global_instruction(
+                name,
+                *scalar_type,
+                value,
+                temporary_base,
+                target,
+                &mut labels,
+                assembly,
+            )?,
             Instruction::JumpIfZero { condition, label } => {
                 emit_x86_64_expr(condition, temporary_base, 0, target, &mut labels, assembly)?;
                 assembly.push_str("\tcmpl $0, %eax\n");
@@ -122,6 +119,25 @@ pub(in crate::codegen) fn emit_x86_64_function(
     }
     Ok(())
 }
+
+fn emit_x86_64_store_global_instruction(
+    name: &str,
+    scalar_type: ScalarType,
+    value: &LoweredExpr,
+    temporary_base: usize,
+    target: Target,
+    labels: &mut LabelAllocator<'_>,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let width = scalar_width(scalar_type);
+    emit_x86_64_expr_with_width(value, width, temporary_base, 0, target, labels, assembly)?;
+    if scalar_type == ScalarType::Bool {
+        emit_x86_64_store_global_bool(name, target, assembly)
+    } else {
+        emit_x86_64_store_global(name, width, target, assembly)
+    }
+}
+
 pub(in crate::codegen) fn emit_x86_64_parameter_stores(
     function: &LoweredFunction,
     assembly: &mut String,

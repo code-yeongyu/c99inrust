@@ -55,6 +55,15 @@ pub(in crate::codegen) fn emit_x86_64_load_global(
     write_assembly!(assembly, "\tmov{suffix} {label}(%rip), {register}\n")
 }
 
+pub(in crate::codegen) fn emit_x86_64_load_global_bool(
+    name: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    write_assembly!(assembly, "\tmovzbl {label}(%rip), %eax\n")
+}
+
 pub(in crate::codegen) fn emit_x86_64_load_global_f32_as_f64(
     name: &str,
     target: Target,
@@ -74,6 +83,15 @@ pub(in crate::codegen) fn emit_x86_64_store_global(
     let suffix = x86_64_instruction_suffix(width);
     let register = x86_64_result_register(width);
     write_assembly!(assembly, "\tmov{suffix} {register}, {label}(%rip)\n")
+}
+
+pub(in crate::codegen) fn emit_x86_64_store_global_bool(
+    name: &str,
+    target: Target,
+    assembly: &mut String,
+) -> CompileResult<()> {
+    let label = label_name(name, target);
+    write_assembly!(assembly, "\tmovb %al, {label}(%rip)\n")
 }
 
 pub(in crate::codegen) fn emit_x86_64_load_global_byte_subscript(

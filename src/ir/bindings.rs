@@ -112,7 +112,8 @@ pub(in crate::ir) enum GlobalBinding {
 impl GlobalBinding {
     pub(in crate::ir) fn from_scalar_type(scalar_type: ScalarType) -> CompileResult<Self> {
         match scalar_type {
-            ScalarType::Bool | ScalarType::Int => Ok(Self::Int),
+            ScalarType::Bool => Ok(Self::Scalar(ScalarType::Bool)),
+            ScalarType::Int => Ok(Self::Int),
             ScalarType::LongLong => Ok(Self::LongLong),
             ScalarType::Pointer => Ok(Self::Pointer { referent: None }),
             ScalarType::ComplexFloat

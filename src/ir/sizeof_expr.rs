@@ -76,10 +76,8 @@ fn identifier_size(context: &LoweringContext, name: &str) -> CompileResult<Optio
         Some(GlobalBinding::ScalarArray {
             scalar_type,
             length: Some(length),
-        }) => length
-            .checked_mul(scalar_size(*scalar_type))
-            .ok_or_else(|| CompileError::new("sizeof global scalar array overflow"))
-            .map(Some),
+        }) => local_scalar_array_byte_size(*scalar_type, *length).map(Some),
+        Some(GlobalBinding::Scalar(ScalarType::Bool)) => Ok(Some(1)),
         _ => Ok(None),
     }
 }
@@ -95,7 +93,9 @@ fn local_binding_size(binding: &LocalBinding) -> CompileResult<usize> {
             scalar_type,
             referent,
             ..
-        } => Ok(if *scalar_type == ScalarType::Int {
+        } => Ok(if *scalar_type == ScalarType::Bool {
+            1
+        } else if *scalar_type == ScalarType::Int {
             local_scalar_referent_size(referent.as_deref())
                 .unwrap_or_else(|| scalar_size(*scalar_type))
         } else {

@@ -2,6 +2,7 @@ use crate::diagnostics::CompileResult;
 use crate::front_end::lexer::{Keyword, Token, TokenKind};
 
 use super::external_declarations::{classify_external_item, top_level_function_open_paren};
+use super::global_bool_declarations::parse_global_bool;
 use super::global_byte_declarations::parse_global_unsigned_char_array;
 use super::global_double_declarations::parse_global_double_array;
 use super::global_floatlike_declarations::parse_global_floatlike_scalar;
@@ -43,6 +44,9 @@ pub(super) fn parse_supported_global_declaration(
         return Ok(None);
     }
     if let Some(global) = parse_global_unsigned_char_array(tokens, constants)? {
+        return Ok(Some(global));
+    }
+    if let Some(global) = parse_global_bool(tokens, constants, sizeof_symbols)? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_pointer_string_array(tokens, constants)? {

@@ -40,6 +40,13 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             LoweredGlobalInitializer::IntArray(values.clone()),
             GlobalBinding::IntArray,
         )),
+        GlobalInitializer::BoolArray(values) => Ok((
+            LoweredGlobalInitializer::UnsignedCharArray(values.clone()),
+            GlobalBinding::ScalarArray {
+                scalar_type: ScalarType::Bool,
+                length: Some(values.len()),
+            },
+        )),
         GlobalInitializer::ShortArray { .. } => lower_short_array_global_initializer(global),
         GlobalInitializer::IntMatrix { values, columns } => Ok((
             LoweredGlobalInitializer::IntArray(values.clone()),
@@ -84,6 +91,7 @@ pub(in crate::ir) fn lower_defined_global_initializer(
             "internal error: byte global reached fallback lowering",
         )),
         GlobalInitializer::Int(_)
+        | GlobalInitializer::Bool(_)
         | GlobalInitializer::LongLong(_)
         | GlobalInitializer::Double(_)
         | GlobalInitializer::ComplexReal { .. }

@@ -66,6 +66,7 @@ pub enum GlobalInitializer {
         struct_name: String,
     },
     Int(i64),
+    Bool(i64),
     LongLong(i64),
     Double(String),
     ComplexReal {
@@ -74,6 +75,7 @@ pub enum GlobalInitializer {
     },
     ScalarZero(ScalarType),
     IntArray(Vec<i32>),
+    BoolArray(Vec<u8>),
     ShortArray {
         values: Vec<i32>,
         is_unsigned: bool,

@@ -95,11 +95,13 @@ pub(in crate::ir) fn lower_extern_global_binding(
             }
         }
         GlobalInitializer::Int(_)
+        | GlobalInitializer::Bool(_)
         | GlobalInitializer::LongLong(_)
         | GlobalInitializer::Double(_)
         | GlobalInitializer::ComplexReal { .. }
         | GlobalInitializer::ScalarZero(_)
         | GlobalInitializer::IntArray(_)
+        | GlobalInitializer::BoolArray(_)
         | GlobalInitializer::ShortArray { .. }
         | GlobalInitializer::IntMatrix { .. }
         | GlobalInitializer::DoubleArray { .. }

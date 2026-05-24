@@ -104,7 +104,7 @@ impl LoweringContext {
                 LoweredExpr::GlobalAddress { name: name.clone() },
                 self.lower_expr(index)?,
                 *scalar_type,
-                scalar_size(*scalar_type),
+                local_scalar_array_element_size(*scalar_type),
                 false,
             )));
         }
