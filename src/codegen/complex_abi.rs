@@ -33,6 +33,11 @@ pub(in crate::codegen) fn expr_complex_scalar_type(expr: &LoweredExpr) -> Option
             expr,
         } => expr_complex_scalar_type(expr),
         LoweredExpr::Cast { target, .. } if is_complex_scalar(*target) => Some(*target),
+        LoweredExpr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => complex_binary_result_type(then_expr, else_expr),
         LoweredExpr::Binary { op, left, right } if is_complex_arithmetic_op(*op) => {
             complex_binary_result_type(left, right)
         }

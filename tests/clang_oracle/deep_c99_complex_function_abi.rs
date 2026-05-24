@@ -80,6 +80,18 @@ fn complex_expression_argument_preserves_imaginary_lane_matches_host_stdout_and_
 }
 
 #[test]
+fn complex_conditional_argument_preserves_selected_lane_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int hits = 0; int pick(void) { hits = hits + 1; return 0; } int consume(double _Complex z) { double *raw = (double *)&z; return raw[0] == 3.0 && raw[1] == 4.0; } int main(void) { double _Complex a = 1.0; double _Complex b = 3.0; double *ap = (double *)&a; double *bp = (double *)&b; ap[1] = 2.0; bp[1] = 4.0; puts(\"complex-conditional-arg\"); return consume(pick() ? a : b) && hits == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "complex_conditional_argument_preserves_selected_lane",
+        source,
+    );
+}
+
+#[test]
 fn extern_complex_double_function_return_matches_host_stdout_and_exit_code() {
     // given
     let case = OracleMultiFileCase {
