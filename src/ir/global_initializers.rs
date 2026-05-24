@@ -89,6 +89,7 @@ pub(in crate::ir) fn lower_defined_global_initializer(
         | GlobalInitializer::ComplexReal { .. }
         | GlobalInitializer::DoubleArray { .. }
         | GlobalInitializer::ScalarArray { .. }
+        | GlobalInitializer::ScalarArrayValues { .. }
         | GlobalInitializer::ScalarZero(_)
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::Extern(_)
@@ -133,6 +134,21 @@ fn lower_real_array_global_initializer(
                 },
             )))
         }
+        GlobalInitializer::ScalarArrayValues {
+            scalar_type,
+            length,
+            values,
+        } => Ok(Some((
+            LoweredGlobalInitializer::RealArray {
+                scalar_type: *scalar_type,
+                length: *length,
+                values: values.clone(),
+            },
+            GlobalBinding::ScalarArray {
+                scalar_type: *scalar_type,
+                length: Some(*length),
+            },
+        ))),
         _ => Ok(None),
     }
 }

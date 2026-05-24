@@ -47,3 +47,15 @@ fn extern_global_complex_double_array_matches_host_stdout_and_exit_code() {
     // when/then
     assert_multifile_compile_run_matches_host(case);
 }
+
+#[test]
+fn initialized_global_complex_double_array_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double _Complex values[2] = { 1.0, 2.0 }; int main(void) { double *raw = (double *)values; puts(\"initialized-global-complex-array\"); return raw[0] == 1.0 && raw[1] == 0.0 && raw[2] == 2.0 && raw[3] == 0.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "initialized_global_complex_double_array",
+        source,
+    });
+}

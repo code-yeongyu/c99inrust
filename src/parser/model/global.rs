@@ -91,6 +91,11 @@ pub enum GlobalInitializer {
         scalar_type: ScalarType,
         length: usize,
     },
+    ScalarArrayValues {
+        scalar_type: ScalarType,
+        length: usize,
+        values: Vec<String>,
+    },
     PointerNull {
         referent: Option<String>,
     },

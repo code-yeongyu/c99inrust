@@ -92,7 +92,7 @@ pub(super) fn global_floatlike_scalar_type(
     }
 }
 
-fn parse_global_real_initializer(
+pub(super) fn parse_global_real_initializer(
     tokens: &[Token],
     constants: &[Constant],
     sizeof_symbols: &[(String, usize)],

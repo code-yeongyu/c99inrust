@@ -1,3 +1,5 @@
+use crate::parser::ScalarType;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweredGlobal {
     pub name: String,
@@ -13,6 +15,11 @@ pub enum LoweredGlobalInitializer {
     RealThenZero {
         real: String,
         byte_len: usize,
+    },
+    RealArray {
+        scalar_type: ScalarType,
+        length: usize,
+        values: Vec<String>,
     },
     IntArray(Vec<i32>),
     ShortArray(Vec<i32>),

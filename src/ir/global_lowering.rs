@@ -104,6 +104,7 @@ pub(in crate::ir) fn lower_extern_global_binding(
         | GlobalInitializer::IntMatrix { .. }
         | GlobalInitializer::DoubleArray { .. }
         | GlobalInitializer::ScalarArray { .. }
+        | GlobalInitializer::ScalarArrayValues { .. }
         | GlobalInitializer::IntConstant(_)
         | GlobalInitializer::PointerNull { .. }
         | GlobalInitializer::PointerString { .. }

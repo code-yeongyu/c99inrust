@@ -56,6 +56,11 @@ fn global_initializer_sizeof_bytes(
         GlobalInitializer::ScalarArray {
             scalar_type,
             length,
+        }
+        | GlobalInitializer::ScalarArrayValues {
+            scalar_type,
+            length,
+            ..
         } => length
             .checked_mul(scalar_size_for_layout(*scalar_type))
             .ok_or_else(|| CompileError::new("global scalar array sizeof overflow"))?,
