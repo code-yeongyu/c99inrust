@@ -20,6 +20,8 @@ mod deep_c99_complex_function_abi;
 mod deep_c99_compound_complex_edges;
 #[path = "clang_oracle/deep_c99_compound_flex.rs"]
 mod deep_c99_compound_flex;
+#[path = "clang_oracle/deep_c99_compound_global.rs"]
+mod deep_c99_compound_global;
 #[path = "clang_oracle/deep_c99_compound_literal_addresses.rs"]
 mod deep_c99_compound_literal_addresses;
 #[path = "clang_oracle/deep_c99_compound_runtime.rs"]

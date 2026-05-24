@@ -24,6 +24,7 @@ mod global_int_initializers;
 mod global_member_addresses;
 mod global_name_pointer_array_initializers;
 mod global_pointer_arrays;
+mod global_pointer_compound_literals;
 mod global_pointer_name_arrays;
 mod global_pointer_scalars;
 mod global_pointer_string_arrays;

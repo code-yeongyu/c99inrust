@@ -5,7 +5,9 @@ use super::SurfaceTranslationUnit;
 use super::external_declarations::{
     classify_external_item, function_pointer_name, top_level_function_open_paren,
 };
-use super::token_scan::{decrease_depth, last_token_is_punctuator, token_is_punctuator};
+use super::token_scan::{
+    decrease_depth, last_token_is_punctuator, token_is_punctuator, top_level_punctuator_index,
+};
 
 pub(super) struct SurfaceParser<'a> {
     tokens: &'a [Token],
@@ -120,8 +122,10 @@ impl SurfaceParser<'_> {
     }
 
     fn function_body_starts_at_brace(&self, start: usize) -> bool {
-        last_token_is_punctuator(&self.tokens[start..self.index], ")")
-            || top_level_function_open_paren(&self.tokens[start..self.index]).is_some()
+        let tokens = &self.tokens[start..self.index];
+        top_level_punctuator_index(tokens, "=").is_none()
+            && (last_token_is_punctuator(tokens, ")")
+                || top_level_function_open_paren(tokens).is_some())
     }
 
     fn old_style_parameter_declaration_separator(&self, start: usize) -> bool {

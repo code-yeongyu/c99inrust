@@ -8,6 +8,7 @@ use super::global_double_declarations::parse_global_double_array;
 use super::global_floatlike_declarations::parse_global_floatlike_scalar;
 use super::global_int_arrays::parse_global_int_array;
 use super::global_pointer_arrays::{parse_global_extern_pointer_array, parse_global_pointer_array};
+use super::global_pointer_compound_literals::parse_global_pointer_compound_literal;
 use super::global_pointer_name_arrays::parse_global_pointer_name_array;
 use super::global_pointer_scalars::parse_global_pointer;
 use super::global_pointer_string_arrays::parse_global_pointer_string_array;
@@ -118,6 +119,10 @@ pub(super) fn parse_supported_global_declarations(
 ) -> CompileResult<Vec<Global>> {
     if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs, constants)? {
         return Ok(with_global_linkage(tokens, globals));
+    }
+    if let Some(globals) = parse_global_pointer_compound_literal(tokens, known_structs, constants)?
+    {
+        return Ok(globals);
     }
     parse_supported_global_declaration(
         tokens,
