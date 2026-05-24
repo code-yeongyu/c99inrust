@@ -59,3 +59,15 @@ fn local_double_array_initializer_matches_host_stdout_and_exit_code() {
         source,
     });
 }
+
+#[test]
+fn local_bool_array_initializer_uses_one_byte_elements_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int main(void) { _Bool values[3] = { 2, 0, -5 }; puts(\"local-bool-array-init\"); return sizeof(values) == 3 && values[0] == 1 && values[1] == 0 && values[2] == 1 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "local_bool_array_initializer_one_byte_elements",
+        source,
+    });
+}

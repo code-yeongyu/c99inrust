@@ -1,6 +1,6 @@
 use super::{
     LocalBinding, LoweredExpr, LoweredLValue, LoweringContext, local_scalar_array_byte_size,
-    scalar_size, zero_expr_for,
+    local_scalar_array_element_size, zero_expr_for,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Expr, ScalarType};
@@ -31,7 +31,7 @@ impl LoweringContext {
             name,
             scalar_type,
             byte_size,
-            scalar_size(scalar_type),
+            local_scalar_array_element_size(scalar_type),
             LocalBinding::ScalarArray {
                 slot: self.local_slots.len(),
                 scalar_type,
@@ -91,7 +91,7 @@ impl LoweringContext {
                             .map_err(|_| CompileError::new("local scalar array index overflow"))?,
                     )),
                     element_type: scalar_type,
-                    element_byte_size: scalar_size(scalar_type),
+                    element_byte_size: local_scalar_array_element_size(scalar_type),
                     element_unsigned: false,
                 },
                 value,

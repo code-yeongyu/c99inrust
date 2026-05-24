@@ -122,8 +122,15 @@ pub(in crate::ir) fn local_scalar_array_byte_size(
     length: usize,
 ) -> CompileResult<usize> {
     length
-        .checked_mul(scalar_size(scalar_type))
+        .checked_mul(local_scalar_array_element_size(scalar_type))
         .ok_or_else(|| CompileError::new("local scalar array size overflow"))
+}
+
+pub(in crate::ir) const fn local_scalar_array_element_size(scalar_type: ScalarType) -> usize {
+    match scalar_type {
+        ScalarType::Bool => 1,
+        _ => scalar_size(scalar_type),
+    }
 }
 
 pub(in crate::ir) fn struct_alignment(layout: &StructLayout) -> usize {

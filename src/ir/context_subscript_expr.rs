@@ -1,6 +1,6 @@
 use super::{
-    GlobalBinding, LoweredExpr, LoweredLValue, LoweringContext, lowered_expr_scalar_type,
-    scalar_size,
+    GlobalBinding, LoweredExpr, LoweredLValue, LoweringContext, local_scalar_array_element_size,
+    lowered_expr_scalar_type, scalar_size,
 };
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::parser::{Expr, ScalarType};
@@ -200,7 +200,7 @@ impl LoweringContext {
                 pointer,
                 self.lower_expr(index)?,
                 scalar_type,
-                scalar_size(scalar_type),
+                local_scalar_array_element_size(scalar_type),
                 false,
             )));
         }
