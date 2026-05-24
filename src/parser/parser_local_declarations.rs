@@ -20,6 +20,8 @@ impl Parser<'_> {
             self.known_structs,
             self.known_constants,
             &[],
+            self.known_pointer_typedefs,
+            self.known_function_pointer_typedefs,
         )?
         else {
             return Ok(None);

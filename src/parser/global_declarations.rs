@@ -30,6 +30,8 @@ pub(super) fn parse_supported_global_declaration(
     known_structs: &[StructLayout],
     constants: &[Constant],
     sizeof_symbols: &[(String, usize)],
+    known_pointer_typedefs: &[String],
+    function_pointer_typedefs: &[(String, String)],
 ) -> CompileResult<Option<Global>> {
     if last_token_is_punctuator(tokens, "}") || !last_token_is_punctuator(tokens, ";") {
         return Ok(None);
@@ -46,13 +48,29 @@ pub(super) fn parse_supported_global_declaration(
     if let Some(global) = parse_global_pointer_string_array(tokens, constants)? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer_name_array(tokens, known_structs, constants)? {
+    if let Some(global) = parse_global_pointer_name_array(
+        tokens,
+        known_structs,
+        constants,
+        known_pointer_typedefs,
+        function_pointer_typedefs,
+    )? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_pointer_array(tokens, constants)? {
+    if let Some(global) = parse_global_pointer_array(
+        tokens,
+        constants,
+        known_pointer_typedefs,
+        function_pointer_typedefs,
+    )? {
         return Ok(Some(global));
     }
-    if let Some(global) = parse_global_extern_pointer_array(tokens, constants)? {
+    if let Some(global) = parse_global_extern_pointer_array(
+        tokens,
+        constants,
+        known_pointer_typedefs,
+        function_pointer_typedefs,
+    )? {
         return Ok(Some(global));
     }
     if let Some(global) = parse_global_struct_array(tokens, known_structs, constants)? {
@@ -91,16 +109,24 @@ pub(super) fn parse_supported_global_declarations(
     known_structs: &[StructLayout],
     constants: &[Constant],
     sizeof_symbols: &[(String, usize)],
+    known_pointer_typedefs: &[String],
+    function_pointer_typedefs: &[(String, String)],
 ) -> CompileResult<Vec<Global>> {
     if let Some(globals) = parse_global_int_declarator_list(tokens, known_structs, constants)? {
         return Ok(with_global_linkage(tokens, globals));
     }
-    parse_supported_global_declaration(tokens, known_structs, constants, sizeof_symbols).map(
-        |global| {
-            let globals = global.map_or_else(Vec::new, |global| vec![global]);
-            with_global_linkage(tokens, globals)
-        },
+    parse_supported_global_declaration(
+        tokens,
+        known_structs,
+        constants,
+        sizeof_symbols,
+        known_pointer_typedefs,
+        function_pointer_typedefs,
     )
+    .map(|global| {
+        let globals = global.map_or_else(Vec::new, |global| vec![global]);
+        with_global_linkage(tokens, globals)
+    })
 }
 
 fn with_global_linkage(tokens: &[Token], mut globals: Vec<Global>) -> Vec<Global> {

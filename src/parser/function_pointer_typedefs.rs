@@ -12,7 +12,10 @@ pub(super) fn function_pointer_typedef_declaration_referent(
     pointer_referent_for_depth(pointer_depth, Some(&function_referent))
 }
 
-fn function_pointer_typedef_referent(typedefs: &[(String, String)], name: &str) -> Option<String> {
+pub(super) fn function_pointer_typedef_referent(
+    typedefs: &[(String, String)],
+    name: &str,
+) -> Option<String> {
     typedefs
         .iter()
         .find(|(typedef_name, _referent)| typedef_name == name)

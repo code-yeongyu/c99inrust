@@ -71,6 +71,8 @@ pub fn parse_supported_translation_unit(tokens: &[Token]) -> CompileResult<Progr
             &structs,
             &constants,
             &sizeof_symbols,
+            &pointer_typedefs,
+            &function_pointer_typedefs,
         )?;
         if !parsed_globals.is_empty() {
             globals.extend(parsed_globals);

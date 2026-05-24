@@ -1,9 +1,12 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::function_pointer_typedefs::function_pointer_typedef_referent;
 use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::global_name_pointer_array_initializers::parse_name_pointer_array_initializer;
-use super::global_specifiers::global_specifiers_are_pointer;
+use super::global_specifiers::{
+    global_specifiers_are_pointer, global_specifiers_are_pointer_typedef,
+};
 use super::pointer_referent_from_specifiers;
 use super::token_scan::{
     matching_top_level_bracket, previous_identifier_index, token_identifier,
@@ -15,6 +18,8 @@ pub(super) fn parse_global_pointer_name_array(
     tokens: &[Token],
     known_structs: &[StructLayout],
     constants: &[Constant],
+    known_pointer_typedefs: &[String],
+    function_pointer_typedefs: &[(String, String)],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -25,7 +30,10 @@ pub(super) fn parse_global_pointer_name_array(
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
         return Ok(None);
     };
-    if !global_specifiers_are_pointer(&declaration[..name_index]) {
+    let specifiers = &declaration[..name_index];
+    if !global_specifiers_are_pointer(specifiers)
+        && !global_specifiers_are_pointer_typedef(specifiers, known_pointer_typedefs)
+    {
         return Ok(None);
     }
     let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
@@ -58,7 +66,8 @@ pub(super) fn parse_global_pointer_name_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected global pointer-array name"))?
         .to_owned();
-    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
+    let referent = pointer_referent_from_specifiers(specifiers)
+        .or_else(|| function_pointer_typedef_array_referent(specifiers, function_pointer_typedefs));
     Ok(Some(Global::new(
         name,
         GlobalInitializer::PointerNameArray {
@@ -67,6 +76,14 @@ pub(super) fn parse_global_pointer_name_array(
             length,
         },
     )))
+}
+
+fn function_pointer_typedef_array_referent(
+    specifiers: &[Token],
+    function_pointer_typedefs: &[(String, String)],
+) -> Option<String> {
+    let name = specifiers.iter().rev().find_map(token_identifier)?;
+    function_pointer_typedef_referent(function_pointer_typedefs, name)
 }
 
 fn pointer_array_length(

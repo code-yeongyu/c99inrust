@@ -41,8 +41,24 @@ pub(super) fn global_specifiers_are_pointer(tokens: &[Token]) -> bool {
     !token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_pointer_like(tokens, false)
 }
 
+pub(super) fn global_specifiers_are_pointer_typedef(
+    tokens: &[Token],
+    known_pointer_typedefs: &[String],
+) -> bool {
+    !token_has_keyword(tokens, Keyword::Extern)
+        && global_specifiers_are_pointer_typedef_like(tokens, known_pointer_typedefs, false)
+}
+
 pub(super) fn global_specifiers_are_extern_pointer(tokens: &[Token]) -> bool {
     token_has_keyword(tokens, Keyword::Extern) && global_specifiers_are_pointer_like(tokens, true)
+}
+
+pub(super) fn global_specifiers_are_extern_pointer_typedef(
+    tokens: &[Token],
+    known_pointer_typedefs: &[String],
+) -> bool {
+    token_has_keyword(tokens, Keyword::Extern)
+        && global_specifiers_are_pointer_typedef_like(tokens, known_pointer_typedefs, true)
 }
 
 fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> bool {
@@ -68,6 +84,29 @@ fn global_specifiers_are_pointer_like(tokens: &[Token], allow_extern: bool) -> b
         }
     }
     saw_type && saw_pointer
+}
+
+fn global_specifiers_are_pointer_typedef_like(
+    tokens: &[Token],
+    known_pointer_typedefs: &[String],
+    allow_extern: bool,
+) -> bool {
+    let mut saw_typedef = false;
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Keyword(Keyword::Extern) if allow_extern => {}
+            TokenKind::Keyword(
+                Keyword::Const | Keyword::Restrict | Keyword::Static | Keyword::Volatile,
+            ) => {}
+            TokenKind::Identifier(name)
+                if known_pointer_typedefs.iter().any(|known| known == name) =>
+            {
+                saw_typedef = true;
+            }
+            _ => return false,
+        }
+    }
+    saw_typedef
 }
 
 pub(super) fn global_struct_specifier_name(

@@ -1,9 +1,11 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::function_pointer_typedefs::function_pointer_typedef_referent;
 use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::global_specifiers::{
-    global_specifiers_are_extern_pointer, global_specifiers_are_pointer,
+    global_specifiers_are_extern_pointer, global_specifiers_are_extern_pointer_typedef,
+    global_specifiers_are_pointer, global_specifiers_are_pointer_typedef,
 };
 use super::pointer_referent_from_specifiers;
 use super::token_scan::{
@@ -15,6 +17,8 @@ use super::{Constant, Global, GlobalInitializer};
 pub(super) fn parse_global_pointer_array(
     tokens: &[Token],
     constants: &[Constant],
+    known_pointer_typedefs: &[String],
+    function_pointer_typedefs: &[(String, String)],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -25,7 +29,10 @@ pub(super) fn parse_global_pointer_array(
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
         return Ok(None);
     };
-    if !global_specifiers_are_pointer(&declaration[..name_index]) {
+    let specifiers = &declaration[..name_index];
+    if !global_specifiers_are_pointer(specifiers)
+        && !global_specifiers_are_pointer_typedef(specifiers, known_pointer_typedefs)
+    {
         return Ok(None);
     }
     let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
@@ -71,7 +78,8 @@ pub(super) fn parse_global_pointer_array(
     if top_level_punctuator_index(&declaration[last_dimension_close + 1..], "=").is_some() {
         return Ok(None);
     }
-    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
+    let referent = pointer_referent_from_specifiers(specifiers)
+        .or_else(|| function_pointer_typedef_array_referent(specifiers, function_pointer_typedefs));
     Ok(Some(Global::new(
         name,
         GlobalInitializer::PointerArray {
@@ -85,6 +93,8 @@ pub(super) fn parse_global_pointer_array(
 pub(super) fn parse_global_extern_pointer_array(
     tokens: &[Token],
     constants: &[Constant],
+    known_pointer_typedefs: &[String],
+    function_pointer_typedefs: &[(String, String)],
 ) -> CompileResult<Option<Global>> {
     let Some(declaration) = tokens.get(..tokens.len().saturating_sub(1)) else {
         return Ok(None);
@@ -95,7 +105,10 @@ pub(super) fn parse_global_extern_pointer_array(
     let Some(name_index) = previous_identifier_index(declaration, open_bracket) else {
         return Ok(None);
     };
-    if !global_specifiers_are_extern_pointer(&declaration[..name_index]) {
+    let specifiers = &declaration[..name_index];
+    if !global_specifiers_are_extern_pointer(specifiers)
+        && !global_specifiers_are_extern_pointer_typedef(specifiers, known_pointer_typedefs)
+    {
         return Ok(None);
     }
     let Some(close_bracket) = matching_top_level_bracket(declaration, open_bracket) else {
@@ -133,7 +146,8 @@ pub(super) fn parse_global_extern_pointer_array(
     let name = token_identifier(&declaration[name_index])
         .ok_or_else(|| CompileError::new("expected extern global pointer-array name"))?
         .to_owned();
-    let referent = pointer_referent_from_specifiers(&declaration[..name_index]);
+    let referent = pointer_referent_from_specifiers(specifiers)
+        .or_else(|| function_pointer_typedef_array_referent(specifiers, function_pointer_typedefs));
     Ok(Some(Global::new(
         name,
         GlobalInitializer::ExternPointerArray { referent, columns },
@@ -143,4 +157,12 @@ pub(super) fn parse_global_extern_pointer_array(
 fn declarator_open_bracket(declaration: &[Token]) -> Option<usize> {
     let end = top_level_punctuator_index(declaration, "=").unwrap_or(declaration.len());
     top_level_punctuator_index(&declaration[..end], "[")
+}
+
+fn function_pointer_typedef_array_referent(
+    specifiers: &[Token],
+    function_pointer_typedefs: &[(String, String)],
+) -> Option<String> {
+    let name = specifiers.iter().rev().find_map(token_identifier)?;
+    function_pointer_typedef_referent(function_pointer_typedefs, name)
 }
