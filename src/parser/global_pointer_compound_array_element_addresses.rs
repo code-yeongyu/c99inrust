@@ -1,8 +1,9 @@
-use crate::diagnostics::{CompileError, CompileResult};
+use crate::diagnostics::CompileResult;
 
 use super::global_array_compound_literals::GlobalArrayCompoundLiteralBacking;
 use super::global_pointer_compound_array_literals::{
-    array_globals_at_index, compound_pointer_offset,
+    array_globals_at_index, compound_pointer_add_delta, compound_pointer_delta,
+    compound_pointer_offset, compound_pointer_subtract_delta,
 };
 use super::{Constant, Expr, Global, LValue};
 
@@ -29,9 +30,10 @@ pub(super) fn element_address_offset_globals(
     let Some((array, base_index)) = element_address_parts(pointer) else {
         return Ok(None);
     };
-    let index = compound_pointer_offset(base_index, constants)?
-        .checked_add(compound_pointer_offset(offset, constants)?)
-        .ok_or_else(|| CompileError::new("global compound literal pointer offset is too large"))?;
+    let index = compound_pointer_add_delta(
+        compound_pointer_offset(base_index, constants)?,
+        compound_pointer_delta(offset, constants)?,
+    )?;
     array_element_globals_at_index(name, referent, array, index, constants)
 }
 
@@ -45,9 +47,10 @@ pub(super) fn element_address_subtract_globals(
     let Some((array, base_index)) = element_address_parts(pointer) else {
         return Ok(None);
     };
-    let index = compound_pointer_offset(base_index, constants)?
-        .checked_sub(compound_pointer_offset(offset, constants)?)
-        .ok_or_else(|| CompileError::new("global compound literal pointer offset is negative"))?;
+    let index = compound_pointer_subtract_delta(
+        compound_pointer_offset(base_index, constants)?,
+        compound_pointer_delta(offset, constants)?,
+    )?;
     array_element_globals_at_index(name, referent, array, index, constants)
 }
 

@@ -23,6 +23,30 @@ fn file_scope_array_compound_literal_pointer_offset_matches_host_stdout_and_exit
 }
 
 #[test]
+fn file_scope_array_compound_literal_pointer_subtract_zero_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int *items = (int[]){ 7, 8, 9 } - 0; int main(void) { puts(\"global-compound-array-sub-zero\"); return items[0] == 7 && items[2] == 9 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_array_compound_literal_pointer_subtract_zero",
+        source,
+    );
+}
+
+#[test]
+fn file_scope_array_compound_literal_pointer_subtract_negative_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int *items = (int[]){ 7, 8, 9 } - -1; int main(void) { puts(\"global-compound-array-sub-negative\"); return items[0] == 8 && items[1] == 9 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_array_compound_literal_pointer_subtract_negative",
+        source,
+    );
+}
+
+#[test]
 fn file_scope_array_compound_literal_element_address_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); int *items = &(int[]){ 7, 8, 9 }[1]; int main(void) { puts(\"global-compound-array-element-address\"); return items[0] == 8 && items[1] == 9 ? 0 : 1; }\n";
@@ -44,6 +68,19 @@ fn file_scope_array_compound_literal_element_address_offset_matches_host_stdout_
 }
 
 #[test]
+fn file_scope_array_compound_literal_element_address_add_negative_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int *items = &(int[]){ 7, 8, 9 }[1] + -1; int main(void) { puts(\"global-compound-array-element-address-add-negative\"); return items[0] == 7 && items[1] == 8 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_array_compound_literal_element_address_add_negative",
+        source,
+    );
+}
+
+#[test]
 fn file_scope_array_compound_literal_element_address_subtract_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); int *items = &(int[]){ 7, 8, 9 }[2] - 1; int main(void) { puts(\"global-compound-array-element-address-subtract\"); return items[0] == 8 && items[1] == 9 ? 0 : 1; }\n";
@@ -51,6 +88,19 @@ fn file_scope_array_compound_literal_element_address_subtract_matches_host_stdou
     // when/then
     assert_case(
         "file_scope_array_compound_literal_element_address_subtract",
+        source,
+    );
+}
+
+#[test]
+fn file_scope_array_compound_literal_element_address_subtract_negative_matches_host_stdout_and_exit_code()
+ {
+    // given
+    let source = "int puts(char*); int *items = &(int[]){ 7, 8, 9 }[0] - -2; int main(void) { puts(\"global-compound-array-element-address-sub-negative\"); return items[0] == 9 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_array_compound_literal_element_address_subtract_negative",
         source,
     );
 }
