@@ -36,7 +36,7 @@ impl LoweringContext {
             return self.lower_scalar_compound_pointer_initializer(slot, initializer);
         }
         if scalar_type == ScalarType::Pointer
-            && let Some(initializer @ Expr::AddressOf { .. }) = initializer
+            && let Some(initializer) = initializer
             && Self::is_array_compound_element_address(initializer)
         {
             return self.lower_array_compound_element_pointer_initializer(slot, initializer);

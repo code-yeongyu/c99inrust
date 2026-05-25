@@ -1,6 +1,6 @@
 use super::{LoweredExpr, LoweredLValue, LoweringContext, zero_expr_for};
 use crate::diagnostics::{CompileError, CompileResult};
-use crate::parser::{Expr, LValue, ScalarType};
+use crate::parser::{BinaryOp, Expr, LValue, ScalarType};
 
 impl LoweringContext {
     pub(in crate::ir) fn is_array_compound_element_address(initializer: &Expr) -> bool {
@@ -53,7 +53,7 @@ impl LoweringContext {
         let (array_pointer, element_byte_size) = self.lower_array_compound_pointer(array)?;
         let element_pointer = LoweredExpr::PointerOffset {
             pointer: Box::new(array_pointer),
-            index: Box::new(self.lower_expr(index)?),
+            index: Box::new(self.lower_expr(&index)?),
             byte_size: element_byte_size,
         };
         self.push_store(target, element_pointer)
@@ -135,20 +135,58 @@ fn compound_array_alignment(element_byte_size: usize) -> usize {
     element_byte_size.clamp(1, 8)
 }
 
-fn array_compound_element_address(initializer: &Expr) -> CompileResult<(&Expr, &Expr)> {
+fn array_compound_element_address(initializer: &Expr) -> CompileResult<(&Expr, Expr)> {
+    if let Some(address) = direct_array_compound_element_address(initializer) {
+        return Ok(address);
+    }
+    if let Expr::Binary { op, left, right } = initializer {
+        return array_compound_element_address_offset(*op, left, right);
+    }
+    Err(CompileError::new(
+        "expected address of array compound literal element",
+    ))
+}
+
+fn array_compound_element_address_offset<'a>(
+    op: BinaryOp,
+    left: &'a Expr,
+    right: &'a Expr,
+) -> CompileResult<(&'a Expr, Expr)> {
+    match op {
+        BinaryOp::Add => direct_array_compound_element_address(left)
+            .map(|(array, index)| (array, offset_index(index, right, BinaryOp::Add)))
+            .or_else(|| {
+                direct_array_compound_element_address(right)
+                    .map(|(array, index)| (array, offset_index(index, left, BinaryOp::Add)))
+            })
+            .ok_or_else(|| CompileError::new("expected address of array compound literal element")),
+        BinaryOp::Sub => direct_array_compound_element_address(left)
+            .map(|(array, index)| (array, offset_index(index, right, BinaryOp::Sub)))
+            .ok_or_else(|| CompileError::new("expected address of array compound literal element")),
+        _ => Err(CompileError::new(
+            "expected address of array compound literal element",
+        )),
+    }
+}
+
+fn direct_array_compound_element_address(initializer: &Expr) -> Option<(&Expr, Expr)> {
     let Expr::AddressOf {
         target: LValue::Subscript { array, index },
     } = initializer
     else {
-        return Err(CompileError::new(
-            "expected address of array compound literal element",
-        ));
+        return None;
     };
     if matches!(array.as_ref(), Expr::ArrayCompoundLiteral { .. }) {
-        Ok((array, index))
+        Some((array, index.as_ref().clone()))
     } else {
-        Err(CompileError::new(
-            "expected address of array compound literal element",
-        ))
+        None
+    }
+}
+
+fn offset_index(index: Expr, offset: &Expr, op: BinaryOp) -> Expr {
+    Expr::Binary {
+        op,
+        left: Box::new(index),
+        right: Box::new(offset.clone()),
     }
 }
