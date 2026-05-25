@@ -165,6 +165,11 @@ fn binary_referent(
         return for_expr(context, left).or_else(|_error| for_expr(context, right));
     }
     if op == BinaryOp::Sub {
+        if for_expr(context, right).is_ok() {
+            return Err(CompileError::new(
+                "pointer subtraction result is not a pointer",
+            ));
+        }
         return for_expr(context, left);
     }
     Err(CompileError::new(
