@@ -1,9 +1,7 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::{Keyword, Token};
 
-use super::global_array_compound_literals::{
-    GlobalArrayCompoundLiteralBacking, global_array_compound_literal_initializer,
-};
+use super::global_pointer_compound_array_literals::array_compound_literal_globals;
 use super::global_scalar_compound_literals::scalar_compound_literal_globals;
 use super::global_specifiers::global_specifiers_are_pointer;
 use super::integer_initializer::eval_integer_initializer_expr_with_constants;
@@ -82,27 +80,11 @@ fn compound_literal_globals(
     expr: Expr,
     constants: &[Constant],
 ) -> CompileResult<Option<Vec<Global>>> {
+    if let Some(globals) = array_compound_literal_globals(name, referent.clone(), &expr, constants)?
+    {
+        return Ok(Some(globals));
+    }
     match expr {
-        Expr::ArrayCompoundLiteral {
-            element_type,
-            element_byte_size,
-            element_unsigned,
-            length,
-            values,
-            ..
-        } => array_compound_literal_globals(
-            name,
-            referent,
-            GlobalArrayCompoundLiteralBacking {
-                element_type,
-                element_byte_size,
-                element_unsigned,
-                length,
-            },
-            &values,
-            constants,
-        )
-        .map(Some),
         Expr::AddressOf {
             target:
                 LValue::ScalarCompoundLiteral {
@@ -129,28 +111,6 @@ fn compound_literal_globals(
             .map(Some),
         _ => Ok(None),
     }
-}
-
-fn array_compound_literal_globals(
-    name: &str,
-    referent: Option<String>,
-    backing: GlobalArrayCompoundLiteralBacking,
-    values: &[Expr],
-    constants: &[Constant],
-) -> CompileResult<Vec<Global>> {
-    if values.len() > backing.length {
-        return Err(CompileError::new(
-            "global array compound literal initializer is too large",
-        ));
-    }
-    let backing_name = compound_backing_name(name);
-    let initializer = global_array_compound_literal_initializer(backing, values, constants)?;
-    Ok(pointer_with_backing(
-        name,
-        referent,
-        backing_name,
-        initializer,
-    ))
 }
 
 fn struct_compound_literal_globals(
