@@ -36,7 +36,11 @@ pub(super) fn global_array_compound_literal_initializer(
     }
     if matches!(
         backing.element_type,
-        ScalarType::Double | ScalarType::LongDouble
+        ScalarType::ComplexFloat
+            | ScalarType::ComplexDouble
+            | ScalarType::ComplexLongDouble
+            | ScalarType::Double
+            | ScalarType::LongDouble
     ) {
         return real_array_compound_literal_initializer(backing, values, constants);
     }

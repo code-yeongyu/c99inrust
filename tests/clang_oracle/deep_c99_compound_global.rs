@@ -41,6 +41,15 @@ fn file_scope_double_array_compound_literal_pointer_matches_host_stdout_and_exit
 }
 
 #[test]
+fn file_scope_complex_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double _Complex *values = (double _Complex[]){ 1.5, 2.5 }; int main(void) { double *raw = (double *)values; puts(\"global-compound-complex-ptr\"); return raw[0] == 1.5 && raw[1] == 0.0 && raw[2] == 2.5 && raw[3] == 0.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_complex_array_compound_literal_pointer", source);
+}
+
+#[test]
 fn file_scope_short_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); short *values = (short[]){ 1, 258, 513 }; int main(void) { puts(\"global-compound-short-ptr\"); return values[0] == 1 && values[1] == 258 && values[2] == 513 ? 0 : 1; }\n";
