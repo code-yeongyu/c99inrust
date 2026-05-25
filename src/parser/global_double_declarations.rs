@@ -1,6 +1,9 @@
 use crate::diagnostics::{CompileError, CompileResult};
 use crate::front_end::lexer::Token;
 
+use super::global_array_compound_literals::{
+    GlobalArrayCompoundLiteralBacking, global_array_compound_literal_initializer,
+};
 use super::global_byte_declarations::parse_unsigned_char_array_length;
 use super::global_floatlike_declarations::{
     global_floatlike_scalar_type, parse_global_real_initializer,
@@ -10,7 +13,7 @@ use super::token_scan::{
     matching_top_level_brace, matching_top_level_bracket, previous_identifier_index,
     token_identifier, token_is_punctuator, top_level_punctuator_index,
 };
-use super::{Constant, Global, GlobalInitializer, ScalarType};
+use super::{Constant, Expr, Global, GlobalInitializer, Parser, ScalarType};
 
 pub(super) fn parse_global_double_array(
     tokens: &[Token],
@@ -43,25 +46,12 @@ pub(super) fn parse_global_double_array(
     let initializer = if let Some(assign_index) =
         top_level_punctuator_index(&declaration[close_bracket + 1..], "=")
     {
-        let values = parse_global_real_array_initializer(
+        parse_global_double_array_initializer(
             &declaration[close_bracket + assign_index + 2..],
-            constants,
-        )?;
-        let length = if length_tokens.is_empty() {
-            values.len()
-        } else {
-            parse_unsigned_char_array_length(length_tokens, constants)?
-        };
-        if values.len() > length {
-            return Err(CompileError::new(
-                "too many global scalar-array initializers",
-            ));
-        }
-        GlobalInitializer::ScalarArrayValues {
             scalar_type,
-            length,
-            values,
-        }
+            length_tokens,
+            constants,
+        )?
     } else {
         let length = parse_unsigned_char_array_length(length_tokens, constants)?;
         if scalar_type == ScalarType::Double {
@@ -74,6 +64,100 @@ pub(super) fn parse_global_double_array(
         }
     };
     Ok(Some(Global::new(name, initializer)))
+}
+
+fn parse_global_double_array_initializer(
+    tokens: &[Token],
+    scalar_type: ScalarType,
+    length_tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<GlobalInitializer> {
+    if tokens
+        .first()
+        .is_some_and(|token| token_is_punctuator(token, "{"))
+    {
+        let values = parse_global_real_array_initializer(tokens, constants)?;
+        let length = global_double_array_length(length_tokens, values.len(), constants)?;
+        if values.len() > length {
+            return Err(CompileError::new(
+                "too many global scalar-array initializers",
+            ));
+        }
+        return Ok(GlobalInitializer::ScalarArrayValues {
+            scalar_type,
+            length,
+            values,
+        });
+    }
+    parse_global_compound_array_initializer(tokens, scalar_type, length_tokens, constants)
+}
+
+fn global_double_array_length(
+    length_tokens: &[Token],
+    inferred_length: usize,
+    constants: &[Constant],
+) -> CompileResult<usize> {
+    if length_tokens.is_empty() {
+        Ok(inferred_length)
+    } else {
+        parse_unsigned_char_array_length(length_tokens, constants)
+    }
+}
+
+fn parse_global_compound_array_initializer(
+    tokens: &[Token],
+    scalar_type: ScalarType,
+    length_tokens: &[Token],
+    constants: &[Constant],
+) -> CompileResult<GlobalInitializer> {
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        known_structs: &[],
+        known_constants: constants,
+        known_scalar_typedefs: &[],
+        known_pointer_typedefs: &[],
+        known_function_pointer_typedefs: &[],
+    };
+    let expr = parser.expression()?;
+    if parser.peek().is_some() {
+        return Err(CompileError::new(
+            "unsupported global scalar-array initializer",
+        ));
+    }
+    let Expr::ArrayCompoundLiteral {
+        element_type,
+        element_byte_size,
+        element_unsigned,
+        length,
+        values,
+    } = expr
+    else {
+        return Err(CompileError::new(
+            "expected global scalar-array initializer",
+        ));
+    };
+    if element_type != scalar_type {
+        return Err(CompileError::new(
+            "global scalar-array compound literal type mismatch",
+        ));
+    }
+    let declared_length = global_double_array_length(length_tokens, length, constants)?;
+    if declared_length != length {
+        return Err(CompileError::new(
+            "global scalar-array compound literal length mismatch",
+        ));
+    }
+    global_array_compound_literal_initializer(
+        GlobalArrayCompoundLiteralBacking {
+            element_type,
+            element_byte_size,
+            element_unsigned,
+            length,
+        },
+        &values,
+        constants,
+    )
 }
 
 fn parse_global_real_array_initializer(

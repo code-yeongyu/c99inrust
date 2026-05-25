@@ -119,3 +119,15 @@ fn global_complex_double_array_designators_infer_length_matches_host_stdout_and_
         source,
     });
 }
+
+#[test]
+fn global_complex_array_compound_literal_initializer_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); double _Complex values[2] = (double _Complex[2]){ 1.0, 2.0 }; int main(void) { double *raw = (double *)values; puts(\"complex-array-compound-init\"); return raw[0] == 1.0 && raw[1] == 0.0 && raw[2] == 2.0 && raw[3] == 0.0 ? 0 : 1; }\n";
+
+    // when/then
+    assert_compile_run_matches_host(OracleCase {
+        name: "global_complex_array_compound_literal_initializer",
+        source,
+    });
+}
