@@ -154,7 +154,7 @@ fn pointer_with_backing(
     vec![backing, pointer]
 }
 
-fn global_struct_value(
+pub(super) fn global_struct_value(
     value: &LocalStructInitializerValue,
     constants: &[Constant],
 ) -> CompileResult<GlobalStructInitializerValue> {

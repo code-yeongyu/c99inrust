@@ -115,6 +115,15 @@ fn file_scope_struct_compound_literal_address_matches_host_stdout_and_exit_code(
 }
 
 #[test]
+fn file_scope_struct_compound_literal_object_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); typedef struct { int x; int y; } pair_t; pair_t pair = (pair_t){ .x = 11, .y = 13 }; int main(void) { puts(\"global-compound-struct-object\"); return pair.x == 11 && pair.y == 13 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case("file_scope_struct_compound_literal_object", source);
+}
+
+#[test]
 fn file_scope_char_array_compound_literal_pointer_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); char *text = (char[]){ 'o', 'k', 0 }; int main(void) { puts(text); return text[0] == 'o' && text[1] == 'k' && text[2] == 0 ? 0 : 1; }\n";
