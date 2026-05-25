@@ -32,6 +32,18 @@ fn file_scope_array_compound_literal_element_address_matches_host_stdout_and_exi
 }
 
 #[test]
+fn file_scope_array_compound_literal_element_address_offset_matches_host_stdout_and_exit_code() {
+    // given
+    let source = "int puts(char*); int *items = &(int[]){ 7, 8, 9 }[0] + 2; int main(void) { puts(\"global-compound-array-element-address-offset\"); return items[0] == 9 ? 0 : 1; }\n";
+
+    // when/then
+    assert_case(
+        "file_scope_array_compound_literal_element_address_offset",
+        source,
+    );
+}
+
+#[test]
 fn file_scope_struct_compound_literal_address_matches_host_stdout_and_exit_code() {
     // given
     let source = "int puts(char*); typedef struct { int x; int y; } pair_t; pair_t *pair = &(pair_t){ .x = 11, .y = 13 }; int main(void) { puts(\"global-compound-struct-ptr\"); return pair->x == 11 && pair->y == 13 ? 0 : 1; }\n";

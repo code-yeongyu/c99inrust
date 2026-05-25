@@ -3,8 +3,11 @@ use crate::diagnostics::{CompileError, CompileResult};
 use super::global_array_compound_literals::{
     GlobalArrayCompoundLiteralBacking, global_array_compound_literal_initializer,
 };
+use super::global_pointer_compound_array_element_addresses::{
+    element_address_globals, element_address_offset_globals,
+};
 use super::integer_initializer::eval_integer_initializer_expr_with_constants;
-use super::{BinaryOp, Constant, Expr, Global, GlobalInitializer, LValue};
+use super::{BinaryOp, Constant, Expr, Global, GlobalInitializer};
 
 pub(super) fn array_compound_literal_globals(
     name: &str,
@@ -38,45 +41,9 @@ pub(super) fn array_compound_literal_globals(
             left,
             right,
         } => offset_globals(name, referent, left, right, constants),
-        Expr::AddressOf {
-            target: LValue::Subscript { array, index },
-        } => element_address_globals(name, referent, array, index, constants),
+        Expr::AddressOf { .. } => element_address_globals(name, referent, expr, constants),
         _ => Ok(None),
     }
-}
-
-fn element_address_globals(
-    name: &str,
-    referent: Option<String>,
-    array: &Expr,
-    index: &Expr,
-    constants: &[Constant],
-) -> CompileResult<Option<Vec<Global>>> {
-    let Expr::ArrayCompoundLiteral {
-        element_type,
-        element_byte_size,
-        element_unsigned,
-        length,
-        values,
-        ..
-    } = array
-    else {
-        return Ok(None);
-    };
-    array_globals_at_index(
-        name,
-        referent,
-        GlobalArrayCompoundLiteralBacking {
-            element_type: *element_type,
-            element_byte_size: *element_byte_size,
-            element_unsigned: *element_unsigned,
-            length: *length,
-        },
-        values,
-        constants,
-        compound_pointer_offset(index, constants)?,
-    )
-    .map(Some)
 }
 
 fn offset_globals(
@@ -89,7 +56,15 @@ fn offset_globals(
     if let Some(globals) = array_offset_globals(name, referent.clone(), left, right, constants)? {
         return Ok(Some(globals));
     }
-    array_offset_globals(name, referent, right, left, constants)
+    if let Some(globals) =
+        element_address_offset_globals(name, referent.clone(), left, right, constants)?
+    {
+        return Ok(Some(globals));
+    }
+    if let Some(globals) = array_offset_globals(name, referent.clone(), right, left, constants)? {
+        return Ok(Some(globals));
+    }
+    element_address_offset_globals(name, referent, right, left, constants)
 }
 
 fn array_offset_globals(
@@ -152,7 +127,7 @@ fn array_globals(
     Ok(vec![backing, pointer])
 }
 
-fn array_globals_at_index(
+pub(super) fn array_globals_at_index(
     name: &str,
     referent: Option<String>,
     backing: GlobalArrayCompoundLiteralBacking,
@@ -180,7 +155,7 @@ fn array_globals_at_index(
     Ok(vec![backing, pointer])
 }
 
-fn compound_pointer_offset(expr: &Expr, constants: &[Constant]) -> CompileResult<usize> {
+pub(super) fn compound_pointer_offset(expr: &Expr, constants: &[Constant]) -> CompileResult<usize> {
     let index = eval_integer_initializer_expr_with_constants(expr, constants)?.to_i64_trunc()?;
     if index < 0 {
         return Err(CompileError::new(
