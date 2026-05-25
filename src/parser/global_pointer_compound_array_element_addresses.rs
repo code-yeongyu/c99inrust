@@ -35,6 +35,22 @@ pub(super) fn element_address_offset_globals(
     array_element_globals_at_index(name, referent, array, index, constants)
 }
 
+pub(super) fn element_address_subtract_globals(
+    name: &str,
+    referent: Option<String>,
+    pointer: &Expr,
+    offset: &Expr,
+    constants: &[Constant],
+) -> CompileResult<Option<Vec<Global>>> {
+    let Some((array, base_index)) = element_address_parts(pointer) else {
+        return Ok(None);
+    };
+    let index = compound_pointer_offset(base_index, constants)?
+        .checked_sub(compound_pointer_offset(offset, constants)?)
+        .ok_or_else(|| CompileError::new("global compound literal pointer offset is negative"))?;
+    array_element_globals_at_index(name, referent, array, index, constants)
+}
+
 fn element_address_parts(pointer: &Expr) -> Option<(&Expr, &Expr)> {
     let Expr::AddressOf {
         target: LValue::Subscript { array, index },

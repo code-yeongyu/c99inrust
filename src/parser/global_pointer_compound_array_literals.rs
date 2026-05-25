@@ -4,7 +4,7 @@ use super::global_array_compound_literals::{
     GlobalArrayCompoundLiteralBacking, global_array_compound_literal_initializer,
 };
 use super::global_pointer_compound_array_element_addresses::{
-    element_address_globals, element_address_offset_globals,
+    element_address_globals, element_address_offset_globals, element_address_subtract_globals,
 };
 use super::integer_initializer::eval_integer_initializer_expr_with_constants;
 use super::{BinaryOp, Constant, Expr, Global, GlobalInitializer};
@@ -41,6 +41,11 @@ pub(super) fn array_compound_literal_globals(
             left,
             right,
         } => offset_globals(name, referent, left, right, constants),
+        Expr::Binary {
+            op: BinaryOp::Sub,
+            left,
+            right,
+        } => element_address_subtract_globals(name, referent, left, right, constants),
         Expr::AddressOf { .. } => element_address_globals(name, referent, expr, constants),
         _ => Ok(None),
     }
