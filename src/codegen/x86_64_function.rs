@@ -8,6 +8,7 @@ use super::widths::{TEMPORARY_BYTES, ValueWidth, scalar_width};
 use super::x86_64_addressing::{
     x86_64_argument_register, x86_64_instruction_suffix, x86_64_stack_argument_scratch_register,
 };
+use super::x86_64_branch::emit_x86_64_jump_if_zero;
 use super::x86_64_complex_abi::{
     emit_x86_64_complex_return_expr, emit_x86_64_store_complex_return,
 };
@@ -109,12 +110,13 @@ fn emit_x86_64_instructions(
                 assembly,
             )?,
             Instruction::JumpIfZero { condition, label } => {
-                emit_x86_64_expr(condition, temporary_base, 0, target, labels, assembly)?;
-                assembly.push_str("\tcmpl $0, %eax\n");
-                write_assembly!(
+                emit_x86_64_jump_if_zero(
+                    condition,
+                    &branch_label(&function.name, *label, target),
+                    temporary_base,
+                    target,
+                    labels,
                     assembly,
-                    "\tje {}\n",
-                    branch_label(&function.name, *label, target)
                 )?;
             }
             Instruction::Jump { label } => {

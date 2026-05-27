@@ -156,3 +156,91 @@ fn compiler_emits_short_circuit_logical_branches() {
         }
     }
 }
+
+#[test]
+fn compiler_branches_directly_for_x86_64_relational_conditions() {
+    // given
+    let source = "int main(void) { int x = 3; if (x < 5) { return 7; } return 2; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(
+        assembly.contains("\tcmpl %ecx, %eax\n\tjge .Lmain_"),
+        "relational if should branch directly without materializing a boolean:\n{assembly}"
+    );
+    assert!(
+        !assembly.contains("\tsetl %al\n\tmovzbl %al, %eax\n\tcmpl $0, %eax\n"),
+        "relational if still materializes setcc before branching:\n{assembly}"
+    );
+}
+
+#[test]
+fn compiler_branches_directly_for_x86_64_logical_not_conditions() {
+    // given
+    let source = "int main(void) { int x = 0; if (!x) { return 7; } return 2; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(
+        assembly.contains("\tjne .Lmain_"),
+        "logical-not if should invert the zero branch directly:\n{assembly}"
+    );
+    assert!(
+        !assembly.contains("\tsete %al\n\tmovzbl %al, %eax\n\tcmpl $0, %eax\n"),
+        "logical-not if still materializes setcc before branching:\n{assembly}"
+    );
+}
+
+#[test]
+fn compiler_still_materializes_x86_64_scalar_boolean_values() {
+    // given
+    let source = "int main(void) { int x = 3; int y = x < 5; return y == 1 ? 0 : 1; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(
+        assembly.contains("\tsetl %al\n\tmovzbl %al, %eax\n"),
+        "scalar boolean value should still be materialized for assignment:\n{assembly}"
+    );
+}
+
+#[test]
+fn compiler_branches_directly_for_x86_64_double_relational_conditions() {
+    // given
+    let source = "int main(void) { double x = 1.5; if (x < 2.0) { return 7; } return 2; }";
+
+    // when
+    let tokens = lex(source).expect("lexer should succeed");
+    let program = parse(&tokens).expect("parser should succeed");
+    let lowered = lower(&program).expect("ir lowering should succeed");
+    let assembly =
+        emit_assembly(&lowered, Target::X86_64UnknownLinuxGnu).expect("assembly should emit");
+
+    // then
+    assert!(
+        assembly.contains("\tucomisd %xmm1, %xmm0\n\tjae .Lmain_"),
+        "double relational if should use floating false-branch condition:\n{assembly}"
+    );
+    assert!(
+        !assembly.contains("\tsetb %al\n\tmovzbl %al, %eax\n\tcmpl $0, %eax\n"),
+        "double relational if still materializes setcc before branching:\n{assembly}"
+    );
+}

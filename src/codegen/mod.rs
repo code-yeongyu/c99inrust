@@ -48,6 +48,7 @@ mod widths;
 mod x86_64_addressing;
 mod x86_64_assign;
 mod x86_64_binary;
+mod x86_64_branch;
 mod x86_64_builtin_calls;
 mod x86_64_call_preserve;
 mod x86_64_calls;
